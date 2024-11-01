@@ -2,38 +2,20 @@
 // https://deno.land/manual/getting_started/setup_your_environment
 // This enables autocomplete, go to definition, etc.
 
-// Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
+import {Application} from "jsr:@oak/oak/application";
 import {Bot, webhookCallback} from "https://deno.land/x/grammy@v1.31.0/mod.ts";
 
 console.log("Hello from telegram-webhook!")
 
-// Create an instance of the `Bot` class and pass your bot token to it.
-const telegramBotToken = Deno.env.get("TELEGRAM_BOT_TOKEN");
-const bot = new Bot(telegramBotToken!);
+const bot = new Bot((Deno.env.get("TELEGRAM_BOT_TOKEN"))!);
 
-// You can now register listeners on your bot object `bot`.
-// grammY will call the listeners when users send messages to your bot.
-
-// Handle the /start command.
 bot.command("start", (ctx) => ctx.reply("Welcome! Up and running."));
-// Handle other messages.
 bot.on("message", (ctx) => ctx.reply("Got another message!"));
 
-console.log("ZPQ grammY bot started!")
-
-Deno.serve(webhookCallback(bot, "std/http"));
-// Deno.serve(async (req) => {
-//     const { name } = await req.json()
-//     const data = {
-//         message: `Hello ${name}!`,
-//     }
-//
-//     return new Response(
-//         JSON.stringify(data),
-//         { headers: { "Content-Type": "application/json" } },
-//     )
-// });
+const app = new Application();
+app.use(webhookCallback(bot, "oak"));
+app.listen({ port: 8000 });
 
 /* To invoke locally:
 
