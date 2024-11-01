@@ -1,3 +1,5 @@
 .idea/
 supabase/.temp/
 supabase/.branches/
+supabase/functions/.env
+supabase/functions/.env.local
