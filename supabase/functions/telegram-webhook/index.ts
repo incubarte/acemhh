@@ -16,6 +16,8 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 console.log("Hello from telegram-webhook!");
 
 const CMD_REGISTRAR_PERSONA = "rp";
+const CMD_REGISTRAR_PAGO = "pago";
+const CMD_CONSULTAR_PERSONA = "cp";
 const VALID_CATEGORIES = ["E1", "E2", "M", "C", "B", "A", "OTHER"];
 
 const supabaseAdmin = createClient(
@@ -86,6 +88,145 @@ bot.command(
         }
     },
 );
+
+bot.command(
+    CMD_REGISTRAR_PAGO,
+    async (ctx) => {
+        console.log("log pago");
+        const text = ctx.msg.text;
+        console.log(`Mensaje recibido: ${text}`);
+
+        // text = /pago id,monto,detalle?
+        const [
+            idInput,
+            montoInput,
+            detalle,
+            ...rest
+        ] = text.trim()
+            .substring(`/${CMD_REGISTRAR_PAGO}`.length).trim()
+            .split(",").map((_) => _.trim());
+
+        if (rest) {
+            console.error(`There are many more parameters: ${rest}`);
+        }
+
+        const id = idInput.toLowerCase();
+
+        if (!(montoInput && montoInput.length > 0)) {
+            const errorMsg = `Monto no ingresado.`
+            console.error(errorMsg);
+            reply(ctx, errorMsg,);
+            return;
+        }
+
+        let monto: number;
+        let factor = 1;
+        // Verifica si el último carácter es una 'k' (indicador de mil)
+        if (montoInput.slice(-1).toLowerCase() === "k") {
+            monto = parseFloat(montoInput.slice(0, -1));
+            factor = 1000;
+        } else {
+            monto = parseFloat(montoInput);
+        }
+        // Verifica que el monto sea un número válido
+        if (isNaN(monto))  {
+            const errorMsg = `El monto ingresado (${montoInput}) es inválido.`
+            console.error(errorMsg);
+            reply(ctx, errorMsg,);
+            return;
+        }
+        monto = monto * factor;
+
+        const { data: player_data, error: player_error } = await supabaseAdmin
+            .from("players")
+            .select("*")
+            .or(`dni.eq.${id},alias.eq.${id},nick.eq.${id}`)
+            .single();
+
+        if (player_error) {
+            console.error("Player not found in DB " + JSON.stringify(player_error));
+            reply(
+                ctx,
+                `Jugador con id ${id} no encontrado.`,
+            );
+            return;
+        }
+
+        const identif = player_data.id
+        const { payment_data, error } = await supabaseAdmin
+            .from("payments")
+            .insert([{
+                identif,
+                monto
+            }])
+            .select().single();
+
+        if (error) {
+            console.error(error);
+            reply(ctx, "Error al registrar el pago");
+            throw new Error(error.message);
+        } else {
+            reply(ctx, "pago registrado! " + JSON.stringify(payment_data));
+            return new Response("todo fue bien: " + JSON.stringify(payment_data));
+        }
+    },
+);
+
+
+bot.command(
+    CMD_CONSULTAR_PERSONA,
+    async (ctx) => {
+        console.log("log consulstar persona");
+        const text = ctx.msg.text;
+        console.log(`Mensaje recibido: ${text}`);
+
+        // text = /cp id
+        const [
+            idInput,
+            ...rest
+        ] = text.trim()
+            .substring(`/${CMD_REGISTRAR_PAGO}`.length).trim()
+            .split(",").map((_) => _.trim());
+
+        if (rest) {
+            console.error(`There are many more parameters: ${rest}`);
+        }
+        const id = idInput.toLowerCase();
+
+        const { data: player_data, error: player_error } = await supabaseAdmin
+            .from("players")
+            .select("*")
+            .or(`dni.eq.${id},alias.eq.${id},nick.eq.${id}`)
+            .single();
+
+        if (player_error) {
+            console.error("Player not found in DB " + JSON.stringify(player_error));
+            reply(
+                ctx,
+                `Jugador con id ${id} no encontrado.`,
+            );
+            return;
+        }
+
+        const { data: payments_data, error: payments_error } = await supabaseAdmin
+            .from("payments")
+            .select("*")
+            .eq("player_id",player_data.id)
+            .join((_) => _.monto, ",")
+
+
+        if (payments_error) {
+            console.error(payments_error);
+            reply(ctx, "Error al levantar pagos");
+            throw new Error(payments_error.message);
+        } else {
+            reply(ctx, "Devolviendo informacion de Player " + JSON.stringify(player_data));
+            reply(ctx, "y sus payments" + payments_data);
+            return new Response("todo fue bien");
+        }
+    },
+);
+
 bot.on(
     "message",
     (ctx) => ctx.reply(`Unexpected message: ${ctx.msg.text}`),
