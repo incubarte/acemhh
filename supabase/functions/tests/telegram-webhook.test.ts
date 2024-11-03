@@ -19,8 +19,10 @@ function createAdmin(): SupabaseClient {
 Deno.test("test adding a player", async () => {
     const admin = createAdmin();
 
-    // Invoke the 'hello-world' function with a parameter
-    const DNI = "30111222";
+    const Name = "Alex";
+    const LastName = "Delight";
+    const Document = "30111222";
+    const Category = "B";
     try {
         const { error } = await admin.functions
             .invoke("telegram-webhook", {
@@ -45,7 +47,7 @@ Deno.test("test adding a player", async () => {
                             "type": "private",
                         },
                         "date": 1730475323,
-                        "text": "/rp  Alex  ,  Delight," + DNI + ",b  ",
+                        "text": `/rp  ${Name}  ,  ${LastName},` + Document + `,${Category.toLowerCase()}  `,
                         "entities": [
                             {
                                 "offset": 0,
@@ -63,25 +65,23 @@ Deno.test("test adding a player", async () => {
 
         const { data: player_data, error: player_error } = await admin.from("players")
             .select("*")
-            .eq('dni', DNI)
+            .eq('dni', Document)
             .single();
 
         if (player_error) {
             throw new Error("Player not found in DB " + JSON.stringify(player_error));
         }
 
-        // TODO pasar a variables
-        // TODO ver el tema del alias
-        assertEquals(player_data.alias, "alex222");
-        assertEquals(player_data.name, "Alex");
-        assertEquals(player_data.last_name, "Delight");
-        assertEquals(player_data.category, "B");
-        assertEquals(player_data.dni, DNI);
+        assertEquals(player_data.alias, `${Name.toLowerCase()}${Document.slice(-3)}`);
+        assertEquals(player_data.name, Name);
+        assertEquals(player_data.last_name, LastName);
+        assertEquals(player_data.category, Category);
+        assertEquals(player_data.dni, Document);
     } finally {
         await admin
             .from("players")
             .delete()
-            .eq("dni", DNI);
+            .eq("dni", Document);
     }
 });
 
@@ -95,7 +95,7 @@ Deno.test("test adding a payment", async () => {
         .from("players")
         .insert([{
             name : "Alexis",
-            lastaname: "Delpe",
+            last_name: "Delpe",
             dni: DNI,
             category: "B",
             alias: "Alexis888",
@@ -135,7 +135,7 @@ Deno.test("test adding a payment", async () => {
                         "entities": [
                             {
                                 "offset": 0,
-                                "length": 3,
+                                "length": 5,
                                 "type": "bot_command",
                             },
                         ],
@@ -156,9 +156,9 @@ Deno.test("test adding a payment", async () => {
             throw new Error("Player not found in DB " + JSON.stringify(player_error));
         }
 
-        const { data: payment_data, error: payment_error } = await admin.from("players")
+        const { data: payment_data, error: payment_error } = await admin.from("payments")
             .select("*")
-            .eq('id', player_data.id)
+            .eq('player_id', player_data.id)
             .single();
 
         if (payment_error) {
@@ -167,8 +167,8 @@ Deno.test("test adding a payment", async () => {
 
         // TODO pasar a variables
         // TODO ver el tema del alias
-        assertEquals(payment_data.player_id, player_data.player_id);
-        assertEquals(payment_data.monto, "40000");
+        assertEquals(payment_data.player_id, player_data.id);
+        assertEquals(payment_data.amount, 40000);
     } finally {
 
         const { data: player_data, error: player_error } = await admin.from("players")
@@ -182,7 +182,7 @@ Deno.test("test adding a payment", async () => {
             .eq("player_id", player_data.id);
 
         await admin
-            .from("payments")
+            .from("players")
             .delete()
             .eq("dni", DNI);
     }

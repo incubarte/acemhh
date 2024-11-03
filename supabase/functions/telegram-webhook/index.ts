@@ -34,9 +34,8 @@ bot.command(
 bot.command(
     CMD_REGISTRAR_PERSONA,
     async (ctx) => {
-        console.log("ZPQ");
+        console.log(`Ejecutando comando ${CMD_REGISTRAR_PERSONA}`);
         const text = ctx.msg.text;
-        console.log(`Mensaje recibido: ${text}`);
 
         // text = /rp nombre,apellido,dni,categoria,alias
         const [
@@ -50,21 +49,20 @@ bot.command(
             .substring(`/${CMD_REGISTRAR_PERSONA}`.length).trim()
             .split(",").map((_) => _.trim());
 
+        if (rest && rest.length > 0) {
+            console.warn(`There are many more parameters: ${rest}`);
+        }
+
         const category = categoryAnyCase.toUpperCase();
         const alias = (maybeAlias && maybeAlias.length > 0)
             ? maybeAlias.toLowerCase()
             : name.toLowerCase() + dni.slice(-3);
 
-        if (rest) {
-            console.error(`There are many more parameters: ${rest}`);
-        }
-
         if (!VALID_CATEGORIES.includes(category)) {
-            reply(
+            return reply(
                 ctx,
                 `Categoria ${category} invalida. Validas: ${VALID_CATEGORIES}`,
             );
-            return;
         }
 
         const { data, error } = await supabaseAdmin
@@ -80,11 +78,9 @@ bot.command(
 
         if (error) {
             console.error(error);
-            reply(ctx, "Error al registrar jugador");
-            throw new Error(error.message);
+            return reply(ctx, "Error al registrar jugador");
         } else {
-            reply(ctx, "persona registrada! " + JSON.stringify(data));
-            return new Response("todo fue bien: " + JSON.stringify(data));
+            return reply(ctx, "persona registrada! " + JSON.stringify(data));
         }
     },
 );
@@ -92,9 +88,8 @@ bot.command(
 bot.command(
     CMD_REGISTRAR_PAGO,
     async (ctx) => {
-        console.log("log pago");
+        console.log(`Ejecutando comando ${CMD_REGISTRAR_PAGO}`);
         const text = ctx.msg.text;
-        console.log(`Mensaje recibido: ${text}`);
 
         // text = /pago id,monto,detalle?
         const [
@@ -106,17 +101,16 @@ bot.command(
             .substring(`/${CMD_REGISTRAR_PAGO}`.length).trim()
             .split(",").map((_) => _.trim());
 
-        if (rest) {
-            console.error(`There are many more parameters: ${rest}`);
+        if (rest && rest.length > 0) {
+            console.warn(`There are many more parameters: ${rest}`);
         }
 
         const id = idInput.toLowerCase();
 
         if (!(montoInput && montoInput.length > 0)) {
-            const errorMsg = `Monto no ingresado.`
+            const errorMsg = `Monto no ingresado.`;
             console.error(errorMsg);
-            reply(ctx, errorMsg,);
-            return;
+            return reply(ctx, errorMsg);
         }
 
         let monto: number;
@@ -129,100 +123,104 @@ bot.command(
             monto = parseFloat(montoInput);
         }
         // Verifica que el monto sea un número válido
-        if (isNaN(monto))  {
-            const errorMsg = `El monto ingresado (${montoInput}) es inválido.`
+        if (isNaN(monto)) {
+            const errorMsg = `El monto ingresado (${montoInput}) es inválido.`;
             console.error(errorMsg);
-            reply(ctx, errorMsg,);
-            return;
+            return reply(ctx, errorMsg);
         }
         monto = monto * factor;
+
+        const concept = detalle ?? new Date().toISOString().substring(0, 7);
+        const [maybeName, maybeLastName] = id.split(".");
 
         const { data: player_data, error: player_error } = await supabaseAdmin
             .from("players")
             .select("*")
-            .or(`dni.eq.${id},alias.eq.${id},nick.eq.${id}`)
+            .or(`dni.eq.${id},alias.ilike.${id},nick.ilike.${id},and(name.ilike.${maybeName},last_name.ilike.${maybeLastName})`)
             .single();
 
         if (player_error) {
-            console.error("Player not found in DB " + JSON.stringify(player_error));
-            reply(
+            console.error(
+                "Player not found in DB " + JSON.stringify(player_error),
+            );
+            return reply(
                 ctx,
                 `Jugador con id ${id} no encontrado.`,
             );
-            return;
         }
 
-        const identif = player_data.id
-        const { payment_data, error } = await supabaseAdmin
+        const { data: paymentData, error } = await supabaseAdmin
             .from("payments")
             .insert([{
-                identif,
-                monto
+                player_id: player_data.id,
+                amount: monto,
+                concept,
             }])
             .select().single();
 
         if (error) {
             console.error(error);
-            reply(ctx, "Error al registrar el pago");
-            throw new Error(error.message);
+            return reply(ctx, "Error al registrar el pago");
         } else {
-            reply(ctx, "pago registrado! " + JSON.stringify(payment_data));
-            return new Response("todo fue bien: " + JSON.stringify(payment_data));
+            return reply(ctx, "pago registrado! " + JSON.stringify(paymentData));
         }
     },
 );
 
-
 bot.command(
     CMD_CONSULTAR_PERSONA,
     async (ctx) => {
-        console.log("log consulstar persona");
+        console.log(`Ejecutando comando ${CMD_CONSULTAR_PERSONA}`);
         const text = ctx.msg.text;
-        console.log(`Mensaje recibido: ${text}`);
 
         // text = /cp id
         const [
             idInput,
             ...rest
         ] = text.trim()
-            .substring(`/${CMD_REGISTRAR_PAGO}`.length).trim()
+            .substring(`/${CMD_CONSULTAR_PERSONA}`.length).trim()
             .split(",").map((_) => _.trim());
 
-        if (rest) {
-            console.error(`There are many more parameters: ${rest}`);
+        if (rest && rest.length > 0) {
+            console.warn(`There are many more parameters: ${rest}`);
         }
-        const id = idInput.toLowerCase();
 
-        const { data: player_data, error: player_error } = await supabaseAdmin
+        const id = idInput.toLowerCase();
+        const [maybeName, maybeLastName] = id.split(".");
+
+        const { data: playerData, error: player_error } = await supabaseAdmin
             .from("players")
             .select("*")
-            .or(`dni.eq.${id},alias.eq.${id},nick.eq.${id}`)
+            .or(`dni.eq.${id},alias.ilike.${id},nick.ilike.${id},and(name.ilike.${maybeName},last_name.ilike.${maybeLastName})`)
             .single();
 
         if (player_error) {
-            console.error("Player not found in DB " + JSON.stringify(player_error));
-            reply(
+            console.error(
+                "Player not found in DB " + JSON.stringify(player_error),
+            );
+            return reply(
                 ctx,
                 `Jugador con id ${id} no encontrado.`,
             );
-            return;
         }
 
-        const { data: payments_data, error: payments_error } = await supabaseAdmin
-            .from("payments")
-            .select("*")
-            .eq("player_id",player_data.id)
-            .join((_) => _.monto, ",")
-
+        const { data: paymentsData, error: payments_error } =
+            await supabaseAdmin
+                .from("payments")
+                .select("*")
+                .eq("player_id", playerData.id);
 
         if (payments_error) {
             console.error(payments_error);
-            reply(ctx, "Error al levantar pagos");
-            throw new Error(payments_error.message);
+            return reply(ctx, "Error al levantar pagos");
         } else {
-            reply(ctx, "Devolviendo informacion de Player " + JSON.stringify(player_data));
-            reply(ctx, "y sus payments" + payments_data);
-            return new Response("todo fue bien");
+            // const payments = paymentsData.map(_ => _.monto).join(",");
+            const jsonPlayer = JSON.stringify(playerData, null, 2);
+            const jsonPayments = JSON.stringify(paymentsData, null, 2);
+            return reply(
+                ctx,
+                `Devolviendo informacion de Player ${jsonPlayer} y sus payments: ${jsonPayments}`,
+            );
         }
     },
 );
@@ -236,7 +234,7 @@ function reply(ctx: CommandContext<Context>, msg: string) {
     if ((ctx.update as any).test) {
         return;
     }
-    ctx.reply(msg);
+    return ctx.reply(msg);
 }
 
 const app = new Application();
