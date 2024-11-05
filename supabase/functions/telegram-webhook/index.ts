@@ -3,21 +3,23 @@
 // This enables autocomplete, go to definition, etc.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { Application } from "jsr:@oak/oak/application";
-import { Router } from "jsr:@oak/oak/router";
 import {
     Bot,
+    CallbackQueryContext,
     CommandContext,
     Context,
-    webhookCallback,
+    InlineKeyboard,
+    session,
+    SessionFlavor,
 } from "https://deno.land/x/grammy@v1.31.0/mod.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 console.log("Hello from telegram-webhook!");
 
-const CMD_REGISTRAR_PERSONA = "rp";
-const CMD_REGISTRAR_PAGO = "pago";
-const CMD_CONSULTAR_PERSONA = "cp";
+const CMD_PAGO2 = "pago2";
+const CMD_RP = "rp";
+const CMD_PAGO = "pago";
+const CMD_CP = "cp";
 const VALID_CATEGORIES = ["E1", "E2", "M", "C", "B", "A", "OTHER"];
 
 const supabaseAdmin = createClient(
@@ -25,17 +27,56 @@ const supabaseAdmin = createClient(
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
 
-const bot = new Bot((Deno.env.get("TELEGRAM_BOT_TOKEN"))!);
+interface Session {
+    payment: {
+        playerId: string | null;
+        playerLastName: string | null;
+        playerName: string | null;
+        amount: number | null;
+    };
+}
+
+type ContextWithSession = Context & SessionFlavor<Session>;
+
+const bot = new Bot<ContextWithSession>((Deno.env.get("TELEGRAM_BOT_TOKEN"))!);
+
+bot.use(session({
+    getSessionKey: (ctx) => ctx.from?.id.toString(), // a session per user/bot combination
+}));
+
+bot.use(async (ctx, next) => {
+    const sessionId = ctx.from!.id.toString();
+
+    const { data, error } = await supabaseAdmin
+        .from("grammy_sessions")
+        .select()
+        .eq("id", sessionId)
+        .maybeSingle<{ session: string }>();
+    if (!error) {
+        ctx.session = data
+            ? JSON.parse(data.session)
+            : { payment: { playerId: null, amount: null } } as Session;
+    }
+
+    await next();
+
+    const upsert = await supabaseAdmin
+        .from("grammy_sessions")
+        .upsert([{ id: sessionId, session: JSON.stringify(ctx.session) }]);
+    if (upsert.error) {
+        console.error(upsert.error);
+    }
+});
 
 bot.command(
     "start",
     (ctx) => reply(ctx, "Welcome! Up and running."),
 );
+
 bot.command(
-    CMD_REGISTRAR_PERSONA,
+    CMD_RP,
     async (ctx) => {
-        console.log(`Ejecutando comando ${CMD_REGISTRAR_PERSONA}`);
-        const text = ctx.msg.text;
+        console.log(`Ejecutando comando ${CMD_RP}`);
 
         // text = /rp nombre,apellido,dni,categoria,alias
         const [
@@ -45,9 +86,7 @@ bot.command(
             categoryAnyCase,
             maybeAlias,
             ...rest
-        ] = text.trim()
-            .substring(`/${CMD_REGISTRAR_PERSONA}`.length).trim()
-            .split(",").map((_) => _.trim());
+        ] = ctx.match.split(",").map((_) => _.trim());
 
         if (rest && rest.length > 0) {
             console.warn(`There are many more parameters: ${rest}`);
@@ -86,10 +125,9 @@ bot.command(
 );
 
 bot.command(
-    CMD_REGISTRAR_PAGO,
+    CMD_PAGO,
     async (ctx) => {
-        console.log(`Ejecutando comando ${CMD_REGISTRAR_PAGO}`);
-        const text = ctx.msg.text;
+        console.log(`Ejecutando comando ${CMD_PAGO}`);
 
         // text = /pago id,monto,detalle?
         const [
@@ -97,9 +135,7 @@ bot.command(
             montoInput,
             detalle,
             ...rest
-        ] = text.trim()
-            .substring(`/${CMD_REGISTRAR_PAGO}`.length).trim()
-            .split(",").map((_) => _.trim());
+        ] = ctx.match.split(",").map((_) => _.trim());
 
         if (rest && rest.length > 0) {
             console.warn(`There are many more parameters: ${rest}`);
@@ -162,24 +198,22 @@ bot.command(
             console.error(error);
             return reply(ctx, "Error al registrar el pago");
         } else {
-            return reply(ctx, "pago registrado! " + JSON.stringify(paymentData));
+            const jsonPayment = JSON.stringify(paymentData);
+            return reply(ctx, `pago registrado! ${jsonPayment}`);
         }
     },
 );
 
 bot.command(
-    CMD_CONSULTAR_PERSONA,
+    CMD_CP,
     async (ctx) => {
-        console.log(`Ejecutando comando ${CMD_CONSULTAR_PERSONA}`);
-        const text = ctx.msg.text;
+        console.log(`Ejecutando comando ${CMD_CP}`);
 
         // text = /cp id
         const [
             idInput,
             ...rest
-        ] = text.trim()
-            .substring(`/${CMD_CONSULTAR_PERSONA}`.length).trim()
-            .split(",").map((_) => _.trim());
+        ] = ctx.match.split(",").map((_) => _.trim());
 
         if (rest && rest.length > 0) {
             console.warn(`There are many more parameters: ${rest}`);
@@ -225,27 +259,169 @@ bot.command(
     },
 );
 
-bot.on(
-    "message",
-    (ctx) => ctx.reply(`Unexpected message: ${ctx.msg.text}`),
+bot.command(
+    CMD_PAGO2,
+    async (ctx) => {
+        console.log(`Ejecutando comando ${CMD_PAGO2}`);
+
+        const inlineKeyboard = new InlineKeyboard()
+            .text("Escuela 1", "pago cat esc-1")
+            .row().text("Escuela 2", "pago cat esc-2")
+            .row().text("Menores", "pago cat u-14")
+            .row().text("Cat C", "pago cat cat-c")
+            .row().text("Cat B", "pago cat cat-b")
+            .row().text("Cat A", "pago cat cat-a");
+
+        return ctx.reply("Elija categoría", { reply_markup: inlineKeyboard });
+    },
 );
 
-function reply(ctx: CommandContext<Context>, msg: string) {
+bot.callbackQuery(
+    /pago cat (.*)$/,
+    async (ctx) => {
+        const category = ctx.match[1];
+        console.log("Pago - categoria elegida: " + category);
+
+        const { data, error } = await supabaseAdmin
+            .from("players")
+            .select<"*", Player>()
+            .eq("category", category)
+            .order("last_name, name");
+
+        if (error) {
+            console.error(error);
+            return reply(ctx, "Error al buscar jugadores de categoria esc-1");
+        }
+
+        if (data.length == 0) {
+            return ctx.editMessageText(
+                `No hay jugadores para la categoria ${category}`,
+                { reply_markup: new InlineKeyboard() },
+            );
+        }
+
+        const name = (player: Player) => `${player.last_name}, ${player.name}`;
+        const [head, ...tail] = data;
+        const inlineKeyboard = tail.reduce(
+            (kb, player) =>
+                kb.row().text(name(player), `/pago jugador ${player.id}`),
+            new InlineKeyboard().text(name(head)),
+        );
+
+        return ctx.editMessageText(`Elija jugador de la categoria ${category}`, {
+            reply_markup: inlineKeyboard,
+        });
+    },
+);
+
+bot.callbackQuery(
+    /pago jugador (.+)$/,
+    async (ctx) => {
+        console.log(ctx);
+        const playerId = ctx.match[1];
+        console.log(`Pago - jugador seleccionado ${playerId}`);
+        const session = ctx.session.payment;
+        ctx.session.payment.playerId = playerId;
+
+        const { data } = await supabaseAdmin
+            .from("players")
+            .select()
+            .eq("id", playerId)
+            .single<Player>();
+        if (data) {
+            session.playerLastName = data.last_name;
+            session.playerName = data.name;
+        }
+
+        const inlineKeyboard = new InlineKeyboard()
+            .text("13.000", `pago monto 13`)
+            .text("15.000", `pago monto 15`)
+            .text("30.000", `pago monto 30`)
+            .row()
+            .text("45.000", `pago monto 45`)
+            .text("60.000", `pago monto 60`)
+            .text("otro", `pago monto otro`);
+
+        const alias = session.playerLastName
+            ? `${session.playerLastName}, ${session.playerName}`
+            : "le jugadore";
+        return ctx.editMessageText(
+            `Elija el monto del pago a registrar para ${alias}`,
+            {
+                reply_markup: inlineKeyboard,
+            },
+        );
+    },
+);
+
+bot.callbackQuery(
+    /pago monto (\d+)$/,
+    async (ctx) => {
+        const amount = ctx.match[1];
+        const session = ctx.session.payment;
+        const alias = session.playerLastName
+            ? `${session.playerLastName}, ${session.playerName}`
+            : "le jugadore";
+        console.log(`Pago - registrando pago de ${amount} para ${alias}`);
+
+        session.amount = Number(amount) * 1000;
+
+        return ctx.answerCallbackQuery();
+    },
+);
+
+bot.callbackQuery(
+    /pago monto otro/,
+    async (ctx) => {
+        const playerId = ctx.callbackQuery.data.split(" ", 2)[1];
+        console.log(`requiriendo monto especial de pago para ${playerId}`);
+
+        // await ctx.answerCallbackQuery("ASDF", {
+        //     force_reply: true,
+        // });
+        return bot.api.sendMessage(
+            ctx.chat!.id,
+            "Escriba el monto para el jugador:",
+            { reply_markup: { force_reply: true } },
+        );
+    },
+);
+
+bot.callbackQuery(
+    /.*/,
+    (ctx) => console.error(`Unmatched callback to ${ctx.callbackQuery.data}`),
+);
+
+bot.on(
+    "message",
+    (ctx) => {
+        console.log(ctx);
+        ctx.reply(`Unexpected message: ${ctx.msg.text}`)
+    },
+);
+
+function reply(
+    ctx: CommandContext<Context> | CallbackQueryContext<Context>,
+    msg: string,
+) {
     if ((ctx.update as any).test) {
         return;
     }
     return ctx.reply(msg);
 }
 
-const app = new Application();
-app.use(webhookCallback(bot, "oak"));
-const router = new Router();
-router.get("/", (ctx) => {
-    ctx.response.body = "Hello world";
-});
-app.use(router.routes());
-app.use(router.allowedMethods());
-app.listen({ port: 8000 });
+type Player = {
+    id: string;
+    name: string;
+    last_name: string;
+};
+
+bot.catch((err) => console.error(err));
+bot.start();
+
+// const app = new Application();
+// app.use(webhookCallback(bot, "oak"));
+// app.listen({ port: 8000 });
 
 /* To invoke locally:
 
