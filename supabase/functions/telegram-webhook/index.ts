@@ -3,22 +3,28 @@
 // This enables autocomplete, go to definition, etc.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { Application } from "jsr:@oak/oak/application";
 import {
     Bot,
     CallbackQueryContext,
     CommandContext,
     Context,
     InlineKeyboard,
-    session,
-    SessionFlavor,
+    webhookCallback
 } from "https://deno.land/x/grammy@v1.31.0/mod.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import {
+    CallbackQuery,
+    InlineKeyboardButton,
+} from "https://deno.land/x/grammy_types@v3.15.0/markup.ts";
 
 console.log("Hello from telegram-webhook!");
 
-const CMD_PAGO2 = "pago2";
-const CMD_RP = "rp";
+const DryRun = true;
+
 const CMD_PAGO = "pago";
+const CMD_PAGO_VIEJO = "pagoviejo";
+const CMD_RP = "rp";
 const CMD_CP = "cp";
 const VALID_CATEGORIES = ["E1", "E2", "M", "C", "B", "A", "OTHER"];
 
@@ -27,46 +33,12 @@ const supabaseAdmin = createClient(
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
 
-interface Session {
-    payment: {
-        playerId: string | null;
-        playerLastName: string | null;
-        playerName: string | null;
-        amount: number | null;
-    };
-}
+const MsgConfirm = "*Confirmar?*";
+const ConfirmInlineButtons = new InlineKeyboard()
+    .text("Si", "pago confirmar")
+    .text("Cancelar", "pago cancelar");
 
-type ContextWithSession = Context & SessionFlavor<Session>;
-
-const bot = new Bot<ContextWithSession>((Deno.env.get("TELEGRAM_BOT_TOKEN"))!);
-
-bot.use(session({
-    getSessionKey: (ctx) => ctx.from?.id.toString(), // a session per user/bot combination
-}));
-
-bot.use(async (ctx, next) => {
-    const sessionId = ctx.from!.id.toString();
-
-    const { data, error } = await supabaseAdmin
-        .from("grammy_sessions")
-        .select()
-        .eq("id", sessionId)
-        .maybeSingle<{ session: string }>();
-    if (!error) {
-        ctx.session = data
-            ? JSON.parse(data.session)
-            : { payment: { playerId: null, amount: null } } as Session;
-    }
-
-    await next();
-
-    const upsert = await supabaseAdmin
-        .from("grammy_sessions")
-        .upsert([{ id: sessionId, session: JSON.stringify(ctx.session) }]);
-    if (upsert.error) {
-        console.error(upsert.error);
-    }
-});
+const bot = new Bot((Deno.env.get("TELEGRAM_BOT_TOKEN"))!);
 
 bot.command(
     "start",
@@ -125,7 +97,7 @@ bot.command(
 );
 
 bot.command(
-    CMD_PAGO,
+    CMD_PAGO_VIEJO,
     async (ctx) => {
         console.log(`Ejecutando comando ${CMD_PAGO}`);
 
@@ -149,22 +121,14 @@ bot.command(
             return reply(ctx, errorMsg);
         }
 
-        let monto: number;
-        let factor = 1;
         // Verifica si el último carácter es una 'k' (indicador de mil)
-        if (montoInput.slice(-1).toLowerCase() === "k") {
-            monto = parseFloat(montoInput.slice(0, -1));
-            factor = 1000;
-        } else {
-            monto = parseFloat(montoInput);
-        }
+        const monto = parseAmount(montoInput);
         // Verifica que el monto sea un número válido
         if (isNaN(monto)) {
             const errorMsg = `El monto ingresado (${montoInput}) es inválido.`;
             console.error(errorMsg);
             return reply(ctx, errorMsg);
         }
-        monto = monto * factor;
 
         const concept = detalle ?? new Date().toISOString().substring(0, 7);
         const [maybeName, maybeLastName] = id.split(".");
@@ -260,9 +224,9 @@ bot.command(
 );
 
 bot.command(
-    CMD_PAGO2,
-    async (ctx) => {
-        console.log(`Ejecutando comando ${CMD_PAGO2}`);
+    CMD_PAGO,
+    (ctx) => {
+        console.log(`Ejecutando comando ${CMD_PAGO}`);
 
         const inlineKeyboard = new InlineKeyboard()
             .text("Escuela 1", "pago cat esc-1")
@@ -272,20 +236,23 @@ bot.command(
             .row().text("Cat B", "pago cat cat-b")
             .row().text("Cat A", "pago cat cat-a");
 
-        return ctx.reply("Elija categoría", { reply_markup: inlineKeyboard });
+        return ctx.reply(
+            msgWithHeader("_Elegir categoria:_"),
+            { reply_markup: inlineKeyboard, parse_mode: "MarkdownV2" },
+        );
     },
 );
 
 bot.callbackQuery(
     /pago cat (.*)$/,
     async (ctx) => {
-        const category = ctx.match[1];
-        console.log("Pago - categoria elegida: " + category);
+        const cat = ctx.match[1];
+        console.log("Pago - categoria elegida: " + cat);
 
         const { data, error } = await supabaseAdmin
             .from("players")
             .select<"*", Player>()
-            .eq("category", category)
+            .eq("category", cat)
             .order("last_name, name");
 
         if (error) {
@@ -295,7 +262,7 @@ bot.callbackQuery(
 
         if (data.length == 0) {
             return ctx.editMessageText(
-                `No hay jugadores para la categoria ${category}`,
+                `No hay jugadores para la categoria ${cat}`,
                 { reply_markup: new InlineKeyboard() },
             );
         }
@@ -304,51 +271,53 @@ bot.callbackQuery(
         const [head, ...tail] = data;
         const inlineKeyboard = tail.reduce(
             (kb, player) =>
-                kb.row().text(name(player), `/pago jugador ${player.id}`),
-            new InlineKeyboard().text(name(head)),
+                kb.row().text(
+                    name(player),
+                    `pago jugador ${player.id}`,
+                ),
+            new InlineKeyboard().text(name(head), `pago jugador ${head.id}`),
         );
 
-        return ctx.editMessageText(`Elija jugador de la categoria ${category}`, {
-            reply_markup: inlineKeyboard,
-        });
+        return ctx.editMessageText(
+            msgWithHeader("_Elegir jugador:_", { cat }),
+            {
+                reply_markup: inlineKeyboard,
+                parse_mode: "MarkdownV2",
+            },
+        );
     },
 );
 
 bot.callbackQuery(
     /pago jugador (.+)$/,
-    async (ctx) => {
-        console.log(ctx);
+    (ctx) => {
         const playerId = ctx.match[1];
         console.log(`Pago - jugador seleccionado ${playerId}`);
-        const session = ctx.session.payment;
-        ctx.session.payment.playerId = playerId;
 
-        const { data } = await supabaseAdmin
-            .from("players")
-            .select()
-            .eq("id", playerId)
-            .single<Player>();
-        if (data) {
-            session.playerLastName = data.last_name;
-            session.playerName = data.name;
-        }
+        const header = parseHeader(ctx.callbackQuery.message!.text!);
+        const [last_name, name] = findInlineKeyboardButton(
+            ctx.callbackQuery,
+            (_) => _.callback_data.endsWith(playerId),
+        )!.text.split(", ");
 
         const inlineKeyboard = new InlineKeyboard()
-            .text("13.000", `pago monto 13`)
-            .text("15.000", `pago monto 15`)
-            .text("30.000", `pago monto 30`)
+            .text("13.000", `pago monto 13000`)
+            .text("15.000", `pago monto 15000`)
+            .text("30.000", `pago monto 30000`)
             .row()
-            .text("45.000", `pago monto 45`)
-            .text("60.000", `pago monto 60`)
+            .text("45.000", `pago monto 45000`)
+            .text("60.000", `pago monto 60000`)
             .text("otro", `pago monto otro`);
-
-        const alias = session.playerLastName
-            ? `${session.playerLastName}, ${session.playerName}`
-            : "le jugadore";
         return ctx.editMessageText(
-            `Elija el monto del pago a registrar para ${alias}`,
+            msgWithHeader("_Elegir monto:_", {
+                ...header,
+                last_name,
+                name,
+                id: playerId,
+            }),
             {
                 reply_markup: inlineKeyboard,
+                parse_mode: "MarkdownV2",
             },
         );
     },
@@ -356,33 +325,106 @@ bot.callbackQuery(
 
 bot.callbackQuery(
     /pago monto (\d+)$/,
+    (ctx) => {
+        const amount = Number(ctx.match[1]);
+        console.log(`Pago - registrando pago por $${amount}`);
+
+        const header = parseHeader(ctx.callbackQuery.message!.text!);
+
+        return ctx.editMessageText(
+            msgWithHeader(MsgConfirm, { ...header, amount }),
+            {
+                reply_markup: ConfirmInlineButtons,
+                parse_mode: "MarkdownV2",
+            },
+        );
+    },
+);
+
+bot.callbackQuery(
+    "pago confirmar",
     async (ctx) => {
-        const amount = ctx.match[1];
-        const session = ctx.session.payment;
-        const alias = session.playerLastName
-            ? `${session.playerLastName}, ${session.playerName}`
-            : "le jugadore";
-        console.log(`Pago - registrando pago de ${amount} para ${alias}`);
+        console.log(`Pago - confirmacion`);
 
-        session.amount = Number(amount) * 1000;
+        const header = parseHeader(ctx.callbackQuery.message!.text!);
 
-        return ctx.answerCallbackQuery();
+        if (DryRun) {
+            return ctx.editMessageText(
+                msgWithHeader(
+                    "*Operacion finalizada con exito\\!*\nID de pago: dummy\\-payment\\-id",
+                ),
+                {
+                    reply_markup: new InlineKeyboard(),
+                    parse_mode: "MarkdownV2",
+                },
+            );
+        }
+
+        const { data, error } = await supabaseAdmin
+            .from("payments")
+            .insert([{
+                player_id: header.id,
+                amount: header.amount!,
+                concept: new Date().toISOString().substring(0, 7),
+            }])
+            .select().single<Payment>();
+
+        if (error) {
+            console.log(error);
+        }
+
+        const msg = error
+            ? `*Operacion finalzada con errores*\n${error.message}`
+            : `*Operacion finalizada con exito\\!*\nID de pago: ${data.id}`;
+        return ctx.editMessageText(
+            msgWithHeader(msg),
+            {
+                reply_markup: new InlineKeyboard(),
+                parse_mode: "MarkdownV2",
+            },
+        );
+    },
+);
+
+bot.callbackQuery(
+    "pago cancelar",
+    // deno-lint-ignore require-await
+    async (ctx) => {
+        console.log(`Pago - cancelacion`);
+
+        const header = parseHeader(ctx.callbackQuery.message!.text!);
+
+        return ctx.editMessageText(
+            msgWithHeader("*OPERACION CANCELADA*", header),
+            {
+                reply_markup: new InlineKeyboard(),
+                parse_mode: "MarkdownV2",
+            },
+        );
     },
 );
 
 bot.callbackQuery(
     /pago monto otro/,
     async (ctx) => {
-        const playerId = ctx.callbackQuery.data.split(" ", 2)[1];
-        console.log(`requiriendo monto especial de pago para ${playerId}`);
+        console.log(`Pago - pidiendo monto arbitrario`);
 
-        // await ctx.answerCallbackQuery("ASDF", {
-        //     force_reply: true,
-        // });
+        const header = parseHeader(ctx.callbackQuery.message!.text!);
+
+        await ctx.editMessageText(
+            msgWithHeader("Continuando operacion debajo\\.\\.\\.", header),
+            {
+                reply_markup: new InlineKeyboard(),
+                parse_mode: "MarkdownV2",
+            },
+        );
         return bot.api.sendMessage(
             ctx.chat!.id,
-            "Escriba el monto para el jugador:",
-            { reply_markup: { force_reply: true } },
+            msgWithHeader("_Escriba monto:_", header),
+            {
+                reply_markup: { force_reply: true },
+                parse_mode: "MarkdownV2",
+            },
         );
     },
 );
@@ -395,8 +437,21 @@ bot.callbackQuery(
 bot.on(
     "message",
     (ctx) => {
-        console.log(ctx);
-        ctx.reply(`Unexpected message: ${ctx.msg.text}`)
+        const repliedText = ctx.update.message?.reply_to_message?.text;
+        if (repliedText) {
+            const header = parseHeader(repliedText);
+            if (header.cat && header.id) {
+                const amount = Number(ctx.message.text);
+                return ctx.reply(
+                    msgWithHeader(MsgConfirm, { ...header, amount }),
+                    {
+                        reply_markup: ConfirmInlineButtons,
+                        parse_mode: "MarkdownV2",
+                    },
+                );
+            }
+        }
+        return ctx.reply(`Unexpected message: ${ctx.msg.text}`);
     },
 );
 
@@ -404,11 +459,27 @@ function reply(
     ctx: CommandContext<Context> | CallbackQueryContext<Context>,
     msg: string,
 ) {
+    // deno-lint-ignore no-explicit-any
     if ((ctx.update as any).test) {
         return;
     }
     return ctx.reply(msg);
 }
+
+// bot.catch((err) => console.error(err));
+// bot.start();
+
+const app = new Application();
+app.use(webhookCallback(bot, "oak"));
+app.listen({ port: 8000 });
+
+type Header = {
+    cat: string;
+    last_name: string;
+    name: string;
+    id: string;
+    amount: number;
+};
 
 type Player = {
     id: string;
@@ -416,12 +487,73 @@ type Player = {
     last_name: string;
 };
 
-bot.catch((err) => console.error(err));
-bot.start();
+type Payment = {
+    id: string;
+};
 
-// const app = new Application();
-// app.use(webhookCallback(bot, "oak"));
-// app.listen({ port: 8000 });
+function parseAmount(strAmount: string) {
+    if (strAmount.slice(-1).toLowerCase() === "k") {
+        const unscaledAmount = parseFloat(strAmount.slice(0, -1));
+        return isNaN(unscaledAmount) ? unscaledAmount : unscaledAmount * 1000;
+    } else {
+        return parseFloat(strAmount);
+    }
+}
+
+function findInlineKeyboardButton(
+    callbackQuery: CallbackQuery,
+    predicate: (button: InlineKeyboardButton.CallbackButton) => boolean,
+): InlineKeyboardButton.CallbackButton | undefined {
+    return callbackQuery.message!.reply_markup!
+        .inline_keyboard.flatMap((_) =>
+            _ as InlineKeyboardButton.CallbackButton[]
+        )
+        .find((button) => predicate(button));
+}
+
+function parseHeader(text: string): Partial<Header> {
+    const RegexCategory = /^Categoria: ([a-zA-Z0-9-_]+)$/;
+    const RegexFrom = /^De: (\w+), (\w+) \((.*)\)$/;
+    const RegexAmount = /^Monto: (\d+)$/;
+
+    const mapOrEmpty = <T>(
+        regex: RegExp,
+        text: string,
+        arrayToJson: (array: string[]) => T,
+    ) => regex.test(text) ? arrayToJson(regex.exec(text)!) : {};
+
+    const [, l1, l2, l3] = text.split("\n");
+
+    const jsonCategory = mapOrEmpty(RegexCategory, l1, (arr) => ({
+        cat: arr[1],
+    }));
+
+    const jsonFrom = mapOrEmpty(RegexFrom, l2, (arr) => ({
+        last_name: arr[1],
+        name: arr[2],
+        id: arr[3],
+    }));
+
+    const jsonAmount = mapOrEmpty(RegexAmount, l3, (arr) => ({
+        amount: Number(arr[1]),
+    }));
+
+    return {
+        ...jsonCategory,
+        ...jsonFrom,
+        ...jsonAmount,
+    };
+}
+
+function msgWithHeader(msg: string, h: Partial<Header> = {}) {
+    const safe = (txt: string) => txt.replaceAll("-", "\\-");
+    return "*Registro de pago*\n" +
+        (h.cat ? `Categoria: ${safe(h.cat)}\n` : "") +
+        (h.id ? `De: ${h.last_name}, ${h.name} \\(${safe(h.id)}\\)\n` : "") +
+        (h.amount ? `Monto: ${h.amount}\n` : "") +
+        "\n" +
+        msg;
+}
 
 /* To invoke locally:
 
