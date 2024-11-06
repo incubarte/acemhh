@@ -51,6 +51,11 @@ bot.command(
         console.log(`Ejecutando comando ${CMD_RP}`);
 
         // text = /rp nombre,apellido,dni,categoria,alias
+        const tokens = ctx.match.split(",");
+        if (tokens.length < 4) {
+            return ctx.reply("Uso: /rp nombre,apellido,dni,categoria,alias");
+        }
+
         const [
             name,
             last_name,
@@ -58,7 +63,7 @@ bot.command(
             categoryAnyCase,
             maybeAlias,
             ...rest
-        ] = ctx.match.split(",").map((_) => _.trim());
+        ] = tokens.map((_) => _.trim());
 
         if (rest && rest.length > 0) {
             console.warn(`There are many more parameters: ${rest}`);
