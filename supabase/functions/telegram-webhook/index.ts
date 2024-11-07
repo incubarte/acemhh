@@ -22,11 +22,11 @@ console.log("Hello from telegram-webhook!");
 
 const DryRun = true;
 
-const CMD_PAGO = "pago";
-const CMD_PAGO_VIEJO = "pagoviejo";
-const CMD_RP = "rp";
-const CMD_CP = "cp";
+const CMD_PAGO = "registrarpago";
 const CMD_LISTAR_PAGOS = "listarpagos";
+const CMD_PAGO_VIEJO = "registrarpagoviejo";
+const CMD_RP = "registrarpersona";
+const CMD_CP = "consultarpersona";
 
 const VALID_CATEGORIES = ["E1", "E2", "M", "C", "B", "A", "OTHER"];
 
@@ -37,8 +37,8 @@ const supabaseAdmin = createClient(
 
 const MsgConfirm = "*Confirmar?*";
 const ConfirmInlineButtons = new InlineKeyboard()
-    .text("Si", "pago confirmar")
-    .text("Cancelar", "pago cancelar");
+    .text("Si", `${CMD_PAGO} confirmar`)
+    .text("Cancelar", `${CMD_PAGO} cancelar`);
 
 const bot = new Bot((Deno.env.get("TELEGRAM_BOT_TOKEN"))!);
 
@@ -49,12 +49,12 @@ bot.command(CMD_CP, catchErrors(CmdConsultarPersona));
 bot.command(CMD_PAGO, catchErrors(CmdPago));
 bot.command(CMD_LISTAR_PAGOS, catchErrors(CmdListarPagos));
 
-bot.callbackQuery(/pago cat (.*)$/, callbackPagoCategoria);
-bot.callbackQuery(/pago jugador (.+)$/, callbackPagoJugador);
-bot.callbackQuery(/pago monto (\d+)$/, callbackPagoMonto);
-bot.callbackQuery("pago confirmar", callbackPagoConfirmar);
-bot.callbackQuery("pago cancelar", callbackPagoCancelar);
-bot.callbackQuery(/pago monto otro/, callbackPagoOtroMonto);
+bot.callbackQuery(/registrarpago cat (.*)$/, callbackPagoCategoria);
+bot.callbackQuery(/registrarpago jugador (.+)$/, callbackPagoJugador);
+bot.callbackQuery(/registrarpago monto (\d+)$/, callbackPagoMonto);
+bot.callbackQuery("registrarpago confirmar", callbackPagoConfirmar);
+bot.callbackQuery("registrarpago cancelar", callbackPagoCancelar);
+bot.callbackQuery(/registrarpago monto otro/, callbackPagoOtroMonto);
 bot.callbackQuery(/listarpagos cat (.*)$/, callbackListarPagosCategoria);
 bot.callbackQuery(
     /.*/,
@@ -284,8 +284,8 @@ async function callbackPagoCategoria(ctx: CallbackQueryContext<Context>) {
     const [head, ...tail] = data;
     const inlineKeyboard = tail.reduce(
         (kb, player) =>
-            kb.row().text(name(player), `pago jugador ${player.id}`),
-        new InlineKeyboard().text(name(head), `pago jugador ${head.id}`),
+            kb.row().text(name(player), `${CMD_PAGO} jugador ${player.id}`),
+        new InlineKeyboard().text(name(head), `${CMD_PAGO} jugador ${head.id}`),
     );
 
     return ctx.editMessageText(
@@ -308,13 +308,13 @@ function callbackPagoJugador(ctx: CallbackQueryContext<Context>) {
     )!.text.split(", ");
 
     const inlineKeyboard = new InlineKeyboard()
-        .text("13.000", `pago monto 13000`)
-        .text("15.000", `pago monto 15000`)
-        .text("30.000", `pago monto 30000`)
+        .text("13.000", `${CMD_PAGO} monto 13000`)
+        .text("15.000", `${CMD_PAGO} monto 15000`)
+        .text("30.000", `${CMD_PAGO} monto 30000`)
         .row()
-        .text("45.000", `pago monto 45000`)
-        .text("60.000", `pago monto 60000`)
-        .text("otro", `pago monto otro`);
+        .text("45.000", `${CMD_PAGO} monto 45000`)
+        .text("60.000", `${CMD_PAGO} monto 60000`)
+        .text("otro", `${CMD_PAGO} monto otro`);
 
     return ctx.editMessageText(
         paymentMessage("_Elegir monto:_", {
