@@ -24,9 +24,9 @@ const DryRun = true;
 
 const CMD_PAGO = "registrarpago";
 const CMD_LISTAR_PAGOS = "listarpagos";
-const CMD_PAGO_VIEJO = "registrarpagoviejo";
-const CMD_RP = "registrarpersona";
-const CMD_CP = "consultarpersona";
+const CMD_PAGO_VIEJO = "rpag";
+const CMD_RP = "rper";
+const CMD_CP = "cper";
 
 const VALID_CATEGORIES = ["E1", "E2", "M", "C", "B", "A", "OTHER"];
 
