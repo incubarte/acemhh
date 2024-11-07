@@ -55,7 +55,7 @@ bot.callbackQuery(/registrarpago monto (\d+)$/, callbackPagoMonto);
 bot.callbackQuery("registrarpago confirmar", callbackPagoConfirmar);
 bot.callbackQuery("registrarpago cancelar", callbackPagoCancelar);
 bot.callbackQuery(/registrarpago monto otro/, callbackPagoOtroMonto);
-bot.callbackQuery(/listarpagos cat (.*)$/, callbackListarPagosCategoria);
+bot.callbackQuery(/listarpagos cat (.*)$/, catchErrors(callbackListarPagosCategoria));
 bot.callbackQuery(
     /.*/,
     (ctx) => console.error(`Unmatched callback to ${ctx.callbackQuery.data}`),
@@ -474,7 +474,7 @@ async function callbackListarPagosCategoria(
     ]) as PlayerWithAmount[];
 
     const messages = sorted.map((payment) =>
-        `${payment.amount} \\- ${payment.last_name}, ${payment.name}`
+        `${payment.amount} - ${payment.last_name}, ${payment.name}`
     );
     return ctx.editMessageText(
         `
@@ -482,7 +482,7 @@ async function callbackListarPagosCategoria(
 
 Categoria: ${safe(cat)}
 
-${messages.join("\n")}`,
+${messages.map(safe).join("\n")}`,
         { parse_mode: "MarkdownV2" },
     );
 }
