@@ -20,7 +20,7 @@ import {sortBy, sum} from "https://deno.land/x/lodash@4.17.15-es/lodash.js";
 
 console.log("Hello from telegram-webhook!");
 
-const DryRun = true;
+const DryRun = false;
 
 const CMD_PAGO = "registrarpago";
 const CMD_LISTAR_PAGOS = "listarpagos";
@@ -185,10 +185,22 @@ async function CmdPagoViejo(ctx: CommandContext<Context>) {
         );
     }
 
-    const { data: paymentData, error } = await supabaseAdmin
-        .from("payments")
-        .insert({ player_id: player_data.id, amount: monto, concept })
-        .select().single();
+    function GetRegisteredBy() {
+        try {
+            const from = ctx.update.message!.from;
+            return `${from.last_name}, ${from.first_name} (${from.username})`;
+        } catch (error) {
+            console.log(error);
+            return "[unknown]";
+        }
+    }
+
+    const {data: paymentData, error} = await supabaseAdmin.from("payments").insert({
+        player_id: player_data.id,
+        amount: monto,
+        concept,
+        registered_by: GetRegisteredBy()
+    }).select().single();
 
     if (error) {
         console.error(error);
@@ -384,12 +396,22 @@ async function callbackPagoConfirmar(ctx: CallbackQueryContext<Context>) {
         );
     }
 
+    function GetRegisteredBy() {
+        try {
+            const from = ctx.update.callback_query.from;
+            return `${from.last_name}, ${from.first_name} (${from.username})`;
+        } catch (error) {
+            console.log(error);
+            return "[unknown]";
+        }
+    }
     const { data, error } = await supabaseAdmin
         .from("payments")
         .insert([{
             player_id: header.id,
             amount: header.amount!,
             concept: conceptCurrentMonth(),
+            registered_by: GetRegisteredBy(),
         }])
         .select().single<Payment>();
 
