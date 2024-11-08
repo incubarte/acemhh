@@ -13,10 +13,13 @@ import {
     InlineKeyboard,
     webhookCallback,
 } from "https://deno.land/x/grammy@v1.31.0/mod.ts";
-import {createClient} from "jsr:@supabase/supabase-js@2";
-import {CallbackQuery, InlineKeyboardButton,} from "https://deno.land/x/grammy_types@v3.15.0/markup.ts";
-import {Message} from "https://deno.land/x/grammy_types@v3.15.0/mod.ts";
-import {sortBy, sum} from "https://deno.land/x/lodash@4.17.15-es/lodash.js";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+import {
+    CallbackQuery,
+    InlineKeyboardButton,
+} from "https://deno.land/x/grammy_types@v3.15.0/markup.ts";
+import { Message } from "https://deno.land/x/grammy_types@v3.15.0/mod.ts";
+import { sortBy, sum } from "https://deno.land/x/lodash@4.17.15-es/lodash.js";
 
 console.log("Hello from telegram-webhook!");
 
@@ -195,12 +198,13 @@ async function CmdPagoViejo(ctx: CommandContext<Context>) {
         }
     }
 
-    const {data: paymentData, error} = await supabaseAdmin.from("payments").insert({
-        player_id: player_data.id,
-        amount: monto,
-        concept,
-        registered_by: GetRegisteredBy()
-    }).select().single();
+    const { data: paymentData, error } = await supabaseAdmin.from("payments")
+        .insert({
+            player_id: player_data.id,
+            amount: monto,
+            concept,
+            registered_by: GetRegisteredBy(),
+        }).select().single();
 
     if (error) {
         console.error(error);
@@ -320,13 +324,13 @@ function callbackPagoJugador(ctx: CallbackQueryContext<Context>) {
     )!.text.split(", ");
 
     const inlineKeyboard = new InlineKeyboard()
-        .text("13.000", `${CMD_PAGO} monto 13000`)
-        .text("15.000", `${CMD_PAGO} monto 15000`)
-        .text("30.000", `${CMD_PAGO} monto 30000`)
-        .row()
-        .text("45.000", `${CMD_PAGO} monto 45000`)
-        .text("60.000", `${CMD_PAGO} monto 60000`)
-        .text("otro", `${CMD_PAGO} monto otro`);
+        .text("60k", `${CMD_PAGO} monto 60`)
+        .text("45k", `${CMD_PAGO} monto 45`)
+        .text("30k", `${CMD_PAGO} monto 30`)
+        .text("15k", `${CMD_PAGO} monto 15`)
+        .text("13k", `${CMD_PAGO} monto 13`)
+        .text("10k", `${CMD_PAGO} monto 13`)
+        .row().text("otro", `${CMD_PAGO} monto otro`);
 
     return ctx.editMessageText(
         paymentMessage("_Elegir monto:_", {
@@ -365,10 +369,21 @@ async function callbackPagoOtroMonto(ctx: CallbackQueryContext<Context>) {
 }
 
 function callbackPagoMonto(ctx: CallbackQueryContext<Context>) {
-    const amount = Number(ctx.match[1]);
-    console.log(`Pago - registrando pago por $${amount}`);
+    const strAmount = ctx.match[1];
+    console.log(`Pago - registrando pago por $${strAmount}`);
 
     const header = parsePaymentMessage(ctx.callbackQuery.message!.text!);
+
+    const [valid, amount] = tryParseAmount(strAmount);
+    if (!valid) {
+        return ctx.editMessageText(
+            paymentMessage("*Monto ingresado no valido*", header),
+            {
+                reply_markup: new InlineKeyboard(),
+                parse_mode: "MarkdownV2",
+            },
+        );
+    }
 
     return ctx.editMessageText(
         paymentMessage(MsgConfirm, { ...header, amount }),
@@ -520,7 +535,19 @@ function OnMessage(
     if (repliedText) {
         const header = parsePaymentMessage(repliedText);
         if (header.cat && header.id) {
-            const amount = Number(ctx.message.text);
+            const [valid, amount] = ctx.message?.text
+                ? tryParseAmount(ctx.message.text)
+                : [false, -1];
+
+            if (!valid) {
+                return ctx.reply(
+                    paymentMessage("*Monto ingresado no valido*", header),
+                    {
+                        parse_mode: "MarkdownV2",
+                    },
+                );
+            }
+
             return ctx.reply(
                 paymentMessage(MsgConfirm, { ...header, amount }),
                 {
@@ -656,7 +683,7 @@ function paymentMessage(msg: string, h: Partial<Header> = {}) {
     return "*Registro de pago*\n" +
         (h.cat ? `Categoria: ${safe(h.cat)}\n` : "") +
         (h.id ? `De: ${h.last_name}, ${h.name} \\(${safe(h.id)}\\)\n` : "") +
-        (h.amount ? `Monto: ${h.amount}\n` : "") +
+        (h.amount ? `Monto: ${h.amount}\\.000\n` : "") +
         "\n" +
         msg;
 }
@@ -667,4 +694,25 @@ function conceptCurrentMonth() {
 
 function safe(txt: string) {
     return txt.replaceAll("-", "\\-");
+}
+
+function tryParseAmount(strAmount: string): [boolean, number] {
+    const verboseRegex = /^\d{1,3}\.\d\d\d$/;
+    const kRegex = /^\d{1,3}k$/;
+    const shortRegex = /^\d{1,3}$/;
+    const longRegex = /^\d{4,6}$/;
+
+    if (verboseRegex.test(strAmount)) {
+        return [true, parseInt(strAmount.slice(0, -4))];
+    } else if (kRegex.test(strAmount)) {
+        return [true, parseInt(strAmount.slice(0, -1))];
+    } else if (shortRegex.test(strAmount)) {
+        return [true, parseInt(strAmount)];
+    } else if (longRegex.test(strAmount)) {
+        console.log(strAmount.slice(0, -3));
+        console.log(parseInt(strAmount.slice(0, -3)));
+        return [true, parseInt(strAmount.slice(0, -3))];
+    } else {
+        return [false, -1];
+    }
 }
