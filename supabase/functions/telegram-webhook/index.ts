@@ -3,7 +3,7 @@
 // This enables autocomplete, go to definition, etc.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import {Application} from "jsr:@oak/oak/application";
+import { Application } from "jsr:@oak/oak/application";
 import {
     Bot,
     CallbackQueryContext,
@@ -18,7 +18,10 @@ import {
     CallbackQuery,
     InlineKeyboardButton,
 } from "https://deno.land/x/grammy_types@v3.15.0/markup.ts";
-import { Message } from "https://deno.land/x/grammy_types@v3.15.0/mod.ts";
+import {
+    Message,
+    ParseMode,
+} from "https://deno.land/x/grammy_types@v3.15.0/mod.ts";
 import { sortBy, sum } from "https://deno.land/x/lodash@4.17.15-es/lodash.js";
 
 console.log("Hello from telegram-webhook!");
@@ -37,11 +40,6 @@ const supabaseAdmin = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
-
-const MsgConfirm = "*Confirmar?*";
-const ConfirmInlineButtons = new InlineKeyboard()
-    .text("Si", `${CMD_PAGO} confirmar`)
-    .text("Cancelar", `${CMD_PAGO} cancelar`);
 
 const bot = new Bot((Deno.env.get("TELEGRAM_BOT_TOKEN"))!);
 
@@ -193,7 +191,7 @@ async function CmdPagoViejo(ctx: CommandContext<Context>) {
             const from = ctx.update.message!.from;
             return `${from.last_name}, ${from.first_name} (${from.username})`;
         } catch (error) {
-            console.log(error);
+            console.error(error);
             return "[unknown]";
         }
     }
@@ -360,7 +358,7 @@ async function callbackPagoOtroMonto(ctx: CallbackQueryContext<Context>) {
     );
     return bot.api.sendMessage(
         ctx.chat!.id,
-        paymentMessage("_Escriba monto:_", header),
+        paymentMessage("_Escriba monto en miles \\(ej: 60\\):_", header),
         {
             reply_markup: { force_reply: true },
             parse_mode: "MarkdownV2",
@@ -386,11 +384,8 @@ function callbackPagoMonto(ctx: CallbackQueryContext<Context>) {
     }
 
     return ctx.editMessageText(
-        paymentMessage(MsgConfirm, { ...header, amount }),
-        {
-            reply_markup: ConfirmInlineButtons,
-            parse_mode: "MarkdownV2",
-        },
+        confirmMessage(header, amount),
+        replyWithConfirmButtons(amount),
     );
 }
 
@@ -403,6 +398,7 @@ async function callbackPagoConfirmar(ctx: CallbackQueryContext<Context>) {
         return ctx.editMessageText(
             paymentMessage(
                 "*Operacion finalizada con exito\\!*\nID de pago: dummy\\-payment\\-id",
+                header,
             ),
             {
                 reply_markup: new InlineKeyboard(),
@@ -416,7 +412,7 @@ async function callbackPagoConfirmar(ctx: CallbackQueryContext<Context>) {
             const from = ctx.update.callback_query.from;
             return `${from.last_name}, ${from.first_name} (${from.username})`;
         } catch (error) {
-            console.log(error);
+            console.error(error);
             return "[unknown]";
         }
     }
@@ -431,14 +427,14 @@ async function callbackPagoConfirmar(ctx: CallbackQueryContext<Context>) {
         .select().single<Payment>();
 
     if (error) {
-        console.log(error);
+        console.error(error);
     }
 
     const msg = error
         ? `*Operacion finalzada con errores*\n${error.message}`
         : `*Operacion finalizada con exito\\!*\nID de pago: ${data.id}`;
     return ctx.editMessageText(
-        paymentMessage(msg),
+        paymentMessage(msg, header),
         {
             reply_markup: new InlineKeyboard(),
             parse_mode: "MarkdownV2",
@@ -465,7 +461,7 @@ function callbackPagoCancelar(ctx: CallbackQueryContext<Context>) {
 // ////////////////////////////////////
 
 function CmdListarPagos(ctx: CommandContext<Context>) {
-    console.log(`E`);
+    console.log(`Ejecutando comando ${CMD_LISTAR_PAGOS}`);
 
     const inlineKeyboard = selectCategoriesKeyboard(CMD_LISTAR_PAGOS);
     return ctx.reply(
@@ -488,7 +484,7 @@ async function callbackListarPagosCategoria(
         .eq("payments.concept", conceptCurrentMonth());
 
     if (error) {
-        console.log(error);
+        console.error(error);
         return ctx.editMessageText(
             `Unexpected error while getting list of payments: ${error.message}`,
         );
@@ -549,11 +545,8 @@ function OnMessage(
             }
 
             return ctx.reply(
-                paymentMessage(MsgConfirm, { ...header, amount }),
-                {
-                    reply_markup: ConfirmInlineButtons,
-                    parse_mode: "MarkdownV2",
-                },
+                confirmMessage(header, amount),
+                replyWithConfirmButtons(amount),
             );
         }
     }
@@ -648,7 +641,7 @@ function findInlineKeyboardButton(
 function parsePaymentMessage(text: string): Partial<Header> {
     const RegexCategory = /^Categoria: ([a-zA-Z0-9-_]+)$/;
     const RegexFrom = /^De: (\w+), (\w+) \((.*)\)$/;
-    const RegexAmount = /^Monto: (\d+)$/;
+    const RegexAmount = /^Monto: (\d+).000$/;
 
     const mapOrEmpty = <T>(
         regex: RegExp,
@@ -709,10 +702,21 @@ function tryParseAmount(strAmount: string): [boolean, number] {
     } else if (shortRegex.test(strAmount)) {
         return [true, parseInt(strAmount)];
     } else if (longRegex.test(strAmount)) {
-        console.log(strAmount.slice(0, -3));
-        console.log(parseInt(strAmount.slice(0, -3)));
         return [true, parseInt(strAmount.slice(0, -3))];
     } else {
         return [false, -1];
     }
+}
+
+function confirmMessage(header: Partial<Header>, amount: number) {
+    return paymentMessage("*Confirmar?*", { ...header, amount });
+}
+
+function replyWithConfirmButtons(amount: number) {
+    return {
+        reply_markup: new InlineKeyboard()
+            .text(`${amount} mil`, `${CMD_PAGO} confirmar`)
+            .text("Cancelar", `${CMD_PAGO} cancelar`),
+        parse_mode: "MarkdownV2" as ParseMode,
+    };
 }
