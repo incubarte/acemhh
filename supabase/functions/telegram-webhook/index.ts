@@ -428,7 +428,7 @@ async function callbackPagoConfirmar(ctx: CallbackQueryContext<Context>) {
     }
 
     const msg = error
-        ? `*Operacion finalzada con errores*\n${error.message}`
+        ? `*Operacion finalzada con errores*\n${escape(error.message)}`
         : `*Operacion finalizada con exito\\!*\nID de pago: ${data.id}`;
     return ctx.editMessageText(
         paymentMessage(msg, header),
@@ -510,9 +510,9 @@ async function callbackListarPagosCategoria(
         `
 *Lista de pagos del mes*
 
-Categoria: ${safe(cat)}
+Categoria: ${escape(cat)}
 
-${messages.map(safe).join("\n")}`,
+${messages.map(escape).join("\n")}`,
         { parse_mode: "MarkdownV2" },
     );
 }
@@ -637,7 +637,7 @@ function findInlineKeyboardButton(
 
 function parsePaymentMessage(text: string): Partial<Header> {
     const RegexCategory = /^Categoria: ([a-zA-Z0-9-_]+)$/;
-    const RegexFrom = /^De: (\w+), (\w+) \((.*)\)$/;
+    const RegexFrom = /^De: ([\w ]+), ([\w ]+) \((.*)\)$/;
     const RegexAmount = /^Monto: (\d+).000$/;
 
     const mapOrEmpty = <T>(
@@ -671,8 +671,8 @@ function parsePaymentMessage(text: string): Partial<Header> {
 
 function paymentMessage(msg: string, h: Partial<Header> = {}) {
     return "*Registro de pago*\n" +
-        (h.cat ? `Categoria: ${safe(h.cat)}\n` : "") +
-        (h.id ? `De: ${h.last_name}, ${h.name} \\(${safe(h.id)}\\)\n` : "") +
+        (h.cat ? `Categoria: ${escape(h.cat)}\n` : "") +
+        (h.id ? `De: ${h.last_name}, ${h.name} \\(${escape(h.id)}\\)\n` : "") +
         (h.amount ? `Monto: ${h.amount}\\.000\n` : "") +
         "\n" +
         msg;
@@ -682,8 +682,8 @@ function conceptCurrentMonth() {
     return new Date().toISOString().substring(0, 7);
 }
 
-function safe(txt: string) {
-    return txt.replaceAll("-", "\\-");
+function escape(txt) {
+    return txt.replaceAll(/[_*\[\]()~`>#+\-=|{}.!]/g, "\\$&");
 }
 
 function tryParseAmount(strAmount: string): [boolean, number] {
