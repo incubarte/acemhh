@@ -50,17 +50,14 @@ bot.command(CMD_CP, catchErrors(CmdConsultarPersona));
 bot.command(CMD_PAGO, catchErrors(CmdPago));
 bot.command(CMD_LISTAR_PAGOS, catchErrors(CmdListarPagos));
 
-bot.callbackQuery(/registrarpago cat (.*)$/, callbackPagoCategoria);
-bot.callbackQuery(/registrarpago jugador (.+)$/, callbackPagoJugador);
-bot.callbackQuery(/registrarpago monto (\d+)$/, callbackPagoMonto);
-bot.callbackQuery("registrarpago confirmar", callbackPagoConfirmar);
-bot.callbackQuery("registrarpago cancelar", callbackPagoCancelar);
-bot.callbackQuery(/registrarpago monto otro/, callbackPagoOtroMonto);
+bot.callbackQuery(/registrarpago cat (.*)$/, catchErrors(callbackPagoCategoria));
+bot.callbackQuery(/registrarpago jugador (.+)$/, catchErrors(callbackPagoJugador));
+bot.callbackQuery(/registrarpago monto (\d+)$/, catchErrors(callbackPagoMonto));
+bot.callbackQuery("registrarpago confirmar", catchErrors(callbackPagoConfirmar));
+bot.callbackQuery("registrarpago cancelar", catchErrors(callbackPagoCancelar));
+bot.callbackQuery(/registrarpago monto otro/, catchErrors(callbackPagoOtroMonto));
 bot.callbackQuery(/listarpagos cat (.*)$/, catchErrors(callbackListarPagosCategoria));
-bot.callbackQuery(
-    /.*/,
-    (ctx) => console.error(`Unmatched callback to ${ctx.callbackQuery.data}`),
-);
+bot.callbackQuery(/.*/, (ctx) => console.error(`Unmatched callback to ${ctx.callbackQuery.data}`));
 
 bot.on("message", OnMessage);
 
