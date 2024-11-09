@@ -34,7 +34,7 @@ const CMD_PAGO_VIEJO = "rpag";
 const CMD_RP = "rper";
 const CMD_CP = "cper";
 
-const VALID_CATEGORIES = ["E1", "E2", "M", "C", "B", "A", "OTHER"];
+const VALID_CATEGORIES = ["esc-1", "esc-2", "u-14", "cat-c", "cat-b", "cat-a", "other"];
 
 const supabaseAdmin = createClient(
     Deno.env.get("SUPABASE_URL")!,
@@ -682,7 +682,7 @@ function conceptCurrentMonth() {
     return new Date().toISOString().substring(0, 7);
 }
 
-function escape(txt) {
+function escape(txt: string) {
     return txt.replaceAll(/[_*\[\]()~`>#+\-=|{}.!]/g, "\\$&");
 }
 
