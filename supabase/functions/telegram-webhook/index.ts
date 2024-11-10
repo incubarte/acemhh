@@ -106,7 +106,7 @@ async function CmdRegistrarPersona(ctx: CommandContext<Context>) {
         console.warn(`There are many more parameters: ${rest}`);
     }
 
-    const category = categoryAnyCase.toUpperCase();
+    const category = categoryAnyCase.toLowerCase();
     const alias = (maybeAlias && maybeAlias.length > 0)
         ? maybeAlias.toLowerCase()
         : name.toLowerCase() + dni.slice(-3);
@@ -118,9 +118,10 @@ async function CmdRegistrarPersona(ctx: CommandContext<Context>) {
         );
     }
 
+    const maybeDni = dni ? { dni } : {};
     const { data, error } = await supabaseAdmin
         .from("players")
-        .insert({ name, last_name, dni, category, alias })
+        .insert({ name, last_name, ...maybeDni, category, alias })
         .select().single();
 
     if (error) {
@@ -637,7 +638,7 @@ function findInlineKeyboardButton(
 
 function parsePaymentMessage(text: string): Partial<Header> {
     const RegexCategory = /^Categoria: ([a-zA-Z0-9-_]+)$/;
-    const RegexFrom = /^De: ([\w ]+), ([\w ]+) \((.*)\)$/;
+    const RegexFrom = /^De: ([A-zÀ-ú ]+), ([A-zÀ-ú ]+) \((.*)\)$/;
     const RegexAmount = /^Monto: (\d+).000$/;
 
     const mapOrEmpty = <T>(
