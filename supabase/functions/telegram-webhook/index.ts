@@ -120,7 +120,7 @@ async function CmdRegistrarPersona(ctx: CommandContext<Context>) {
     const category = categoryAnyCase.toLowerCase();
     const alias = (maybeAlias && maybeAlias.length > 0)
         ? maybeAlias.toLowerCase()
-        : name.toLowerCase() + dni.slice(-3);
+        : (name + "." + last_name).toLowerCase().replaceAll(" ", ".");
 
     if (!VALID_CATEGORIES.includes(category)) {
         return reply(
