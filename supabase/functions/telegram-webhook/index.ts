@@ -34,7 +34,15 @@ const CMD_PAGO_VIEJO = "rpag";
 const CMD_RP = "rper";
 const CMD_CP = "cper";
 
-const VALID_CATEGORIES = ["esc-1", "esc-2", "u-14", "cat-c", "cat-b", "cat-a", "other"];
+const VALID_CATEGORIES = [
+    "esc-1",
+    "esc-2",
+    "u-14",
+    "cat-c",
+    "cat-b",
+    "cat-a",
+    "other",
+];
 
 const supabaseAdmin = createClient(
     Deno.env.get("SUPABASE_URL")!,
@@ -44,20 +52,23 @@ const supabaseAdmin = createClient(
 const bot = new Bot((Deno.env.get("TELEGRAM_BOT_TOKEN"))!);
 
 bot.command("start", (ctx) => reply(ctx, "Welcome! Up and running."));
-bot.command(CMD_RP, catchErrors(CmdRegistrarPersona));
-bot.command(CMD_PAGO_VIEJO, catchErrors(CmdPagoViejo));
-bot.command(CMD_CP, catchErrors(CmdConsultarPersona));
-bot.command(CMD_PAGO, catchErrors(CmdPago));
-bot.command(CMD_LISTAR_PAGOS, catchErrors(CmdListarPagos));
+bot.command(CMD_RP, catchAll(CmdRegistrarPersona));
+bot.command(CMD_PAGO_VIEJO, catchAll(CmdPagoViejo));
+bot.command(CMD_CP, catchAll(CmdConsultarPersona));
+bot.command(CMD_PAGO, catchAll(CmdPago));
+bot.command(CMD_LISTAR_PAGOS, catchAll(CmdListarPagos));
 
-bot.callbackQuery(/registrarpago cat (.*)$/, catchErrors(callbackPagoCategoria));
-bot.callbackQuery(/registrarpago jugador (.+)$/, catchErrors(callbackPagoJugador));
-bot.callbackQuery(/registrarpago monto (\d+)$/, catchErrors(callbackPagoMonto));
-bot.callbackQuery("registrarpago confirmar", catchErrors(callbackPagoConfirmar));
-bot.callbackQuery("registrarpago cancelar", catchErrors(callbackPagoCancelar));
-bot.callbackQuery(/registrarpago monto otro/, catchErrors(callbackPagoOtroMonto));
-bot.callbackQuery(/listarpagos cat (.*)$/, catchErrors(callbackListarPagosCategoria));
-bot.callbackQuery(/.*/, (ctx) => console.error(`Unmatched callback to ${ctx.callbackQuery.data}`));
+bot.callbackQuery(/registrarpago cat (.*)$/, catchAll(callbackPagoCategoria));
+bot.callbackQuery(/registrarpago jugador (.+)$/, catchAll(callbackPagoJugador));
+bot.callbackQuery(/registrarpago monto (\d+)$/, catchAll(callbackPagoMonto));
+bot.callbackQuery("registrarpago confirmar", catchAll(callbackPagoConfirmar));
+bot.callbackQuery("registrarpago cancelar", catchAll(callbackPagoCancelar));
+bot.callbackQuery(/registrarpago monto otro/, catchAll(callbackPagoOtroMonto));
+bot.callbackQuery(/listarpagos cat (.*)$/, catchAll(callbackListarPagosCateg));
+bot.callbackQuery(
+    /.*/,
+    (ctx) => console.error(`Unmatched callback to ${ctx.callbackQuery.data}`),
+);
 
 bot.on("message", OnMessage);
 
@@ -429,8 +440,8 @@ async function callbackPagoConfirmar(ctx: CallbackQueryContext<Context>) {
     }
 
     const msg = error
-        ? `*Operacion finalzada con errores*\n${escape(error.message)}`
-        : `*Operacion finalizada con exito\\!*\nID de pago: ${data.id}`;
+        ? `*Operacion finalzada con errores*\n${error.message}`
+        : `*Operacion finalizada con exito!*\nID de pago: ${data.id}`;
     return ctx.editMessageText(
         paymentMessage(msg, header),
         {
@@ -468,7 +479,7 @@ function CmdListarPagos(ctx: CommandContext<Context>) {
     );
 }
 
-async function callbackListarPagosCategoria(
+async function callbackListarPagosCateg(
     ctx: CallbackQueryContext<Context>,
 ) {
     const cat = ctx.match[1];
@@ -508,12 +519,12 @@ async function callbackListarPagosCategoria(
         `${payment.amount} - ${payment.last_name}, ${payment.name}`
     );
     return ctx.editMessageText(
-        `
+        escape(`
 *Lista de pagos del mes*
 
-Categoria: ${escape(cat)}
+Categoria: ${cat}
 
-${messages.map(escape).join("\n")}`,
+${messages.join("\n")}`),
         { parse_mode: "MarkdownV2" },
     );
 }
@@ -603,7 +614,7 @@ function selectCategoriesKeyboard(cmd: string) {
         .row().text("Cat A", `${cmd} cat cat-a`);
 }
 
-function catchErrors<T>(f: Middleware<T>): Middleware<T | Message.TextMessage> {
+function catchAll<T>(f: Middleware<T>): Middleware<T | Message.TextMessage> {
     return async (ctx) => {
         try {
             return await f(ctx);
@@ -671,12 +682,14 @@ function parsePaymentMessage(text: string): Partial<Header> {
 }
 
 function paymentMessage(msg: string, h: Partial<Header> = {}) {
-    return "*Registro de pago*\n" +
-        (h.cat ? `Categoria: ${escape(h.cat)}\n` : "") +
-        (h.id ? `De: ${h.last_name}, ${h.name} \\(${escape(h.id)}\\)\n` : "") +
-        (h.amount ? `Monto: ${h.amount}\\.000\n` : "") +
-        "\n" +
-        msg;
+    return escape(
+        "*Registro de pago*\n" +
+            (h.cat ? `Categoria: ${h.cat}\n` : "") +
+            (h.id ? `De: ${h.last_name}, ${h.name} (${h.id})\n` : "") +
+            (h.amount ? `Monto: ${h.amount}.000\n` : "") +
+            "\n" +
+            msg,
+    );
 }
 
 function conceptCurrentMonth() {
