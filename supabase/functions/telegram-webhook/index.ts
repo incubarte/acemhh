@@ -28,6 +28,12 @@ console.log("Hello from telegram-webhook!");
 
 const DryRun = false;
 
+const ErrorMsgPaymentContextLost =
+    "Error: no se puede recuperar la información de pago. Reintente";
+const ErrorMsgNoPlayers = (cat: string) =>
+    `No hay jugadores para la categoria ${cat}`;
+const NoKeyboard = { reply_markup: new InlineKeyboard() };
+
 const CMD_PAGO = "registrarpago";
 const CMD_LISTAR_PAGOS = "listarpagos";
 const CMD_PAGO_VIEJO = "rpag";
@@ -297,10 +303,7 @@ async function callbackPagoCategoria(ctx: CallbackQueryContext<Context>) {
     }
 
     if (data.length == 0) {
-        return ctx.editMessageText(
-            `No hay jugadores para la categoria ${cat}`,
-            { reply_markup: new InlineKeyboard() },
-        );
+        return ctx.editMessageText(ErrorMsgNoPlayers(cat), NoKeyboard);
     }
 
     const name = (player: Player) => `${player.last_name}, ${player.name}`;
@@ -309,10 +312,11 @@ async function callbackPagoCategoria(ctx: CallbackQueryContext<Context>) {
         (kb, player) =>
             kb.row().text(name(player), `${CMD_PAGO} jugador ${player.id}`),
         new InlineKeyboard().text(name(head), `${CMD_PAGO} jugador ${head.id}`),
-    );
+    ).row().text("Cancelar", `${CMD_PAGO} cancelar`);
 
+    const id = ctx.update.callback_query.message!.message_id;
     return ctx.editMessageText(
-        paymentMessage("_Elegir jugador:_", { cat }),
+        paymentMessage("_Elegir jugador:_", { id, cat }),
         {
             reply_markup: inlineKeyboard,
             parse_mode: "MarkdownV2",
@@ -324,7 +328,12 @@ function callbackPagoJugador(ctx: CallbackQueryContext<Context>) {
     const playerId = ctx.match[1];
     console.log(`Pago - jugador seleccionado ${playerId}`);
 
-    const header = parsePaymentMessage(ctx.callbackQuery.message!.text!);
+    const maybePaymentMessage = ctx.callbackQuery.message?.text;
+    if (!maybePaymentMessage) {
+        return ctx.editMessageText(ErrorMsgPaymentContextLost, NoKeyboard);
+    }
+
+    const header = parsePaymentMessage(maybePaymentMessage);
     const [last_name, name] = findInlineKeyboardButton(
         ctx.callbackQuery,
         (_) => _.callback_data.endsWith(playerId),
@@ -337,14 +346,15 @@ function callbackPagoJugador(ctx: CallbackQueryContext<Context>) {
         .text("15k", `${CMD_PAGO} monto 15`)
         .text("13k", `${CMD_PAGO} monto 13`)
         .text("10k", `${CMD_PAGO} monto 13`)
-        .row().text("otro", `${CMD_PAGO} monto otro`);
+        .row().text("Otro", `${CMD_PAGO} monto otro`)
+        .text("Cancelar", `${CMD_PAGO} cancelar`);
 
     return ctx.editMessageText(
         paymentMessage("_Elegir monto:_", {
             ...header,
             last_name,
             name,
-            id: playerId,
+            player_id: playerId,
         }),
         {
             reply_markup: inlineKeyboard,
@@ -356,7 +366,12 @@ function callbackPagoJugador(ctx: CallbackQueryContext<Context>) {
 async function callbackPagoOtroMonto(ctx: CallbackQueryContext<Context>) {
     console.log(`Pago - pidiendo monto arbitrario`);
 
-    const header = parsePaymentMessage(ctx.callbackQuery.message!.text!);
+    const maybePaymentMessage = ctx.callbackQuery.message?.text;
+    if (!maybePaymentMessage) {
+        return ctx.editMessageText(ErrorMsgPaymentContextLost, NoKeyboard);
+    }
+
+    const header = parsePaymentMessage(maybePaymentMessage);
 
     await ctx.editMessageText(
         paymentMessage("Continuando operacion debajo\\.\\.\\.", header),
@@ -379,7 +394,11 @@ function callbackPagoMonto(ctx: CallbackQueryContext<Context>) {
     const strAmount = ctx.match[1];
     console.log(`Pago - registrando pago por $${strAmount}`);
 
-    const header = parsePaymentMessage(ctx.callbackQuery.message!.text!);
+    const maybePaymentMessage = ctx.callbackQuery.message?.text;
+    if (!maybePaymentMessage) {
+        return ctx.editMessageText(ErrorMsgPaymentContextLost, NoKeyboard);
+    }
+    const header = parsePaymentMessage(maybePaymentMessage);
 
     const [valid, amount] = tryParseAmount(strAmount);
     if (!valid) {
@@ -401,7 +420,12 @@ function callbackPagoMonto(ctx: CallbackQueryContext<Context>) {
 async function callbackPagoConfirmar(ctx: CallbackQueryContext<Context>) {
     console.log(`Pago - confirmacion`);
 
-    const header = parsePaymentMessage(ctx.callbackQuery.message!.text!);
+    const maybePaymentMessage = ctx.callbackQuery.message?.text;
+    if (!maybePaymentMessage) {
+        return ctx.editMessageText(ErrorMsgPaymentContextLost, NoKeyboard);
+    }
+
+    const header = parsePaymentMessage(maybePaymentMessage);
 
     if (DryRun) {
         return ctx.editMessageText(
@@ -428,7 +452,8 @@ async function callbackPagoConfirmar(ctx: CallbackQueryContext<Context>) {
     const { data, error } = await supabaseAdmin
         .from("payments")
         .insert([{
-            player_id: header.id,
+            id: header.id,
+            player_id: header.player_id,
             amount: header.amount!,
             concept: conceptCurrentMonth(),
             registered_by: GetRegisteredBy(),
@@ -536,7 +561,7 @@ function OnMessage(
     const repliedText = ctx.update.message?.reply_to_message?.text;
     if (repliedText) {
         const header = parsePaymentMessage(repliedText);
-        if (header.cat && header.id) {
+        if (header.cat && header.player_id) {
             const [valid, amount] = ctx.message?.text
                 ? tryParseAmount(ctx.message.text)
                 : [false, -1];
@@ -575,10 +600,11 @@ function reply(
 // ////////////////////////////////////
 
 type Header = {
+    id: number;
     cat: string;
     last_name: string;
     name: string;
-    id: string;
+    player_id: string;
     amount: number;
 };
 
@@ -608,7 +634,8 @@ function selectCategoriesKeyboard(cmd: string) {
         .row().text("Menores", `${cmd} cat u-14`)
         .row().text("Cat C", `${cmd} cat cat-c`)
         .row().text("Cat B", `${cmd} cat cat-b`)
-        .row().text("Cat A", `${cmd} cat cat-a`);
+        .row().text("Cat A", `${cmd} cat cat-a`)
+        .row().text("Cancelar", `${cmd} cancelar`);
 }
 
 function catchAll<T>(f: Middleware<T>): Middleware<T | Message.TextMessage> {
@@ -645,6 +672,7 @@ function findInlineKeyboardButton(
 }
 
 function parsePaymentMessage(text: string): Partial<Header> {
+    const RegexFlowID = /^ID: (\d+)$/;
     const RegexCategory = /^Categoria: ([a-zA-Z0-9-_]+)$/;
     const RegexFrom = /^De: ([A-zÀ-ú- ]+), ([A-zÀ-ú- ]+) \((.*)\)$/;
     const RegexAmount = /^Monto: (\d+).000$/;
@@ -655,23 +683,28 @@ function parsePaymentMessage(text: string): Partial<Header> {
         arrayToJson: (array: string[]) => T,
     ) => regex.test(text) ? arrayToJson(regex.exec(text)!) : {};
 
-    const [, l1, l2, l3] = text.split("\n");
+    const [, l1, l2, l3, l4] = text.split("\n");
 
-    const jsonCategory = mapOrEmpty(RegexCategory, l1, (arr) => ({
+    const jsonID = mapOrEmpty(RegexFlowID, l1, (arr) => ({
+        id: Number(arr[1]),
+    }));
+
+    const jsonCategory = mapOrEmpty(RegexCategory, l2, (arr) => ({
         cat: arr[1],
     }));
 
-    const jsonFrom = mapOrEmpty(RegexFrom, l2, (arr) => ({
+    const jsonFrom = mapOrEmpty(RegexFrom, l3, (arr) => ({
         last_name: arr[1],
         name: arr[2],
-        id: arr[3],
+        player_id: arr[3],
     }));
 
-    const jsonAmount = mapOrEmpty(RegexAmount, l3, (arr) => ({
+    const jsonAmount = mapOrEmpty(RegexAmount, l4, (arr) => ({
         amount: Number(arr[1]),
     }));
 
     return {
+        ...jsonID,
         ...jsonCategory,
         ...jsonFrom,
         ...jsonAmount,
@@ -681,8 +714,11 @@ function parsePaymentMessage(text: string): Partial<Header> {
 function paymentMessage(msg: string, h: Partial<Header> = {}) {
     return "*Registro de pago*\n" +
         escape(
-            (h.cat ? `Categoria: ${h.cat}\n` : "") +
-                (h.id ? `De: ${h.last_name}, ${h.name} (${h.id})\n` : "") +
+            (h.id ? `ID: ${h.id}\n` : "") +
+                (h.cat ? `Categoria: ${h.cat}\n` : "") +
+                (h.player_id
+                    ? `De: ${h.last_name}, ${h.name} (${h.player_id})\n`
+                    : "") +
                 (h.amount ? `Monto: ${h.amount}.000\n` : "") +
                 "\n",
         ) + msg;
