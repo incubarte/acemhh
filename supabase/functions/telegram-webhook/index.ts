@@ -3,7 +3,7 @@
 // This enables autocomplete, go to definition, etc.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { Application } from "jsr:@oak/oak/application";
+import {Application} from "jsr:@oak/oak/application";
 import {
     Bot,
     CallbackQueryContext,
@@ -13,16 +13,10 @@ import {
     InlineKeyboard,
     webhookCallback,
 } from "https://deno.land/x/grammy@v1.31.0/mod.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
-import {
-    CallbackQuery,
-    InlineKeyboardButton,
-} from "https://deno.land/x/grammy_types@v3.15.0/markup.ts";
-import {
-    Message,
-    ParseMode,
-} from "https://deno.land/x/grammy_types@v3.15.0/mod.ts";
-import { sortBy, sum } from "https://deno.land/x/lodash@4.17.15-es/lodash.js";
+import {createClient} from "jsr:@supabase/supabase-js@2";
+import {CallbackQuery, InlineKeyboardButton,} from "https://deno.land/x/grammy_types@v3.15.0/markup.ts";
+import {Message, ParseMode,} from "https://deno.land/x/grammy_types@v3.15.0/mod.ts";
+import {sortBy, sum} from "https://deno.land/x/lodash@4.17.15-es/lodash.js";
 
 console.log("Hello from telegram-webhook!");
 
@@ -70,6 +64,8 @@ bot.command(CMD_LISTAR_PAGOS, catchAll(CmdListarPagos));
 
 bot.callbackQuery(/registrarpago cat (.*)$/, catchAll(callbackPagoCategoria));
 bot.callbackQuery(/registrarpago jugador (.+)$/, catchAll(callbackPagoJugador));
+bot.callbackQuery(/registrarpago traino categoria$/, catchAll(callbackPagoTrainoCategoria));
+bot.callbackQuery(/registrarpago traino (\d\d\d\d-\d\d-\d\d) (\d\d?)$/, catchAll(callbackPagoTrainoInvitado));
 bot.callbackQuery(/registrarpago monto (\d+)$/, catchAll(callbackPagoMonto));
 bot.callbackQuery("registrarpago confirmar", catchAll(callbackPagoConfirmar));
 bot.callbackQuery(/registrarpago monto otro/, catchAll(callbackPagoOtroMonto));
@@ -186,7 +182,7 @@ async function CmdPagoViejo(ctx: CommandContext<Context>) {
         return reply(ctx, errorMsg);
     }
 
-    const concept = detalle ?? conceptCurrentMonth();
+    const concept = detalle ?? currentYearMonth();
     const [maybeName, maybeLastName] = id.split(".");
 
     const {
@@ -338,58 +334,89 @@ function callbackPagoJugador(ctx: CallbackQueryContext<Context>) {
         return ctx.editMessageText(ErrorMsgPaymentContextLost, NoKeyboard);
     }
 
-    const header = parsePaymentMessage(maybePaymentMessage);
     const [last_name, name] = findInlineKeyboardButton(
         ctx.callbackQuery,
         (_) => _.callback_data.endsWith(playerId),
     )!.text.split(", ");
+    const header = {
+        ...parsePaymentMessage(maybePaymentMessage),
+        last_name,
+        name,
+        player_id: playerId,
+    };
 
-    const inlineKeyboard = new InlineKeyboard()
-        .text("60k", `${CMD_PAGO} monto 60`)
-        .text("45k", `${CMD_PAGO} monto 45`)
-        .text("30k", `${CMD_PAGO} monto 30`)
-        .text("15k", `${CMD_PAGO} monto 15`)
-        .text("13k", `${CMD_PAGO} monto 13`)
-        .text("10k", `${CMD_PAGO} monto 10`)
-        .row().text("Otro", `${CMD_PAGO} monto otro`)
-        .text("Cancelar", "cancelar");
+    const last = previousTrainingDay(todayAtNoon());
+    const previousToLast = previousTrainingDay(getDayBefore(last));
+
+    const previousTrainos = [last, previousToLast].flatMap(
+        (day) => hoursFor(day.getDay()).map((hour) => [day, hour]),
+    ) as [Date, number][];
+    const text = (d: Date, h: number) => `Invitado ${toString(d)} - ${h}hs`;
+    const data = (d: Date, h: number) => `${CMD_PAGO} traino ${toISODate(d)} ${h}`;
+    const kb = previousTrainos.reduce(
+        (_kb, [day, hour]) => _kb.row().text(text(day, hour), data(day, hour)),
+        new InlineKeyboard().text(
+            `Entrenamiento categoria (${slotForTraino(header.cat!)})`,
+            `${CMD_PAGO} traino categoria`,
+        ),
+    ).row().text("Cancelar", "cancelar");
 
     return ctx.editMessageText(
-        paymentMessage("_Elegir monto:_", {
-            ...header,
-            last_name,
-            name,
-            player_id: playerId,
-        }),
+        paymentMessage("_Elegir horario de entrenamiento:_", header),
         {
-            reply_markup: inlineKeyboard,
+            reply_markup: kb,
             parse_mode: "MarkdownV2",
         },
     );
 }
 
-async function callbackPagoOtroMonto(ctx: CallbackQueryContext<Context>) {
-    console.log(`Pago - pidiendo monto arbitrario`);
+function callbackPagoTrainoCategoria(ctx: CallbackQueryContext<Context>) {
+    console.log("Pago - entrenamiento de la categoria");
 
     const maybePaymentMessage = ctx.callbackQuery.message?.text;
     if (!maybePaymentMessage) {
         return ctx.editMessageText(ErrorMsgPaymentContextLost, NoKeyboard);
     }
-
     const header = parsePaymentMessage(maybePaymentMessage);
 
-    await ctx.editMessageText(
-        paymentMessage("Continuando operacion debajo\\.\\.\\.", header),
+    if (!header.cat) {
+        return ctx.editMessageText(ErrorMsgPaymentContextLost, NoKeyboard);
+    }
+    const slot = slotForTraino(header.cat);
+    return editTextChooseAmount(ctx, { ...header, slot });
+}
+
+function callbackPagoTrainoInvitado(ctx: CallbackQueryContext<Context>) {
+    const [, isoDate, time] = ctx.match;
+    console.log(`Pago - entrenamiento de invitado ${isoDate} ${time}hs`);
+
+    const maybePaymentMessage = ctx.callbackQuery.message?.text;
+    if (!maybePaymentMessage) {
+        return ctx.editMessageText(ErrorMsgPaymentContextLost, NoKeyboard);
+    }
+    const header = parsePaymentMessage(maybePaymentMessage);
+
+    const slot = toSlot(isoDate, time);
+    return editTextChooseAmount(ctx, { ...header, slot });
+}
+
+function editTextChooseAmount(
+    ctx: CallbackQueryContext<Context>,
+    header: Partial<Header>,
+) {
+    return ctx.editMessageText(
+        paymentMessage("_Elegir monto:_", header),
         {
-            reply_markup: new InlineKeyboard(),
-            parse_mode: "MarkdownV2",
-        },
-    );
-    return bot.api.sendMessage(
-        ctx.chat!.id,
-        paymentMessage("_Escriba monto en miles \\(ej: 60\\):_", header),
-        {
-            reply_markup: { force_reply: true },
+            reply_markup: new InlineKeyboard()
+                .text("60k", `${CMD_PAGO} monto 60`)
+                .text("45k", `${CMD_PAGO} monto 45`)
+                .text("30k", `${CMD_PAGO} monto 30`)
+                .text("15k", `${CMD_PAGO} monto 15`)
+                .text("13k", `${CMD_PAGO} monto 13`)
+                .text("10k", `${CMD_PAGO} monto 10`)
+                .row()
+                .text("Otro", `${CMD_PAGO} monto otro`)
+                .text("Cancelar", "cancelar"),
             parse_mode: "MarkdownV2",
         },
     );
@@ -419,6 +446,32 @@ function callbackPagoMonto(ctx: CallbackQueryContext<Context>) {
     return ctx.editMessageText(
         confirmMessage(header, amount),
         replyWithConfirmButtons(amount),
+    );
+}
+
+async function callbackPagoOtroMonto(ctx: CallbackQueryContext<Context>) {
+    console.log(`Pago - pidiendo monto arbitrario`);
+
+    const maybePaymentMessage = ctx.callbackQuery.message?.text;
+    if (!maybePaymentMessage) {
+        return ctx.editMessageText(ErrorMsgPaymentContextLost, NoKeyboard);
+    }
+    const header = parsePaymentMessage(maybePaymentMessage);
+
+    await ctx.editMessageText(
+        paymentMessage("Continuando operacion debajo\\.\\.\\.", header),
+        {
+            reply_markup: new InlineKeyboard(),
+            parse_mode: "MarkdownV2",
+        },
+    );
+    return bot.api.sendMessage(
+        ctx.chat!.id,
+        paymentMessage("_Escriba monto en miles \\(ej: 60\\):_", header),
+        {
+            reply_markup: { force_reply: true },
+            parse_mode: "MarkdownV2",
+        },
     );
 }
 
@@ -460,8 +513,9 @@ async function callbackPagoConfirmar(ctx: CallbackQueryContext<Context>) {
             id: header.id,
             player_id: header.player_id,
             amount: header.amount!,
-            concept: conceptCurrentMonth(),
+            concept: currentYearMonth(),
             registered_by: GetRegisteredBy(),
+            slot: header.slot,
         }])
         .select().single<Payment>();
 
@@ -470,7 +524,7 @@ async function callbackPagoConfirmar(ctx: CallbackQueryContext<Context>) {
     }
 
     const msg = error
-        ? `*Operacion finalzada con errores*\n${error.message}`
+        ? `*Operacion finalzada con errores*\n${escape(error.message)}`
         : `*Operacion finalizada con exito\\!*\nID de pago: ${data.id}`;
     return ctx.editMessageText(
         paymentMessage(msg, header),
@@ -542,7 +596,7 @@ async function callbackListarPagosCateg(
         .from("players")
         .select<"*, payments(amount)", Player>(selectType)
         .eq("category", cat)
-        .eq("payments.concept", conceptCurrentMonth());
+        .eq("payments.concept", currentYearMonth());
 
     if (error) {
         console.error(error);
@@ -632,6 +686,7 @@ type Header = {
     last_name: string;
     name: string;
     player_id: string;
+    slot: string;
     amount: number;
 };
 
@@ -702,6 +757,7 @@ function parsePaymentMessage(text: string): Partial<Header> {
     const RegexFlowID = /^ID: (\d+)$/;
     const RegexCategory = /^Categoria: ([a-zA-Z0-9-_]+)$/;
     const RegexFrom = /^De: ([A-zÀ-ú- ]+), ([A-zÀ-ú- ]+) \((.*)\)$/;
+    const RegexSlot = /^Horario: (.*)$/;
     const RegexAmount = /^Monto: (\d+).000$/;
 
     const mapOrEmpty = <T>(
@@ -710,7 +766,7 @@ function parsePaymentMessage(text: string): Partial<Header> {
         arrayToJson: (array: string[]) => T,
     ) => regex.test(text) ? arrayToJson(regex.exec(text)!) : {};
 
-    const [, l1, l2, l3, l4] = text.split("\n");
+    const [, l1, l2, l3, l4, l5] = text.split("\n");
 
     const jsonID = mapOrEmpty(RegexFlowID, l1, (arr) => ({
         id: Number(arr[1]),
@@ -726,7 +782,11 @@ function parsePaymentMessage(text: string): Partial<Header> {
         player_id: arr[3],
     }));
 
-    const jsonAmount = mapOrEmpty(RegexAmount, l4, (arr) => ({
+    const jsonSlot = mapOrEmpty(RegexSlot, l4, (arr) => ({
+        slot: arr[1],
+    }));
+
+    const jsonAmount = mapOrEmpty(RegexAmount, l5, (arr) => ({
         amount: Number(arr[1]),
     }));
 
@@ -734,6 +794,7 @@ function parsePaymentMessage(text: string): Partial<Header> {
         ...jsonID,
         ...jsonCategory,
         ...jsonFrom,
+        ...jsonSlot,
         ...jsonAmount,
     };
 }
@@ -746,13 +807,14 @@ function paymentMessage(msg: string, h: Partial<Header> = {}) {
                 (h.player_id
                     ? `De: ${h.last_name}, ${h.name} (${h.player_id})\n`
                     : "") +
+                (h.slot ? `Horario: ${h.slot}\n` : "") +
                 (h.amount ? `Monto: ${h.amount}.000\n` : "") +
                 "\n",
         ) + msg;
 }
 
-function conceptCurrentMonth() {
-    return new Date().toISOString().substring(0, 7);
+function currentYearMonth() {
+    return new Date().toLocaleString("sv-SE").substring(0, 7);
 }
 
 function escape(txt: string) {
@@ -789,4 +851,69 @@ function replyWithConfirmButtons(amount: number) {
             .text("Cancelar", "cancelar"),
         parse_mode: "MarkdownV2" as ParseMode,
     };
+}
+
+function todayAtNoon() {
+    const today = new Date();
+    today.setHours(12);
+    return today;
+}
+
+function previousTrainingDay(date: Date) {
+    const prev = new Date(date);
+    while (prev.getDay() != 0 && prev.getDay() != 4) {
+        prev.setDate(prev.getDate() - 1);
+    }
+    return prev;
+}
+
+function getDayBefore(date: Date) {
+    const dayBefore = new Date(date);
+    dayBefore.setDate(dayBefore.getDate() - 1);
+    return dayBefore;
+}
+
+function toString(date: Date): string {
+    return date.toLocaleString("es-AR", {
+        weekday: "short",
+        day: "numeric",
+    });
+}
+
+function toISODate(date: Date) {
+    return date.toISOString().substring(0, 10);
+}
+
+function hoursFor(day: number) {
+    if (day === 0) return [23, 11, 10];
+    else if (day === 4) return [23, 22, 21];
+    else throw new Error(`Unexpected training day ${day}`);
+}
+
+function slotForTraino(category: string): string {
+    switch (category) {
+        case "cat-c":
+            return "jue 21hs";
+        case "cat-b":
+            return "jue 22hs";
+        case "cat-a":
+            return "jue 23hs";
+        case "esc-1":
+            return "dom 10hs";
+        case "esc-2":
+        case "u-14":
+            return "dom 11hs";
+        default:
+            throw new Error(`Unexpected category ${category}`);
+    }
+}
+
+function toSlot(isoDate: string, hour: string): string {
+    const date = new Date(`${isoDate}T${hour}:00`);
+    return date.toLocaleString("es-AR", {
+        weekday: "short",
+        day: "numeric",
+        hour: "numeric",
+        hour12: false,
+    }).replace(",", "") + "hs";
 }
