@@ -28,6 +28,10 @@ console.log("Hello from telegram-webhook!");
 
 const DryRun = false;
 
+const TitleAddPayment = "Registro de pago";
+const TitleListPayments = "Lista de pagos del mes";
+const TitleOperationCancelled = "OPERACION CANCELADA";
+
 const ErrorMsgPaymentContextLost =
     "Error: no se puede recuperar la información de pago. Reintente";
 const ErrorMsgNoPlayers = (cat: string) =>
@@ -68,9 +72,10 @@ bot.callbackQuery(/registrarpago cat (.*)$/, catchAll(callbackPagoCategoria));
 bot.callbackQuery(/registrarpago jugador (.+)$/, catchAll(callbackPagoJugador));
 bot.callbackQuery(/registrarpago monto (\d+)$/, catchAll(callbackPagoMonto));
 bot.callbackQuery("registrarpago confirmar", catchAll(callbackPagoConfirmar));
-bot.callbackQuery("registrarpago cancelar", catchAll(callbackPagoCancelar));
 bot.callbackQuery(/registrarpago monto otro/, catchAll(callbackPagoOtroMonto));
 bot.callbackQuery(/listarpagos cat (.*)$/, catchAll(callbackListarPagosCateg));
+
+bot.callbackQuery("cancelar", catchAll(callbackCancelar));
 bot.callbackQuery(
     /.*/,
     (ctx) => console.error(`Unmatched callback to ${ctx.callbackQuery.data}`),
@@ -312,7 +317,7 @@ async function callbackPagoCategoria(ctx: CallbackQueryContext<Context>) {
         (kb, player) =>
             kb.row().text(name(player), `${CMD_PAGO} jugador ${player.id}`),
         new InlineKeyboard().text(name(head), `${CMD_PAGO} jugador ${head.id}`),
-    ).row().text("Cancelar", `${CMD_PAGO} cancelar`);
+    ).row().text("Cancelar", "cancelar");
 
     const id = ctx.update.callback_query.message!.message_id;
     return ctx.editMessageText(
@@ -345,9 +350,9 @@ function callbackPagoJugador(ctx: CallbackQueryContext<Context>) {
         .text("30k", `${CMD_PAGO} monto 30`)
         .text("15k", `${CMD_PAGO} monto 15`)
         .text("13k", `${CMD_PAGO} monto 13`)
-        .text("10k", `${CMD_PAGO} monto 13`)
+        .text("10k", `${CMD_PAGO} monto 10`)
         .row().text("Otro", `${CMD_PAGO} monto otro`)
-        .text("Cancelar", `${CMD_PAGO} cancelar`);
+        .text("Cancelar", "cancelar");
 
     return ctx.editMessageText(
         paymentMessage("_Elegir monto:_", {
@@ -476,13 +481,35 @@ async function callbackPagoConfirmar(ctx: CallbackQueryContext<Context>) {
     );
 }
 
-function callbackPagoCancelar(ctx: CallbackQueryContext<Context>) {
-    console.log(`Pago - cancelacion`);
+function callbackCancelar(ctx: CallbackQueryContext<Context>) {
+    console.log("Cancelacion");
 
-    const header = parsePaymentMessage(ctx.callbackQuery.message!.text!);
+    const flowDescription = ctx.callbackQuery.message?.text;
 
+    if (!flowDescription) {
+        return ctx.editMessageText(
+            `*${TitleOperationCancelled}*`,
+            {
+                reply_markup: new InlineKeyboard(),
+                parse_mode: "MarkdownV2",
+            },
+        );
+    }
+
+    const title = flowDescription.substring(0, flowDescription.indexOf("\n"));
+    console.log(title);
+
+    let message: string;
+    if (title === TitleAddPayment) {
+        const header = parsePaymentMessage(flowDescription);
+        message = paymentMessage(TitleOperationCancelled, header);
+    } else if (title === TitleListPayments) {
+        message = `*${TitleListPayments}*\n\n${TitleOperationCancelled}`;
+    } else {
+        message = TitleOperationCancelled;
+    }
     return ctx.editMessageText(
-        paymentMessage("*OPERACION CANCELADA*", header),
+        message,
         {
             reply_markup: new InlineKeyboard(),
             parse_mode: "MarkdownV2",
@@ -499,7 +526,7 @@ function CmdListarPagos(ctx: CommandContext<Context>) {
 
     const inlineKeyboard = selectCategoriesKeyboard(CMD_LISTAR_PAGOS);
     return ctx.reply(
-        "*Lista de pagos del mes*\n\n_Elegir categoria:_",
+        `*${TitleListPayments}*\n\n_Elegir categoria:_`,
         { reply_markup: inlineKeyboard, parse_mode: "MarkdownV2" },
     );
 }
@@ -635,7 +662,7 @@ function selectCategoriesKeyboard(cmd: string) {
         .row().text("Cat C", `${cmd} cat cat-c`)
         .row().text("Cat B", `${cmd} cat cat-b`)
         .row().text("Cat A", `${cmd} cat cat-a`)
-        .row().text("Cancelar", `${cmd} cancelar`);
+        .row().text("Cancelar", "cancelar");
 }
 
 function catchAll<T>(f: Middleware<T>): Middleware<T | Message.TextMessage> {
@@ -712,7 +739,7 @@ function parsePaymentMessage(text: string): Partial<Header> {
 }
 
 function paymentMessage(msg: string, h: Partial<Header> = {}) {
-    return "*Registro de pago*\n" +
+    return `*${TitleAddPayment}*\n` +
         escape(
             (h.id ? `ID: ${h.id}\n` : "") +
                 (h.cat ? `Categoria: ${h.cat}\n` : "") +
@@ -759,7 +786,7 @@ function replyWithConfirmButtons(amount: number) {
     return {
         reply_markup: new InlineKeyboard()
             .text(`${amount} mil`, `${CMD_PAGO} confirmar`)
-            .text("Cancelar", `${CMD_PAGO} cancelar`),
+            .text("Cancelar", "cancelar"),
         parse_mode: "MarkdownV2" as ParseMode,
     };
 }
