@@ -13,10 +13,16 @@ import {
     InlineKeyboard,
     webhookCallback,
 } from "https://deno.land/x/grammy@v1.31.0/mod.ts";
-import {createClient} from "jsr:@supabase/supabase-js@2";
-import {CallbackQuery, InlineKeyboardButton,} from "https://deno.land/x/grammy_types@v3.15.0/markup.ts";
-import {Message, ParseMode,} from "https://deno.land/x/grammy_types@v3.15.0/mod.ts";
-import {sortBy, sum} from "https://deno.land/x/lodash@4.17.15-es/lodash.js";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+import {
+    CallbackQuery,
+    InlineKeyboardButton,
+} from "https://deno.land/x/grammy_types@v3.15.0/markup.ts";
+import {
+    Message,
+    ParseMode,
+} from "https://deno.land/x/grammy_types@v3.15.0/mod.ts";
+import { sortBy, sum } from "https://deno.land/x/lodash@4.17.15-es/lodash.js";
 
 console.log("Hello from telegram-webhook!");
 
@@ -24,12 +30,13 @@ const DryRun = false;
 
 const TitleAddPayment = "Registro de pago";
 const TitleListPayments = "Lista de pagos del mes";
+const TitleAttendance = "Registro de asistencia";
 const TitleOperationCancelled = "OPERACION CANCELADA";
 
 const ErrorMsgPaymentContextLost =
     "Error: no se puede recuperar la información de pago. Reintente";
-const ErrorMsgNoPlayers = (cat: string) =>
-    `No hay jugadores para la categoria ${cat}`;
+const ErrorMsgNoPlayers = (cats: string[]) =>
+    `No hay jugadores para las categorias ${cats}`;
 const NoKeyboard = { reply_markup: new InlineKeyboard() };
 
 const CMD_PAGO = "registrarpago";
@@ -37,6 +44,7 @@ const CMD_LISTAR_PAGOS = "listarpagos";
 const CMD_PAGO_VIEJO = "rpag";
 const CMD_RP = "rper";
 const CMD_CP = "cper";
+const CmdAsist = "asist";
 
 const VALID_CATEGORIES = [
     "esc-1",
@@ -61,6 +69,7 @@ bot.command(CMD_PAGO_VIEJO, catchAll(CmdPagoViejo));
 bot.command(CMD_CP, catchAll(CmdConsultarPersona));
 bot.command(CMD_PAGO, catchAll(CmdPago));
 bot.command(CMD_LISTAR_PAGOS, catchAll(CmdListarPagos));
+bot.command(CmdAsist, catchAll(CmdRegistrarAsistencia));
 
 bot.callbackQuery(/registrarpago cat (.*)$/, catchAll(callbackPagoCategoria));
 bot.callbackQuery(/registrarpago jugador (.+)$/, catchAll(callbackPagoJugador));
@@ -69,7 +78,15 @@ bot.callbackQuery(/registrarpago traino (\d\d\d\d-\d\d-\d\d) (\d\d?)$/, catchAll
 bot.callbackQuery(/registrarpago monto (\d+)$/, catchAll(callbackPagoMonto));
 bot.callbackQuery("registrarpago confirmar", catchAll(callbackPagoConfirmar));
 bot.callbackQuery(/registrarpago monto otro/, catchAll(callbackPagoOtroMonto));
+
 bot.callbackQuery(/listarpagos cat (.*)$/, catchAll(callbackListarPagosCateg));
+
+const rDate = "\\d\\d\\d\\d-\\d\\d-\\d\\d";
+const rUuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const r = (str: string) => new RegExp(str, "i");
+bot.callbackQuery(r(`asist (${rDate})$`), catchAll(cbAsistenciaDia));
+bot.callbackQuery(r(`asist (${rDate}) (\\d\\d)$`), catchAll(cbAsistenciaSlot));
+bot.callbackQuery(r(`asist (${rDate}) (\\d\\d) (${rUuid}) ([y|n])$`), catchAll(cbAsistenciaSlot));
 
 bot.callbackQuery("cancelar", catchAll(callbackCancelar));
 bot.callbackQuery(
@@ -304,7 +321,7 @@ async function callbackPagoCategoria(ctx: CallbackQueryContext<Context>) {
     }
 
     if (data.length == 0) {
-        return ctx.editMessageText(ErrorMsgNoPlayers(cat), NoKeyboard);
+        return ctx.editMessageText(ErrorMsgNoPlayers([cat]), NoKeyboard);
     }
 
     const name = (player: Player) => `${player.last_name}, ${player.name}`;
@@ -352,11 +369,12 @@ function callbackPagoJugador(ctx: CallbackQueryContext<Context>) {
         (day) => hoursFor(day.getDay()).map((hour) => [day, hour]),
     ) as [Date, number][];
     const text = (d: Date, h: number) => `Invitado ${toString(d)} - ${h}hs`;
-    const data = (d: Date, h: number) => `${CMD_PAGO} traino ${toISODate(d)} ${h}`;
+    const data = (d: Date, h: number) =>
+        `${CMD_PAGO} traino ${toISODate(d)} ${h}`;
     const kb = previousTrainos.reduce(
         (_kb, [day, hour]) => _kb.row().text(text(day, hour), data(day, hour)),
         new InlineKeyboard().text(
-            `Entrenamiento categoria (${slotForTraino(header.cat!)})`,
+            `Entrenamiento categoria (${catToSlot(header.cat!)})`,
             `${CMD_PAGO} traino categoria`,
         ),
     ).row().text("Cancelar", "cancelar");
@@ -382,7 +400,7 @@ function callbackPagoTrainoCategoria(ctx: CallbackQueryContext<Context>) {
     if (!header.cat) {
         return ctx.editMessageText(ErrorMsgPaymentContextLost, NoKeyboard);
     }
-    const slot = slotForTraino(header.cat);
+    const slot = catToSlot(header.cat);
     return editTextChooseAmount(ctx, { ...header, slot });
 }
 
@@ -396,7 +414,7 @@ function callbackPagoTrainoInvitado(ctx: CallbackQueryContext<Context>) {
     }
     const header = parsePaymentMessage(maybePaymentMessage);
 
-    const slot = toSlot(isoDate, time);
+    const slot = toSpecificSlot(isoDate, time);
     return editTextChooseAmount(ctx, { ...header, slot });
 }
 
@@ -559,6 +577,8 @@ function callbackCancelar(ctx: CallbackQueryContext<Context>) {
         message = paymentMessage(TitleOperationCancelled, header);
     } else if (title === TitleListPayments) {
         message = `*${TitleListPayments}*\n\n${TitleOperationCancelled}`;
+    } else if (title === TitleAttendance) {
+        message = `*${TitleAttendance}*\n\n${TitleOperationCancelled}`;
     } else {
         message = TitleOperationCancelled;
     }
@@ -572,7 +592,7 @@ function callbackCancelar(ctx: CallbackQueryContext<Context>) {
 }
 
 // ////////////////////////////////////
-// HANDLERS = LISTAR PAGOS
+// HANDLERS - LISTAR PAGOS
 // ////////////////////////////////////
 
 function CmdListarPagos(ctx: CommandContext<Context>) {
@@ -633,6 +653,200 @@ async function callbackListarPagosCateg(
 }
 
 // ////////////////////////////////////
+// HANDLERS - REGISTRAR ASISTENCIA
+// ////////////////////////////////////
+
+function CmdRegistrarAsistencia(ctx: CommandContext<Context>) {
+    console.log(`Ejecutando comando ${CmdAsist}`);
+
+    const date = searchLastDayWithSlots(new Date());
+    return ctx.reply(
+        attendanceMessage("_Eligir sesión de entrenamiento:_"),
+        {
+            reply_markup: keyboardForChooseSession(date),
+            parse_mode: "MarkdownV2",
+        },
+    );
+}
+
+function cbAsistenciaDia(ctx: CallbackQueryContext<Context>) {
+    const dateText = ctx.match[1];
+    console.log(`Callback asistencia - dia: ${dateText}`);
+
+    const date = new Date(Date.parse(`${dateText}T12:00:00`));
+    const dateWithSlots = searchLastDayWithSlots(date);
+    return ctx.editMessageText(
+        attendanceMessage("_Eligir sesión de entrenamiento:_"),
+        {
+            reply_markup: keyboardForChooseSession(dateWithSlots),
+            parse_mode: "MarkdownV2",
+        },
+    );
+}
+
+async function cbAsistenciaSlot(ctx: CallbackQueryContext<Context>) {
+    const [, isoDate, hs, player_id, attendance] = ctx.match;
+    console.log(`Callback asist: ${isoDate} ${hs} ${player_id} ${attendance}`);
+
+    const specificSlot = toSpecificSlot(isoDate, hs);
+    const genericSlot = toGenericSlot(isoDate, hs);
+    const cats = slotToCat(genericSlot);
+
+    const { data: players, error } = await supabaseAdmin
+        .from("players")
+        .select<"*", Player>()
+        .in("category", cats)
+        .order("last_name, name");
+    if (error) {
+        console.error(error);
+        return reply(ctx, "Error al buscar jugadores de categoria esc-1");
+    }
+
+    if (players.length == 0) {
+        return ctx.editMessageText(ErrorMsgNoPlayers(cats), NoKeyboard);
+    }
+
+    if (player_id && attendance) {
+        const attended = attendance === "y";
+        const { error: insertErr } = await supabaseAdmin
+            .from("attendances")
+            .insert({ slot: specificSlot, player_id, attended });
+
+        if (insertErr) {
+            if (insertErr.code !== "23505") {
+                return ctx.editMessageText("Error al marcar asistencia");
+            }
+
+            const { error: updateErr } = await supabaseAdmin
+                .from("attendances")
+                .update({ attended })
+                .eq("slot", specificSlot)
+                .eq("player_id", player_id);
+
+            if (updateErr) {
+                return ctx.editMessageText("Error al marcar asistencia");
+            }
+        }
+    }
+
+    const { data: attendances, error: attendanceError } = await supabaseAdmin
+        .from("attendances")
+        .select<"*", Attendance>()
+        .eq("slot", specificSlot);
+    if (attendanceError) {
+        console.error(error);
+        return reply(ctx, "Error al buscar asistencias para la sesion");
+    }
+    const attendees = attendances!.filter((_) => _.attended).map(
+        (_) => _.player_id,
+    );
+
+    const status = (p: Player) =>
+        attendees.includes(p.id) ? "PRESENTE" : "AUSENTE";
+    const yn = (p: Player) => attendees.includes(p.id) ? "n" : "y";
+    const lbl = (p: Player) => `${p.last_name}, ${p.name} está ${status(p)}`;
+    const dat = (p: Player) => `${CmdAsist} ${isoDate} ${hs} ${p.id} ${yn(p)}`;
+    const kb = players.reduce(
+        (_kb, player) => _kb.row().text(lbl(player), dat(player)),
+        new InlineKeyboard(),
+    ).row().text("Cancelar", "cancelar");
+
+    return ctx.editMessageText(
+        attendanceMessage("_Ajuste asistencia:_"),
+        {
+            reply_markup: kb,
+            parse_mode: "MarkdownV2",
+        },
+    );
+}
+
+function cbAsistenciaJugador(ctx: CallbackQueryContext<Context>) {
+    const [, dateText, slot, player, attends] = ctx.match;
+    console.log(
+        `Callback asistencia - jugador: ${dateText} at ${slot} player ${player} attends? ${attends}`,
+    );
+
+    // TODO mostrar categorias
+}
+
+function searchLastDayWithSlots(someDate: Date) {
+    const date = new Date(someDate);
+    while (date.getDay() !== 0 && date.getDay() !== 4) {
+        date.setDate(date.getDate() - 1);
+    }
+    return date;
+}
+
+function keyboardForChooseSession(date: Date) {
+    const prevDay = new Date(date);
+    prevDay.setDate(prevDay.getDate() - 1);
+    const prevDateISO = `${prevDay.toISOString().substring(0, 10)}`;
+
+    const slots = (date.getDay() === 0)
+        ? ["10", "11", "23"]
+        : (date.getDay() === 4)
+        ? ["21", "22", "23"]
+        : [];
+
+    const dateISO = date.toISOString().substring(0, 10);
+    return slots.reduce(
+        (kb, slot) =>
+            kb.row().text(
+                `${slot}hs`,
+                `${CmdAsist} ${dateISO} ${slot}`,
+            ),
+        new InlineKeyboard().text(
+            strDate(date),
+            `${CmdAsist} dummy`,
+        ),
+    ).row()
+        .text(`« Dia anterior`, `${CmdAsist} ${prevDateISO}`)
+        .text("Cancelar", "cancelar");
+}
+
+function attendanceMessage(msg: string, h: Partial<HeaderAttendance> = {}) {
+    return `*${TitleAttendance}*\n` +
+        escape(
+            (h.day ? `Dia: ${h.day}\n` : "") +
+                (h.slot ? `Horario: ${h.slot}\n` : "") +
+                (h.categories ? `Categorias: ${h.categories}\n` : "") +
+                "\n",
+        ) + msg;
+}
+
+function parseAttendanceMessage(text: string): Partial<HeaderAttendance> {
+    const RegexDay = /^Dia: (\d\d\d\d-\d\d-\d\d)$/;
+    const RegexSlot = /^Horario: (\d\d)$/;
+    const RegexCategories = /^Categorias: ([a-zA-Z0-9-_]+)$/;
+
+    const mapOrEmpty = <T>(
+        regex: RegExp,
+        text: string,
+        arrayToJson: (array: string[]) => T,
+    ) => regex.test(text) ? arrayToJson(regex.exec(text)!) : {};
+
+    const [, l1, l2, l3] = text.split("\n");
+
+    const jsonDay = mapOrEmpty(RegexDay, l1, (arr) => ({
+        day: arr[1],
+    }));
+
+    const jsonSlot = mapOrEmpty(RegexSlot, l2, (arr) => ({
+        slot: Number(arr[1]),
+    }));
+
+    const jsonCategories = mapOrEmpty(RegexCategories, l2, (arr) => ({
+        categories: arr[1].split(","),
+    }));
+
+    return {
+        ...jsonDay,
+        ...jsonSlot,
+        ...jsonCategories,
+    };
+}
+
+// ////////////////////////////////////
 // DEFAULT MESSAGE HANDLER
 // ////////////////////////////////////
 
@@ -688,6 +902,18 @@ type Header = {
     player_id: string;
     slot: string;
     amount: number;
+};
+
+type HeaderAttendance = {
+    day: string;
+    slot: number;
+    categories: string[];
+};
+
+type Attendance = {
+    slot: string;
+    player_id: string;
+    attended: boolean;
 };
 
 type Player = {
@@ -873,11 +1099,23 @@ function getDayBefore(date: Date) {
     return dayBefore;
 }
 
+// returns: "jue 3"
 function toString(date: Date): string {
     return date.toLocaleString("es-AR", {
         weekday: "short",
         day: "numeric",
     });
+}
+
+// returns: "Hoy" | "jueves, 3 de marzo"
+function strDate(d: Date) {
+    return (d.toLocaleDateString() == new Date().toLocaleDateString())
+        ? "Hoy"
+        : d.toLocaleDateString("es-AR", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+        });
 }
 
 function toISODate(date: Date) {
@@ -890,7 +1128,7 @@ function hoursFor(day: number) {
     else throw new Error(`Unexpected training day ${day}`);
 }
 
-function slotForTraino(category: string): string {
+function catToSlot(category: string): string {
     switch (category) {
         case "cat-c":
             return "jue 21hs";
@@ -908,11 +1146,37 @@ function slotForTraino(category: string): string {
     }
 }
 
-function toSlot(isoDate: string, hour: string): string {
+function slotToCat(slot: string): string[] {
+    switch (slot) {
+        case "jue 21hs":
+            return ["cat-c"];
+        case "jue 22hs":
+            return ["cat-b"];
+        case "jue 23hs":
+            return ["cat-a"];
+        case "dom 10hs":
+            return ["esc-1"];
+        case "dom 11hs":
+            return ["esc-2", "u-14"];
+        default:
+            throw new Error(`Unexpected slot ${slot}`);
+    }
+}
+
+function toSpecificSlot(isoDate: string, hour: string): string {
     const date = new Date(`${isoDate}T${hour}:00`);
     return date.toLocaleString("es-AR", {
         weekday: "short",
         day: "numeric",
+        hour: "numeric",
+        hour12: false,
+    }).replace(",", "") + "hs";
+}
+
+function toGenericSlot(isoDate: string, hour: string): string {
+    const date = new Date(`${isoDate}T${hour}:00`);
+    return date.toLocaleString("es-AR", {
+        weekday: "short",
         hour: "numeric",
         hour12: false,
     }).replace(",", "") + "hs";
