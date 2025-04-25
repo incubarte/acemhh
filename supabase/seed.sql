@@ -1,123 +1,3 @@
-SET session_replication_role = replica;
-
---
--- PostgreSQL database dump
---
-
--- Dumped from database version 15.6
--- Dumped by pg_dump version 15.6
-
-SET statement_timeout = 0;
-SET lock_timeout = 0;
-SET idle_in_transaction_session_timeout = 0;
-SET client_encoding = 'UTF8';
-SET standard_conforming_strings = on;
-SELECT pg_catalog.set_config('search_path', '', false);
-SET check_function_bodies = false;
-SET xmloption = content;
-SET client_min_messages = warning;
-SET row_security = off;
-
---
--- Data for Name: audit_log_entries; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
---
-
-
-
---
--- Data for Name: flow_state; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
---
-
-
-
---
--- Data for Name: users; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
---
-
-
-
---
--- Data for Name: identities; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
---
-
-
-
---
--- Data for Name: instances; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
---
-
-
-
---
--- Data for Name: sessions; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
---
-
-
-
---
--- Data for Name: mfa_amr_claims; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
---
-
-
-
---
--- Data for Name: mfa_factors; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
---
-
-
-
---
--- Data for Name: mfa_challenges; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
---
-
-
-
---
--- Data for Name: one_time_tokens; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
---
-
-
-
---
--- Data for Name: refresh_tokens; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
---
-
-
-
---
--- Data for Name: sso_providers; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
---
-
-
-
---
--- Data for Name: saml_providers; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
---
-
-
-
---
--- Data for Name: saml_relay_states; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
---
-
-
-
---
--- Data for Name: sso_domains; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
---
-
-
-
---
--- Data for Name: key; Type: TABLE DATA; Schema: pgsodium; Owner: supabase_admin
---
-
-
-
---
--- Data for Name: players; Type: TABLE DATA; Schema: public; Owner: postgres
---
-
 INSERT INTO "public"."players" ("id", "alias", "name", "last_name", "dni", "category", "created_at", "updated_at", "nick") VALUES
 	('be4d6fc0-b663-450c-82b7-667cb4e1c1c7', 'guido.tibaudin', 'Guido', 'Tibaudin', NULL, 'cat-b', '2024-11-07 16:33:49.683323', NULL, NULL),
 	('12c3cd3c-cb77-4a6f-84d7-58edd2badddc', 'Paupinna', 'Paula', 'Pinna', NULL, 'esc-1', '2024-11-01 17:18:56.426214', NULL, ''),
@@ -228,11 +108,6 @@ INSERT INTO "public"."players" ("id", "alias", "name", "last_name", "dni", "cate
 	('723f1ea7-4ae2-43c1-be19-d4e0ad758ae0', 'code', 'Cecilia', 'Codella', '34828675', 'cat-c', '2024-11-15 00:04:57.847283', '2024-11-19 21:25:59.410846', NULL),
 	('4802a4ca-1590-4ba6-831f-8db416c0acee', 'gregory.efimov', 'Gregory', 'Efimov', NULL, 'cat-b', '2024-11-22 02:54:57.374037', NULL, NULL);
 
-
---
--- Data for Name: attendances; Type: TABLE DATA; Schema: public; Owner: postgres
---
-
 INSERT INTO "public"."attendances" ("id", "slot", "player_id", "attended", "created_at", "updated_at") VALUES
 	(25, 'jue 21 21hs', '04cdd068-c950-4ba4-aed5-ae603e8b90a3', true, '2024-11-22 00:38:12.494499', NULL),
 	(26, 'jue 21 21hs', '98f2bce7-4ebf-48f5-86ca-f157e5147cad', true, '2024-11-22 00:38:17.524559', NULL),
@@ -262,11 +137,6 @@ INSERT INTO "public"."attendances" ("id", "slot", "player_id", "attended", "crea
 	(51, 'jue 21 23hs', 'd09a520d-a0ac-42b3-a9d7-1caf3bf45d72', true, '2024-11-22 01:33:14.367435', NULL),
 	(52, 'jue 21 23hs', '09024e8b-54b1-44b4-b570-06420292f58d', true, '2024-11-22 01:37:17.947618', NULL),
 	(53, 'jue 21 23hs', '866fcbb5-7614-4321-bde2-8d666c58c11c', true, '2024-11-22 01:59:28.803746', NULL);
-
-
---
--- Data for Name: payments; Type: TABLE DATA; Schema: public; Owner: postgres
---
 
 INSERT INTO "public"."payments" ("id", "player_id", "amount", "created_at", "updated_at", "concept", "is_cash", "registered_by", "slot") VALUES
 	(75, 'aa14a778-6bf7-4d10-9f46-46721c8e14aa', 60, '2024-11-10 12:48:12.064124', '2024-11-19 18:45:12.111446', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10hs'),
@@ -385,53 +255,10 @@ INSERT INTO "public"."payments" ("id", "player_id", "amount", "created_at", "upd
 
 
 --
--- Data for Name: buckets; Type: TABLE DATA; Schema: storage; Owner: supabase_storage_admin
---
-
-
-
---
--- Data for Name: objects; Type: TABLE DATA; Schema: storage; Owner: supabase_storage_admin
---
-
-
-
---
--- Data for Name: prefixes; Type: TABLE DATA; Schema: storage; Owner: supabase_storage_admin
---
-
-
-
---
--- Data for Name: s3_multipart_uploads; Type: TABLE DATA; Schema: storage; Owner: supabase_storage_admin
---
-
-
-
---
--- Data for Name: s3_multipart_uploads_parts; Type: TABLE DATA; Schema: storage; Owner: supabase_storage_admin
---
-
-
-
---
--- Data for Name: secrets; Type: TABLE DATA; Schema: vault; Owner: supabase_admin
---
-
-
-
---
 -- Name: refresh_tokens_id_seq; Type: SEQUENCE SET; Schema: auth; Owner: supabase_auth_admin
 --
 
 SELECT pg_catalog.setval('"auth"."refresh_tokens_id_seq"', 1, false);
-
-
---
--- Name: key_key_id_seq; Type: SEQUENCE SET; Schema: pgsodium; Owner: supabase_admin
---
-
-SELECT pg_catalog.setval('"pgsodium"."key_key_id_seq"', 1, false);
 
 
 --
@@ -446,10 +273,3 @@ SELECT pg_catalog.setval('"public"."attendances_id_seq"', 53, true);
 --
 
 SELECT pg_catalog.setval('"public"."payments_id_seq"', 119, true);
-
-
---
--- PostgreSQL database dump complete
---
-
-RESET ALL;
