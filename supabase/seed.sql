@@ -1,0 +1,455 @@
+SET session_replication_role = replica;
+
+--
+-- PostgreSQL database dump
+--
+
+-- Dumped from database version 15.6
+-- Dumped by pg_dump version 15.6
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- Data for Name: audit_log_entries; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
+--
+
+
+
+--
+-- Data for Name: flow_state; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
+--
+
+
+
+--
+-- Data for Name: users; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
+--
+
+
+
+--
+-- Data for Name: identities; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
+--
+
+
+
+--
+-- Data for Name: instances; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
+--
+
+
+
+--
+-- Data for Name: sessions; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
+--
+
+
+
+--
+-- Data for Name: mfa_amr_claims; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
+--
+
+
+
+--
+-- Data for Name: mfa_factors; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
+--
+
+
+
+--
+-- Data for Name: mfa_challenges; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
+--
+
+
+
+--
+-- Data for Name: one_time_tokens; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
+--
+
+
+
+--
+-- Data for Name: refresh_tokens; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
+--
+
+
+
+--
+-- Data for Name: sso_providers; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
+--
+
+
+
+--
+-- Data for Name: saml_providers; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
+--
+
+
+
+--
+-- Data for Name: saml_relay_states; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
+--
+
+
+
+--
+-- Data for Name: sso_domains; Type: TABLE DATA; Schema: auth; Owner: supabase_auth_admin
+--
+
+
+
+--
+-- Data for Name: key; Type: TABLE DATA; Schema: pgsodium; Owner: supabase_admin
+--
+
+
+
+--
+-- Data for Name: players; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+INSERT INTO "public"."players" ("id", "alias", "name", "last_name", "dni", "category", "created_at", "updated_at", "nick") VALUES
+	('be4d6fc0-b663-450c-82b7-667cb4e1c1c7', 'guido.tibaudin', 'Guido', 'Tibaudin', NULL, 'cat-b', '2024-11-07 16:33:49.683323', NULL, NULL),
+	('12c3cd3c-cb77-4a6f-84d7-58edd2badddc', 'Paupinna', 'Paula', 'Pinna', NULL, 'esc-1', '2024-11-01 17:18:56.426214', NULL, ''),
+	('eb2fc793-13b6-453e-9333-dfe347bbb4a7', 'Thommym19', 'Thomas', 'Morgan', NULL, 'esc-1', '2024-11-01 17:19:32.872939', NULL, 'Thomi'),
+	('de57150f-8ac1-4687-8f68-e0334b8be6f5', 'Alann.cjs', 'Alan', 'Nudi', NULL, 'esc-1', '2024-11-01 17:20:10.353863', NULL, ''),
+	('1eb92539-1cd9-4b35-b6d3-7e33981d8cff', 'danidileone', 'Daniel Ayrton', 'Di Leone', NULL, 'esc-1', '2024-11-01 17:20:46.732205', NULL, NULL),
+	('dba3796d-1748-40c4-8fad-3bbb8a543e9e', 'inddiax', 'Abril', 'Castro', NULL, 'esc-1', '2024-11-01 17:21:17.743755', NULL, 'India'),
+	('915b8217-eb7e-48d7-8412-4473c69819d2', 'lauumiroshnichenko', 'Laura', 'Miroshnichenko', NULL, 'esc-1', '2024-11-01 17:22:07.348639', NULL, 'Lau'),
+	('d45f6a03-091a-4089-b0f8-ff83e5b15064', 'Milursv', 'Micaela', 'Rios', NULL, 'esc-1', '2024-11-01 17:22:32.146896', NULL, 'Mica'),
+	('8e1634c7-f83e-4bf9-9b38-37e3f45a82da', 'Chivi_fsk', 'Silvia', 'Grgurevic', NULL, 'esc-1', '2024-11-01 17:22:55.356039', NULL, 'Chivi'),
+	('e335b156-c0c0-40e7-aee4-4aa4851c6db6', 'ailudpg', 'Ailin', 'do Pazo Glave', NULL, 'esc-1', '2024-11-01 17:23:15.722173', NULL, 'Aili'),
+	('2f459bce-9228-4d1c-926a-3cd32c535d5d', 'lic.roxana.rojas', 'Roxana', 'Rojas', NULL, 'esc-1', '2024-11-01 17:23:43.686832', NULL, 'Ro'),
+	('49d63504-5ba6-40c9-ab8d-554566b07e52', 'jennyalsur', 'Alejandra', 'Argañaraz', NULL, 'esc-1', '2024-11-01 17:24:05.665326', NULL, 'Jenny'),
+	('238c80d1-a4f2-4e51-9b1c-3eb5ce8c6c6c', '_lucasa__', 'Lucas Emanuel', 'Cabrera', NULL, 'esc-1', '2024-11-01 17:24:29.697827', NULL, 'Zlatan'),
+	('aa14a778-6bf7-4d10-9f46-46721c8e14aa', 'Rafo.arq24', 'Rafael', 'Capacca', NULL, 'esc-1', '2024-11-01 17:24:54.045749', NULL, NULL),
+	('812be089-8dec-4df1-9752-9747bfdd1e04', 'remo.enelmar', 'Alex', 'Torres Arias', NULL, 'esc-1', '2024-11-01 17:25:51.174485', NULL, 'Alex'),
+	('4156d54d-87a8-48d6-bd61-9c69271db525', '0manur', 'Manuel', 'Irazabal', NULL, 'esc-1', '2024-11-01 17:14:23.300088', NULL, 'Tabo'),
+	('c7a133dd-9814-47b3-92de-14bc85bd88a6', 'Kevinrioshpl', 'Kevin', 'Rios', NULL, 'esc-1', '2024-11-01 17:15:38.915398', NULL, NULL),
+	('e5089974-47f8-4eed-904b-e1ac579928cc', 'davidcatz', 'David', 'Catz', NULL, 'esc-2', '2024-11-01 17:35:02.864424', NULL, NULL),
+	('562e2549-c596-487c-ab00-f180439a034f', 'SantiagoPiaggio', 'Santiago', 'Piaggio', NULL, 'esc-2', '2024-11-01 17:35:28.114059', NULL, NULL),
+	('ebc752c0-7c84-4096-9f47-dd6a4fa06cb8', 'Joako_dyj', 'Joaquín Hernan', 'Carrascosa', NULL, 'esc-2', '2024-11-01 17:36:11.469558', NULL, NULL),
+	('a99da35e-9406-41a9-a015-447709abf647', 'Tribysoft', 'Eugenio', 'Bazan', NULL, 'esc-2', '2024-11-01 17:36:29.086854', NULL, NULL),
+	('430fed25-78b1-48f2-9376-da147285c418', 'matiascenteno11', 'Matías', 'Centeno Nápoli', NULL, 'esc-2', '2024-11-01 17:36:46.572452', NULL, NULL),
+	('79e19d73-d579-4cce-b5df-650d3117ef95', 'lauti_natte', 'Lautaro', 'Nattero', NULL, 'esc-2', '2024-11-01 17:37:10.087806', NULL, NULL),
+	('a41e89ac-ab22-4258-af46-9db1a2797c38', 'Lu_kiddo_9', 'Luciana', 'Fernandez', NULL, 'esc-2', '2024-11-01 17:37:26.432207', NULL, NULL),
+	('56ce483d-7535-41cf-8fed-00ddc4b8cd85', 'L_ucho', 'Luciano', 'Bazzi', NULL, 'esc-2', '2024-11-01 17:37:45.318083', NULL, NULL),
+	('3ce8851b-7d4d-4f26-893f-b7d6cb7a15ab', 'patita.cua', 'Patricia', 'Berkovics', NULL, 'esc-2', '2024-11-01 17:40:29.774392', NULL, 'Pato'),
+	('f35aa639-4908-4d5c-9610-98c9f9821cec', 'Ceck1981', 'Giovanni', 'Malfitano', NULL, 'u-14', '2024-11-01 19:00:31.306946', NULL, 'Gio'),
+	('eacb9ee5-ffe4-4535-9696-b883fde2ce06', 'ser.gus85', 'Martina', 'López Toledo', NULL, 'u-14', '2024-11-01 19:01:18.24743', NULL, 'Martu'),
+	('29cc569b-425a-4595-a5d9-cfc56772e44d', 'gbezenzette', 'Pedro', 'Maruri Bezenzette', NULL, 'u-14', '2024-11-01 19:01:42.134668', NULL, 'Pepi'),
+	('377afec1-537b-4fc4-9a72-8a7706f5d575', 'keyla.clementino.varga', 'Keyla', 'Clementino Varga', NULL, 'u-14', '2024-11-01 19:02:45.26305', NULL, 'Kiki'),
+	('98bf53a9-d68e-4eaf-a882-40d9704c381a', 'lorenzo.tutusaus.barrera', 'Lorenzo', 'Tutusaus Barrera', NULL, 'u-14', '2024-11-01 19:03:23.865305', NULL, 'Lolo'),
+	('26eb7ce3-537e-48aa-bda8-1f51e23859a7', 'vito.francia', 'Vito', 'Francia', NULL, 'u-14', '2024-11-01 19:03:55.369945', NULL, NULL),
+	('892837b3-fb5b-4353-8190-9da71bbe31e2', 'Lafrontera.circo', 'Gaspar', 'Frontera', NULL, 'u-14', '2024-11-01 19:04:18.172451', NULL, 'Apach'),
+	('6e5add78-f1b5-47d7-955c-12fa8d38b2a9', 'benicio.follonier', 'Benicio', 'Follonier', NULL, 'u-14', '2024-11-01 19:04:52.865303', NULL, NULL),
+	('40785bba-6842-4148-a264-5822573b5fce', 'gussansebastian', 'Juana', 'San Sebastian', NULL, 'u-14', '2024-11-01 19:05:15.857356', NULL, 'Juani'),
+	('0fcd07fd-d4f7-4462-aa62-3fa057ddfd98', 'Daniiiisanz', 'Lupe', 'Schechtel', NULL, 'u-14', '2024-11-01 19:05:54.190346', NULL, 'Lulu'),
+	('3bb76d05-4aef-4dde-ac80-81f9bf976d65', 'maia.romero', 'Maia', 'Romero', NULL, 'u-14', '2024-11-01 19:06:21.768628', NULL, 'Maiu'),
+	('bb8ff37b-d9d6-4585-88ba-0a25b45256c8', 'booker21', 'Adrian', 'Mazzalupo', NULL, 'esc-2', '2024-11-01 17:35:50.642107', NULL, NULL),
+	('a6dacde2-c05b-4d29-90b6-cdf9afde65f8', 'sacha.tibaudin', 'Sacha', 'Tibaudin', NULL, 'cat-b', '2024-11-07 16:34:03.485947', NULL, NULL),
+	('023c59ee-152a-4614-ac8d-7298e9884b3b', 'roberto.lagos', 'Roberto', 'Lagos', NULL, 'esc-1', '2024-11-01 17:25:28.065912', '2024-11-05 15:47:19.231635', NULL),
+	('9893baaf-58a9-44e0-9368-be24c314631c', 'laionel.san.millan', 'Laionel', 'San Millan', NULL, 'cat-a', '2024-11-06 19:11:45.016087', NULL, NULL),
+	('43d7b9dd-3ed4-4a3e-97c9-f7ecb8c481e4', 'agustin.conti', 'Agustin', 'Conti', NULL, 'cat-a', '2024-11-06 19:11:59.006966', NULL, NULL),
+	('866fcbb5-7614-4321-bde2-8d666c58c11c', 'lucas.montes', 'Lucas', 'Montes', NULL, 'cat-a', '2024-11-06 19:12:16.049443', NULL, NULL),
+	('429e6924-1265-4926-ba11-11a7de2ccb6b', 'roman.savchuk', 'Roman', 'Savchuk', NULL, 'cat-a', '2024-11-06 19:12:33.056913', NULL, NULL),
+	('cb46aae0-ae03-4d11-abd9-c6cf7c89660a', 'michel.eseisa', 'Michel', 'Eseisa', NULL, 'cat-a', '2024-11-06 19:12:47.980861', NULL, NULL),
+	('d8155b84-dd02-43b3-8702-2d6d0e9f6357', 'nicolas.lagreka', 'Nicolas', 'Lagreka', NULL, 'cat-a', '2024-11-06 19:13:07.427677', NULL, NULL),
+	('e0c0f78d-2a89-4947-8b69-f3ae14a3e262', 'sebastian.perez', 'Sebastian', 'Perez', NULL, 'cat-a', '2024-11-06 19:13:24.650024', NULL, NULL),
+	('4ad4273b-3d20-4b8f-842b-97550cec013e', 'renzo.clementino', 'Renzo', 'Clementino', NULL, 'cat-a', '2024-11-06 19:13:42.187394', NULL, NULL),
+	('d09a520d-a0ac-42b3-a9d7-1caf3bf45d72', 'lucas.thompson', 'Lucas', 'Thompson', NULL, 'cat-a', '2024-11-06 19:14:00.61395', NULL, NULL),
+	('6a7fab4e-a600-432e-9514-e03857d2a26d', 'lucas.provenzano', 'Lucas', 'Provenzano', NULL, 'cat-a', '2024-11-06 19:14:14.939041', NULL, NULL),
+	('09024e8b-54b1-44b4-b570-06420292f58d', 'tomas.del.guesso', 'Tomas', 'Del Guesso', NULL, 'cat-a', '2024-11-06 19:14:31.25952', NULL, NULL),
+	('41f8edff-834a-49df-bf91-2f6ef16b0741', 'santiago.lubian', 'Santiago', 'Lubian', NULL, 'cat-a', '2024-11-06 19:14:45.846554', NULL, NULL),
+	('57ba3817-811a-484e-8ab5-475225ee52ea', 'gabriel.suez', 'Gabriel', 'Suez', NULL, 'cat-b', '2024-11-07 16:33:36.664915', NULL, NULL),
+	('2cc84f81-a6db-4ac6-87f9-13f7eb66c91e', 'hernan.penella', 'Hernan', 'Penella', NULL, 'cat-b', '2024-11-07 16:34:20.132491', NULL, NULL),
+	('539634ed-91f1-4f73-a5d5-e4e1c4f6ce76', 'maximo.cersocissimo', 'Maximo', 'Cersocissimo', NULL, 'cat-b', '2024-11-07 16:34:47.686623', NULL, NULL),
+	('ee972675-a23e-4a40-a824-b35c135584d7', 'inaki.britos', 'Iñaki', 'Britos', NULL, 'cat-b', '2024-11-07 16:35:05.655241', NULL, NULL),
+	('32b82757-a826-4eb2-a317-f779b7391140', 'julian.garibotto', 'Julian', 'Garibotto', NULL, 'cat-b', '2024-11-07 16:35:22.173408', NULL, NULL),
+	('199e899d-6880-4739-b9da-d85f04e8a258', 'lucho.naredo', 'Luciano', 'Naredo', NULL, 'cat-b', '2024-11-07 16:35:35.569987', NULL, NULL),
+	('13fa017a-e076-4f10-ad56-2aff14fe335f', 'tomi.suez', 'Tomas', 'Suez', NULL, 'cat-b', '2024-11-07 16:35:52.909977', NULL, NULL),
+	('476aa255-2fe5-45a0-861e-a5dfbef97137', 'milo', 'Milo', 'Burgess-webb', NULL, 'cat-b', '2024-11-07 16:31:31.11636', '2024-11-07 16:36:01.814568', NULL),
+	('89c835eb-6fb8-43b6-86d6-227a67ec6e5b', 'gian.valentino.cervini', 'Gian Valentino', 'Cervini', NULL, 'cat-b', '2024-11-07 16:39:18.195611', '2024-11-21 17:37:16.172179', NULL),
+	('5e450fa4-725b-42d9-acdf-d0e55f79720c', 'benny', 'Benicio', 'Burgess-webb', NULL, 'cat-b', '2024-11-07 16:31:15.208395', '2024-11-07 16:36:07.367111', NULL),
+	('5f9064db-4bc9-4f04-bbf5-b2a4b98ec8d2', 'sebastian.barcia', 'Sebastian', 'Barcia', NULL, 'cat-b', '2024-11-07 16:32:10.425816', '2024-11-07 16:36:10.49924', NULL),
+	('60614880-6af6-4fad-80a9-573606399ae2', 'facundo.casasola', 'Facundo', 'Casasola', NULL, 'cat-b', '2024-11-07 16:32:41.051983', '2024-11-07 16:36:14.084967', NULL),
+	('a55d290b-6280-4104-8a00-d83b770113ef', 'alejandro.de.lio', 'Alejandro', 'De Lio', NULL, 'cat-b', '2024-11-07 16:29:53.360212', '2024-11-07 16:36:18.204447', NULL),
+	('b5e3b918-ce86-49d5-8b18-8a2c8c365d08', 'diego.berkovics', 'Diego', 'Berkovics', NULL, 'cat-b', '2024-11-07 16:31:54.418682', '2024-11-07 16:36:20.759694', NULL),
+	('5df57d62-38b1-416d-b0e2-b932283b287e', 'alejo.martin', 'Alejo Nicolas', 'Martin', NULL, 'esc-1', '2024-11-03 20:47:50.893557', '2024-11-10 20:24:42.01827', NULL),
+	('c8cc1da7-0c16-4d4d-8738-31ce9bca8ae1', 'damian.tubio', 'Damian', 'Tubio', NULL, 'cat-b', '2024-11-07 16:32:26.70558', '2024-11-07 16:36:25.805921', NULL),
+	('c9f981df-997f-40dd-be04-2c8bec80145e', 'Adam.burgess.webb', 'Adam', 'Burgess-webb', NULL, 'cat-b', '2024-11-07 16:30:55.408548', '2024-11-07 16:36:28.473529', NULL),
+	('dbece0ef-8638-43a9-8e02-225731e88db9', 'fede.pinella', 'Federico', 'Pinella', NULL, 'cat-c', '2024-11-07 16:38:36.032054', NULL, NULL),
+	('f6335c88-ca4c-41e7-acbf-cde447a2319f', 'franco.batista', 'Franco', 'Batista', NULL, 'cat-c', '2024-11-07 16:38:54.085423', NULL, NULL),
+	('e2a57ffc-2779-4a0f-bf9a-91a2ec6e05ef', 'luciano.trinidad', 'Luciano', 'Trinidad', NULL, 'cat-c', '2024-11-07 16:39:36.850564', NULL, NULL),
+	('98f2bce7-4ebf-48f5-86ca-f157e5147cad', 'lisandro.wilde', 'Lisandro Jose', 'Bustos Wilde', NULL, 'cat-c', '2024-11-07 16:39:58.589332', NULL, NULL),
+	('d6be0686-3d50-444b-9dfa-56b00eed1624', 'lole', 'Maria Noel', 'Travetto', NULL, 'cat-c', '2024-11-07 16:40:13.097838', NULL, NULL),
+	('f9f6448c-8627-4678-8e68-19e921a629d4', 'amaranta.airoli', 'Amaranta', 'Airoli', NULL, 'cat-c', '2024-11-07 16:40:55.105661', NULL, NULL),
+	('bbc95311-ffc4-4b99-91ea-ca5e3dab2a99', 'franco.casanovas', 'Franco', 'Casanova', NULL, 'cat-b', '2024-11-07 16:33:16.747068', '2024-11-07 19:08:41.623361', NULL),
+	('4b5d5a01-d11b-4f37-b483-3f318776e965', 'lucas.casasola', 'Lucas', 'Casasola', NULL, 'cat-a', '2024-11-07 16:33:04.375927', '2024-11-13 18:44:21.259823', NULL),
+	('31554bee-f181-42c6-9729-62760725e36c', 'benicio.sanz', 'Benicio', 'Sanz', NULL, 'cat-c', '2024-11-07 16:41:34.315712', NULL, NULL),
+	('af990bb2-2450-4a51-a938-736a8977cb9f', 'santiago.vazquez', 'Santiago', 'Vazquez', NULL, 'cat-c', '2024-11-07 16:41:48.127605', NULL, NULL),
+	('6d0a9be6-6e09-4ecc-9330-a70715e61266', 'ruslan', 'Ruslan', 'Berezyuk', NULL, 'cat-c', '2024-11-07 16:42:16.178919', NULL, NULL),
+	('5011549f-6076-49d9-95a3-4ab8557f7a8c', 'hector.sanchez', 'Hector', 'Sanchez', NULL, 'cat-c', '2024-11-07 16:42:34.688836', NULL, NULL),
+	('2f8db37f-7cc3-4635-a02b-598c79c4b474', 'federico.gonzales', 'Federico', 'González', NULL, 'cat-c', '2024-11-07 16:42:50.896886', NULL, NULL),
+	('0634357f-c4d1-409a-a99d-a9b9cbb6f071', 'fer.casadio', 'Fernando', 'Casadio', NULL, 'cat-c', '2024-11-07 16:43:05.120188', NULL, NULL),
+	('38d69e8c-7dba-4912-929b-797f77aea79d', 'daniel.digangi', 'Daniel', 'Digangi', NULL, 'cat-c', '2024-11-07 16:43:22.08185', NULL, NULL),
+	('62d64f92-5d6f-4090-bf5e-cb39ffeac549', 'nicolas.amitrano', 'Nicolás', 'Amitrano', NULL, 'cat-c', '2024-11-07 16:43:42.357531', NULL, NULL),
+	('212d1dcc-3105-4924-b0cf-0f37eb224dfe', 'mateo.valentin', 'Mateo', 'Valentin', NULL, 'cat-c', '2024-11-07 16:43:55.911042', NULL, NULL),
+	('53a520b3-07bf-4d89-a72e-8424eb21c43f', 'santiago.carabelli', 'Santiago', 'Carabelli', NULL, 'cat-c', '2024-11-07 16:44:11.220963', NULL, NULL),
+	('277e671b-0a0c-4fb2-90df-20b80fe8709b', 'gustavo.san.sebastian', 'Gustavo', 'San Sebastian', NULL, 'cat-c', '2024-11-07 16:44:25.190368', NULL, NULL),
+	('1a071ad6-a1e0-45e7-a0ca-1a0887367f8a', 'alexis.laguarda', 'Alexis', 'Laguarda', NULL, 'cat-b', '2024-11-07 16:40:29.509131', '2024-11-07 16:56:31.31325', NULL),
+	('04cdd068-c950-4ba4-aed5-ae603e8b90a3', 'romi.detto', 'Romina', 'Detto', NULL, 'cat-c', '2024-11-07 16:57:05.526205', NULL, NULL),
+	('121e51bc-78f9-4ff9-89e3-dc50ee2fee56', 'pato.aviliano', 'Patricio', 'Aviliano', NULL, 'cat-b', '2024-11-07 17:28:27.93425', NULL, NULL),
+	('2cea221f-35a6-4ae4-a3ad-0377fae6e74c', 'nathan.rebollar', 'Nathan', 'Rebollar', NULL, 'cat-c', '2024-11-09 04:23:20.063858', NULL, NULL),
+	('f4e1cfc9-bca2-4819-b786-7cc70c0140fd', 'kajsha', 'Kajsha', 'Kajsha', NULL, 'cat-c', '2024-11-09 02:53:27.033003', '2024-11-09 04:25:20.095698', NULL),
+	('5f5fb205-e28a-410f-b2b3-9b1ba932588c', 'mauger', 'Mauger', 'Marthys', NULL, 'u-14', '2024-11-10 19:49:59.203921', '2024-11-10 19:53:57.158053', NULL),
+	('8d885b78-5a46-4f08-868f-0704f9a71f3e', 'duperron', 'Santiago', 'Duperron', NULL, 'esc-2', '2024-11-10 19:55:39.938934', '2024-11-10 19:57:28.847473', NULL),
+	('3f8c85bb-53d7-42f9-a4dc-70ecae832ef6', 'luciano.micucci', 'Luciano', 'Micucci', NULL, 'esc-1', '2024-11-10 20:11:55.910481', NULL, NULL),
+	('3c9c25fb-46ea-48c3-af43-341312287cc4', 'benjamin', 'Benjamin', 'De Lio', NULL, 'u-14', '2024-11-10 23:15:47.330212', NULL, NULL),
+	('72b1d57f-3b5b-4dd8-adfd-62d5fceeacce', 'sergei', 'Sergei', 'Sergei', NULL, 'cat-a', '2024-11-09 02:57:10.077346', '2024-11-13 18:43:30.93946', NULL),
+	('d1bb32a9-c530-4153-b8a4-04bd80d2d09d', 'guadalupe.augier', 'Guadalupe', 'Augier', NULL, 'cat-c', '2024-11-13 19:27:21.367875', NULL, NULL),
+	('d5b21bb9-b0f2-40aa-8801-0376e8de72d6', 'javier.herrera', 'Javier', 'Herrera', NULL, 'cat-b', '2024-11-14 14:26:37.36721', NULL, NULL),
+	('d13ffb07-58f6-4786-acc2-33a617132cb4', 'wally.eseisa', 'Wally', 'Eseisa', NULL, 'cat-b', '2024-11-14 14:26:47.932983', NULL, NULL),
+	('835ee11c-df26-4285-afae-96aecb02053d', 'santiago.frers', 'Santiago', 'Frers', NULL, 'cat-c', '2024-11-14 23:36:56.287224', NULL, NULL),
+	('a650d324-6bf6-4e91-b279-c972de88fbed', 'martín.follonier', 'Martín', 'follonier', '30549688', 'esc-1', '2024-11-17 12:54:00.138711', NULL, NULL),
+	('f0a76e4f-9317-4393-bd81-8dcfe88add99', 'laura.giacchino', 'Laura', 'Giacchino', NULL, 'esc-1', '2024-11-17 13:14:25.505211', NULL, NULL),
+	('6a50a71b-026f-452b-a5a4-28e5d2ae66fa', 'alina.sacramento', 'Alina', 'Sacramento', NULL, 'u-14', '2024-11-17 15:47:53.411995', NULL, NULL),
+	('12ea81cc-f5a1-4730-bf8a-6e54736f995f', 'trejo.analia', 'Analia', 'Trejo', NULL, 'cat-c', '2024-11-15 00:02:00.934904', '2024-11-18 01:50:11.501791', NULL),
+	('723f1ea7-4ae2-43c1-be19-d4e0ad758ae0', 'code', 'Cecilia', 'Codella', '34828675', 'cat-c', '2024-11-15 00:04:57.847283', '2024-11-19 21:25:59.410846', NULL),
+	('4802a4ca-1590-4ba6-831f-8db416c0acee', 'gregory.efimov', 'Gregory', 'Efimov', NULL, 'cat-b', '2024-11-22 02:54:57.374037', NULL, NULL);
+
+
+--
+-- Data for Name: attendances; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+INSERT INTO "public"."attendances" ("id", "slot", "player_id", "attended", "created_at", "updated_at") VALUES
+	(25, 'jue 21 21hs', '04cdd068-c950-4ba4-aed5-ae603e8b90a3', true, '2024-11-22 00:38:12.494499', NULL),
+	(26, 'jue 21 21hs', '98f2bce7-4ebf-48f5-86ca-f157e5147cad', true, '2024-11-22 00:38:17.524559', NULL),
+	(27, 'jue 21 21hs', 'f6335c88-ca4c-41e7-acbf-cde447a2319f', true, '2024-11-22 00:38:43.693371', NULL),
+	(28, 'jue 21 21hs', '31554bee-f181-42c6-9729-62760725e36c', true, '2024-11-22 00:39:01.550876', NULL),
+	(29, 'jue 21 21hs', 'f9f6448c-8627-4678-8e68-19e921a629d4', true, '2024-11-22 00:39:17.09593', NULL),
+	(30, 'jue 21 21hs', 'd6be0686-3d50-444b-9dfa-56b00eed1624', true, '2024-11-22 00:39:21.52425', NULL),
+	(31, 'jue 21 21hs', 'e2a57ffc-2779-4a0f-bf9a-91a2ec6e05ef', true, '2024-11-22 00:39:25.533769', NULL),
+	(32, 'jue 21 21hs', '835ee11c-df26-4285-afae-96aecb02053d', true, '2024-11-22 00:39:36.164132', NULL),
+	(33, 'jue 21 22hs', '121e51bc-78f9-4ff9-89e3-dc50ee2fee56', true, '2024-11-22 00:55:21.691519', NULL),
+	(34, 'jue 21 22hs', '5f9064db-4bc9-4f04-bbf5-b2a4b98ec8d2', true, '2024-11-22 00:55:26.894464', NULL),
+	(35, 'jue 21 22hs', 'b5e3b918-ce86-49d5-8b18-8a2c8c365d08', true, '2024-11-22 00:55:29.210395', NULL),
+	(36, 'jue 21 22hs', 'c9f981df-997f-40dd-be04-2c8bec80145e', true, '2024-11-22 00:55:31.778141', NULL),
+	(37, 'jue 21 22hs', '476aa255-2fe5-45a0-861e-a5dfbef97137', true, '2024-11-22 00:55:34.731096', NULL),
+	(38, 'jue 21 22hs', '5e450fa4-725b-42d9-acdf-d0e55f79720c', true, '2024-11-22 00:55:37.097755', NULL),
+	(39, 'jue 21 22hs', 'bbc95311-ffc4-4b99-91ea-ca5e3dab2a99', true, '2024-11-22 00:55:41.958612', NULL),
+	(40, 'jue 21 22hs', '60614880-6af6-4fad-80a9-573606399ae2', true, '2024-11-22 00:55:44.149427', NULL),
+	(41, 'jue 21 22hs', '539634ed-91f1-4f73-a5d5-e4e1c4f6ce76', true, '2024-11-22 00:55:50.2575', NULL),
+	(42, 'jue 21 22hs', 'd5b21bb9-b0f2-40aa-8801-0376e8de72d6', true, '2024-11-22 00:55:58.766163', NULL),
+	(43, 'jue 21 22hs', '2cc84f81-a6db-4ac6-87f9-13f7eb66c91e', true, '2024-11-22 00:56:03.688686', NULL),
+	(44, 'jue 21 22hs', '57ba3817-811a-484e-8ab5-475225ee52ea', true, '2024-11-22 00:56:05.887491', NULL),
+	(46, 'jue 21 22hs', '13fa017a-e076-4f10-ad56-2aff14fe335f', true, '2024-11-22 00:56:09.649201', NULL),
+	(47, 'jue 21 22hs', 'a6dacde2-c05b-4d29-90b6-cdf9afde65f8', true, '2024-11-22 00:56:19.367773', NULL),
+	(48, 'jue 21 22hs', 'be4d6fc0-b663-450c-82b7-667cb4e1c1c7', true, '2024-11-22 00:57:27.487145', NULL),
+	(49, 'jue 21 23hs', '4b5d5a01-d11b-4f37-b483-3f318776e965', true, '2024-11-22 01:28:39.688717', NULL),
+	(50, 'jue 21 23hs', 'd8155b84-dd02-43b3-8702-2d6d0e9f6357', true, '2024-11-22 01:33:06.965579', NULL),
+	(51, 'jue 21 23hs', 'd09a520d-a0ac-42b3-a9d7-1caf3bf45d72', true, '2024-11-22 01:33:14.367435', NULL),
+	(52, 'jue 21 23hs', '09024e8b-54b1-44b4-b570-06420292f58d', true, '2024-11-22 01:37:17.947618', NULL),
+	(53, 'jue 21 23hs', '866fcbb5-7614-4321-bde2-8d666c58c11c', true, '2024-11-22 01:59:28.803746', NULL);
+
+
+--
+-- Data for Name: payments; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+INSERT INTO "public"."payments" ("id", "player_id", "amount", "created_at", "updated_at", "concept", "is_cash", "registered_by", "slot") VALUES
+	(75, 'aa14a778-6bf7-4d10-9f46-46721c8e14aa', 60, '2024-11-10 12:48:12.064124', '2024-11-19 18:45:12.111446', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10hs'),
+	(2, '3bb76d05-4aef-4dde-ac80-81f9bf976d65', 15, '2024-11-03 14:03:00.200057', '2024-11-19 16:29:38.94325', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 3 11hs'),
+	(3, '12c3cd3c-cb77-4a6f-84d7-58edd2badddc', 45, '2024-11-03 14:47:02.463309', '2024-11-19 16:30:21.636032', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10hs'),
+	(4, 'e335b156-c0c0-40e7-aee4-4aa4851c6db6', 45, '2024-11-03 14:48:57.951038', '2024-11-19 16:30:23.438193', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10hs'),
+	(5, '8e1634c7-f83e-4bf9-9b38-37e3f45a82da', 45, '2024-11-03 14:49:43.506733', '2024-11-19 16:30:25.062973', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10hs'),
+	(6, 'de57150f-8ac1-4687-8f68-e0334b8be6f5', 15, '2024-11-03 14:50:08.767581', '2024-11-19 16:30:37.460032', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 3 10hs'),
+	(7, 'eb2fc793-13b6-453e-9333-dfe347bbb4a7', 45, '2024-11-03 15:04:28.775576', '2024-11-19 16:30:57.891423', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10hs'),
+	(8, '812be089-8dec-4df1-9752-9747bfdd1e04', 60, '2024-11-03 15:05:33.865522', '2024-11-19 16:30:59.951989', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10hs'),
+	(9, 'f35aa639-4908-4d5c-9610-98c9f9821cec', 60, '2024-11-03 15:07:04.218279', '2024-11-19 16:31:04.033983', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 11hs'),
+	(10, '79e19d73-d579-4cce-b5df-650d3117ef95', 15, '2024-11-03 15:08:13.921078', '2024-11-19 16:31:29.024296', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 3 11hs'),
+	(15, '430fed25-78b1-48f2-9376-da147285c418', 45, '2024-11-03 15:16:47.770439', '2024-11-19 16:32:05.335061', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 11hs'),
+	(16, '892837b3-fb5b-4353-8190-9da71bbe31e2', 60, '2024-11-03 15:20:46.692371', '2024-11-19 16:32:28.261649', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 11hs'),
+	(11, 'e5089974-47f8-4eed-904b-e1ac579928cc', 60, '2024-11-03 15:08:47.185214', '2024-11-19 16:32:12.230247', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 11hs'),
+	(12, 'bb8ff37b-d9d6-4585-88ba-0a25b45256c8', 45, '2024-11-03 15:09:33.4774', '2024-11-19 16:32:10.61702', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 11hs'),
+	(13, 'ebc752c0-7c84-4096-9f47-dd6a4fa06cb8', 45, '2024-11-03 15:09:47.207415', '2024-11-19 16:32:09.094666', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 11hs'),
+	(87, 'eacb9ee5-ffe4-4535-9696-b883fde2ce06', 30, '2024-11-10 19:42:12.044608', '2024-11-19 19:00:07.255445', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 11hs'),
+	(14, '562e2549-c596-487c-ab00-f180439a034f', 45, '2024-11-03 15:10:12.924791', '2024-11-19 16:32:07.756208', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 11hs'),
+	(17, '40785bba-6842-4148-a264-5822573b5fce', 60, '2024-11-03 15:24:33.475208', '2024-11-19 16:32:30.446658', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 11hs'),
+	(18, '26eb7ce3-537e-48aa-bda8-1f51e23859a7', 13, '2024-11-03 15:25:16.94284', '2024-11-19 16:32:41.845128', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 3 11hs'),
+	(19, '0fcd07fd-d4f7-4462-aa62-3fa057ddfd98', 15, '2024-11-03 15:25:22.376947', '2024-11-19 16:34:14.169498', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 3 11hs'),
+	(20, '29cc569b-425a-4595-a5d9-cfc56772e44d', 60, '2024-11-03 15:28:50.0323', '2024-11-19 16:34:16.134136', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 11hs'),
+	(100, '4ad4273b-3d20-4b8f-842b-97550cec013e', 60, '2024-11-11 02:05:13.390047', '2024-11-20 00:15:42.053843', '2024-11', true, 'undefined, Romina (undefined)', 'jue 23hs'),
+	(69, '31554bee-f181-42c6-9729-62760725e36c', 45, '2024-11-09 02:06:02.943703', '2024-11-19 19:34:41.910959', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 21hs'),
+	(72, '72b1d57f-3b5b-4dd8-adfd-62d5fceeacce', 15, '2024-11-09 02:57:41.722758', '2024-11-19 21:42:15.796808', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 7 21hs'),
+	(76, '4156d54d-87a8-48d6-bd61-9c69271db525', 60, '2024-11-10 12:58:59.427066', '2024-11-19 18:45:18.997167', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10hs'),
+	(73, '2cea221f-35a6-4ae4-a3ad-0377fae6e74c', 15, '2024-11-09 04:24:04.364347', '2024-11-19 21:45:34.837836', '2024-11', false, 'Berko, Diego (DiegoBerko)', 'jue 7 21hs'),
+	(71, 'f4e1cfc9-bca2-4819-b786-7cc70c0140fd', 15, '2024-11-09 02:54:05.562275', '2024-11-19 19:34:38.065182', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 7 21hs'),
+	(68, 'd6be0686-3d50-444b-9dfa-56b00eed1624', 45, '2024-11-09 02:02:52.443336', '2024-11-19 19:34:43.41313', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 21hs'),
+	(52, 'f9f6448c-8627-4678-8e68-19e921a629d4', 60, '2024-11-09 01:22:46.55284', '2024-11-19 19:34:53.013916', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 21hs'),
+	(91, '9893baaf-58a9-44e0-9368-be24c314631c', 15, '2024-11-11 01:09:53.168325', '2024-11-19 20:57:45.676814', '2024-11', true, 'undefined, Romina (undefined)', 'dom 10 23hs'),
+	(90, '3f8c85bb-53d7-42f9-a4dc-70ecae832ef6', 30, '2024-11-10 20:12:17.425436', '2024-11-19 20:56:51.555758', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10hs'),
+	(70, '04cdd068-c950-4ba4-aed5-ae603e8b90a3', 30, '2024-11-09 02:06:16.915022', '2024-11-19 19:34:40.068803', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 21hs'),
+	(1, '2f459bce-9228-4d1c-926a-3cd32c535d5d', 45, '2024-11-03 13:02:29.184677', '2024-11-19 16:28:55.24412', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10hs'),
+	(78, 'c7a133dd-9814-47b3-92de-14bc85bd88a6', 60, '2024-11-10 13:00:46.159235', '2024-11-19 18:46:34.195589', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10hs'),
+	(79, '238c80d1-a4f2-4e51-9b1c-3eb5ce8c6c6c', 60, '2024-11-10 13:01:02.64122', '2024-11-19 18:46:38.488232', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10hs'),
+	(80, 'eb2fc793-13b6-453e-9333-dfe347bbb4a7', 15, '2024-11-10 13:02:04.145175', '2024-11-19 18:53:58.171404', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10hs'),
+	(77, 'dba3796d-1748-40c4-8fad-3bbb8a543e9e', 60, '2024-11-10 13:00:19.754008', '2024-11-19 18:49:15.364119', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10hs'),
+	(81, 'a99da35e-9406-41a9-a015-447709abf647', 45, '2024-11-10 13:35:32.3775', '2024-11-19 18:58:44.955939', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 11hs'),
+	(82, '56ce483d-7535-41cf-8fed-00ddc4b8cd85', 15, '2024-11-10 13:38:39.462291', '2024-11-19 18:58:46.680862', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 11hs'),
+	(84, '377afec1-537b-4fc4-9a72-8a7706f5d575', 15, '2024-11-10 15:11:28.266287', '2024-11-19 18:59:03.538608', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10 11hs'),
+	(85, 'a41e89ac-ab22-4258-af46-9db1a2797c38', 45, '2024-11-10 15:14:19.555683', '2024-11-19 18:59:27.940555', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 11hs'),
+	(86, '5df57d62-38b1-416d-b0e2-b932283b287e', 15, '2024-11-10 16:06:34.227044', '2024-11-19 18:59:50.647345', '2024-11', false, 'De Lio, Alejandro (Migralito)', 'dom 10 11hs'),
+	(89, '8d885b78-5a46-4f08-868f-0704f9a71f3e', 60, '2024-11-10 19:57:43.888528', '2024-11-19 20:56:45.889792', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 11hs'),
+	(94, 'd8155b84-dd02-43b3-8702-2d6d0e9f6357', 60, '2024-11-11 01:27:37.286468', '2024-11-19 21:00:39.257241', '2024-11', true, 'undefined, Romina (undefined)', 'dom 23hs'),
+	(24, '5df57d62-38b1-416d-b0e2-b932283b287e', 15, '2024-11-03 20:48:27.866143', '2024-11-22 03:12:58.92506', '2024-11', false, 'De Lio, Alejandro (Migralito)', 'dom 3 10hs'),
+	(96, 'be4d6fc0-b663-450c-82b7-667cb4e1c1c7', 15, '2024-11-11 01:48:43.417468', '2024-11-19 21:01:56.275524', '2024-11', true, 'undefined, Romina (undefined)', 'dom 10 23hs'),
+	(95, 'be4d6fc0-b663-450c-82b7-667cb4e1c1c7', 60, '2024-11-11 01:48:25.593721', '2024-11-19 21:02:44.005191', '2024-11', true, 'undefined, Romina (undefined)', 'jue 22hs'),
+	(98, '539634ed-91f1-4f73-a5d5-e4e1c4f6ce76', 15, '2024-11-11 02:01:43.497086', '2024-11-19 21:04:07.948477', '2024-11', true, 'undefined, Romina (undefined)', 'dom 10 23hs'),
+	(103, '4b5d5a01-d11b-4f37-b483-3f318776e965', 45, '2024-11-11 02:06:49.580211', '2024-11-19 21:05:59.735968', '2024-11', true, 'undefined, Romina (undefined)', 'jue 23hs'),
+	(104, '866fcbb5-7614-4321-bde2-8d666c58c11c', 60, '2024-11-11 02:07:05.16476', '2024-11-19 21:06:13.720984', '2024-11', true, 'undefined, Romina (undefined)', 'jue 23hs'),
+	(105, '5f9064db-4bc9-4f04-bbf5-b2a4b98ec8d2', 60, '2024-11-11 02:07:40.781234', '2024-11-19 21:08:10.419643', '2024-11', true, 'undefined, Romina (undefined)', 'jue 22hs'),
+	(106, '121e51bc-78f9-4ff9-89e3-dc50ee2fee56', 60, '2024-11-11 02:08:01.796269', '2024-11-19 21:08:46.44781', '2024-11', true, 'undefined, Romina (undefined)', 'jue 22hs'),
+	(97, 'a55d290b-6280-4104-8a00-d83b770113ef', 60, '2024-11-11 01:52:44.521511', '2024-11-20 01:59:00.687358', '2024-11', true, 'undefined, Romina (undefined)', 'dom 23hs'),
+	(108, '2cc84f81-a6db-4ac6-87f9-13f7eb66c91e', 45, '2024-11-11 02:09:09.128526', '2024-11-19 21:09:18.38392', '2024-11', true, 'undefined, Romina (undefined)', 'jue 22hs'),
+	(110, '60614880-6af6-4fad-80a9-573606399ae2', 45, '2024-11-11 02:10:02.838563', '2024-11-19 21:14:49.156386', '2024-11', true, 'undefined, Romina (undefined)', 'jue 22hs'),
+	(116, '476aa255-2fe5-45a0-861e-a5dfbef97137', 60, '2024-11-11 13:51:47.576657', '2024-11-19 21:15:25.485187', '2024-11', true, 'undefined, Romina (undefined)', 'jue 22hs'),
+	(93, '429e6924-1265-4926-ba11-11a7de2ccb6b', 60, '2024-11-11 01:24:59.267873', '2024-11-19 21:55:06.076388', '2024-11', true, 'undefined, Romina (undefined)', 'jue 23hs'),
+	(107, 'a55d290b-6280-4104-8a00-d83b770113ef', 60, '2024-11-11 02:08:52.728392', '2024-11-20 01:58:58.927722', '2024-11', true, 'undefined, Romina (undefined)', 'jue 22hs'),
+	(1794, '723f1ea7-4ae2-43c1-be19-d4e0ad758ae0', 15, '2024-11-15 00:05:24.868224', '2024-11-19 21:26:21.542688', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 14 21hs'),
+	(1796, 'cb46aae0-ae03-4d11-abd9-c6cf7c89660a', 30, '2024-11-15 02:05:41.783238', '2024-11-19 21:26:39.595338', '2024-11', true, 'undefined, Romina (undefined)', 'jue 23hs'),
+	(1802, '1eb92539-1cd9-4b35-b6d3-7e33981d8cff', 60, '2024-11-17 12:33:10.204538', '2024-11-19 21:27:01.902575', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'dom 10hs'),
+	(1804, '49d63504-5ba6-40c9-ab8d-554566b07e52', 30, '2024-11-17 12:39:37.414638', '2024-11-19 21:27:17.977899', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'dom 10hs'),
+	(1891, '8d885b78-5a46-4f08-868f-0704f9a71f3e', 10, '2024-11-10 20:55:09', '2024-11-19 20:56:28.011207', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10 10hs'),
+	(92, '866fcbb5-7614-4321-bde2-8d666c58c11c', 15, '2024-11-11 01:12:39.402168', '2024-11-19 20:57:56.189633', '2024-11', true, 'undefined, Romina (undefined)', 'dom 10 23hs'),
+	(1816, '3f8c85bb-53d7-42f9-a4dc-70ecae832ef6', 15, '2024-11-17 12:55:50.724651', '2024-11-19 21:28:09.04132', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'dom 10hs'),
+	(102, 'cb46aae0-ae03-4d11-abd9-c6cf7c89660a', 15, '2024-11-11 02:06:26.991639', '2024-11-19 21:05:13.936529', '2024-11', true, 'undefined, Romina (undefined)', 'dom 10 23hs'),
+	(109, 'a6dacde2-c05b-4d29-90b6-cdf9afde65f8', 15, '2024-11-11 02:09:27.364531', '2024-11-19 21:14:28.84346', '2024-11', true, 'undefined, Romina (undefined)', 'jue 7 22hs'),
+	(114, 'c9f981df-997f-40dd-be04-2c8bec80145e', 60, '2024-11-11 13:44:18.418035', '2024-11-19 21:15:13.083613', '2024-11', true, 'undefined, Romina (undefined)', 'jue 22hs'),
+	(1814, 'a650d324-6bf6-4e91-b279-c972de88fbed', 15, '2024-11-17 12:54:28.90574', '2024-11-19 21:28:25.074137', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'dom 17 10hs'),
+	(1830, 'f0a76e4f-9317-4393-bd81-8dcfe88add99', 10, '2024-11-17 14:09:05.342141', '2024-11-19 21:28:51.433447', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 17 10hs'),
+	(1876, '13fa017a-e076-4f10-ad56-2aff14fe335f', 10, '2024-11-17 16:11:57.263489', '2024-11-19 21:34:54.018639', '2024-11', true, 'undefined, Romina (undefined)', 'jue 14 23hs'),
+	(1881, 'b5e3b918-ce86-49d5-8b18-8a2c8c365d08', 15, '2024-11-17 16:12:23.962216', '2024-11-19 21:35:20.290129', '2024-11', true, 'undefined, Romina (undefined)', 'jue 14 23hs'),
+	(115, '5e450fa4-725b-42d9-acdf-d0e55f79720c', 60, '2024-11-11 13:44:28.787746', '2024-11-19 21:15:19.786443', '2024-11', true, 'undefined, Romina (undefined)', 'jue 22hs'),
+	(117, '5e450fa4-725b-42d9-acdf-d0e55f79720c', 15, '2024-11-11 13:56:22.571392', '2024-11-19 21:15:53.554813', '2024-11', true, 'undefined, Romina (undefined)', 'dom 10 23hs'),
+	(119, '3c9c25fb-46ea-48c3-af43-341312287cc4', 60, '2024-11-10 14:54:05', '2024-11-19 18:58:48.334075', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 11hs'),
+	(88, '5f5fb205-e28a-410f-b2b3-9b1ba932588c', 13, '2024-11-10 19:50:36.943811', '2024-11-19 19:00:44.862384', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10 11hs'),
+	(1887, 'dba3796d-1748-40c4-8fad-3bbb8a543e9e', 15, '2024-11-10 18:48:32', '2024-11-19 19:31:08.486518', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 10 11hs'),
+	(53, 'e2a57ffc-2779-4a0f-bf9a-91a2ec6e05ef', 45, '2024-11-09 01:23:14.019669', '2024-11-19 19:34:45.259695', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 21hs'),
+	(1832, '5f5fb205-e28a-410f-b2b3-9b1ba932588c', 20, '2024-11-17 15:06:18.213363', '2024-11-19 21:29:30.550759', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 11hs'),
+	(118, 'c9f981df-997f-40dd-be04-2c8bec80145e', 15, '2024-11-11 13:57:52.862628', '2024-11-19 21:15:58.301228', '2024-11', true, 'undefined, Romina (undefined)', 'dom 10 23hs'),
+	(1740, 'd13ffb07-58f6-4786-acc2-33a617132cb4', 15, '2024-11-11 14:27:41', '2024-11-19 21:16:18.111545', '2024-11', true, 'undefined, Romina (undefined)', 'dom 10 23hs'),
+	(1737, 'd5b21bb9-b0f2-40aa-8801-0376e8de72d6', 60, '2024-11-11 14:27:23', '2024-11-19 21:16:50.468485', '2024-11', true, 'undefined, Romina (undefined)', 'jue 22hs'),
+	(1721, 'bbc95311-ffc4-4b99-91ea-ca5e3dab2a99', 45, '2024-11-11 23:39:04', '2024-11-19 21:17:02.957757', '2024-11', true, 'undefined, Romina (undefined)', 'jue 22hs'),
+	(1727, 'bbc95311-ffc4-4b99-91ea-ca5e3dab2a99', 60, '2024-11-11 23:40:52', '2024-11-19 21:19:03.257944', '2024-11', true, 'undefined, Romina (undefined)', 'dom 23hs'),
+	(1723, 'b5e3b918-ce86-49d5-8b18-8a2c8c365d08', 50, '2024-11-11 23:39:33', '2024-11-19 21:19:11.584315', '2024-11', true, 'undefined, Romina (undefined)', 'jue 22hs'),
+	(1761, '835ee11c-df26-4285-afae-96aecb02053d', 15, '2024-11-14 23:37:15.676938', '2024-11-19 21:20:34.28136', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'jue 14 21hs'),
+	(1767, 'dbece0ef-8638-43a9-8e02-225731e88db9', 50, '2024-11-14 23:59:21.725929', '2024-11-19 21:22:01.392987', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 21hs'),
+	(1772, '98f2bce7-4ebf-48f5-86ca-f157e5147cad', 60, '2024-11-15 00:01:06.048361', '2024-11-19 21:22:19.004185', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 21hs'),
+	(1765, 'd8155b84-dd02-43b3-8702-2d6d0e9f6357', 60, '2024-11-14 23:54:32.01512', '2024-11-19 21:23:06.956663', '2024-11', true, 'undefined, Romina (undefined)', 'jue 23hs'),
+	(1774, '277e671b-0a0c-4fb2-90df-20b80fe8709b', 15, '2024-11-15 00:01:30.191536', '2024-11-19 21:24:50.918615', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'jue 14 21hs'),
+	(1776, 'f4e1cfc9-bca2-4819-b786-7cc70c0140fd', 15, '2024-11-15 00:01:43.883482', '2024-11-19 21:25:17.730831', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 14 21hs'),
+	(1784, '12ea81cc-f5a1-4730-bf8a-6e54736f995f', 13, '2024-11-15 00:03:01.071232', '2024-11-19 21:25:49.047075', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'jue 14 21hs'),
+	(1839, '377afec1-537b-4fc4-9a72-8a7706f5d575', 15, '2024-11-17 15:08:11.571854', '2024-11-19 21:29:54.222432', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 17 11hs'),
+	(1841, '98bf53a9-d68e-4eaf-a882-40d9704c381a', 13, '2024-11-17 15:11:23.815662', '2024-11-19 21:30:08.780194', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 17 11hs'),
+	(1860, '6a50a71b-026f-452b-a5a4-28e5d2ae66fa', 15, '2024-11-17 15:48:07.128215', '2024-11-19 21:31:01.266075', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 17 11hs'),
+	(1868, '09024e8b-54b1-44b4-b570-06420292f58d', 60, '2024-11-17 16:10:35.472227', '2024-11-19 21:31:16.370022', '2024-11', true, 'undefined, Romina (undefined)', 'jue 23hs'),
+	(1763, '9893baaf-58a9-44e0-9368-be24c314631c', 60, '2024-11-14 23:50:09.57485', '2024-11-19 21:32:57.34668', '2024-11', true, 'undefined, Romina (undefined)', 'jue 23hs'),
+	(1870, '13fa017a-e076-4f10-ad56-2aff14fe335f', 45, '2024-11-17 16:11:06.323357', '2024-11-19 21:34:43.572861', '2024-11', true, 'undefined, Romina (undefined)', 'jue 22hs'),
+	(1845, '5df57d62-38b1-416d-b0e2-b932283b287e', 15, '2024-11-17 15:43:33.58413', '2024-11-19 21:37:13.483709', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 17 10hs'),
+	(1899, '5df57d62-38b1-416d-b0e2-b932283b287e', 10, '2024-11-17 21:36:42', '2024-11-28 21:07:29.337678', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'dom 17 11hs'),
+	(1988, '1a071ad6-a1e0-45e7-a0ca-1a0887367f8a', 60, '2024-11-07 17:48:33', '2024-11-21 17:50:52.496494', '2024-11', true, 'renzo', 'jue 22hs'),
+	(1903, '429e6924-1265-4926-ba11-11a7de2ccb6b', 60, '2024-11-11 21:54:14', '2024-11-19 21:55:23.679538', '2024-11', true, 'undefined, Romina (undefined)', 'dom 23hs'),
+	(2047, '539634ed-91f1-4f73-a5d5-e4e1c4f6ce76', 15, '2024-11-22 00:22:37.049133', NULL, '2024-11', true, 'De Lio, Alejandro (Migralito)', 'jue 21 22hs'),
+	(2070, '5f9064db-4bc9-4f04-bbf5-b2a4b98ec8d2', 10, '2024-11-22 01:44:37.82196', NULL, '2024-11', true, 'undefined, Romina (undefined)', 'jue 21 23hs'),
+	(2076, 'bbc95311-ffc4-4b99-91ea-ca5e3dab2a99', 10, '2024-11-22 02:48:59.946434', '2024-11-22 02:52:53.466025', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 21 23hs'),
+	(2082, '4802a4ca-1590-4ba6-831f-8db416c0acee', 20, '2024-11-22 02:57:53.849191', '2024-11-22 02:59:57.637613', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 21 22hs'),
+	(2087, '4802a4ca-1590-4ba6-831f-8db416c0acee', 10, '2024-11-22 02:58:17.816659', '2024-11-22 03:00:10.831053', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 21 23hs'),
+	(2072, 'a6dacde2-c05b-4d29-90b6-cdf9afde65f8', 30, '2024-11-22 02:46:41.38874', '2024-11-22 02:51:53.452564', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 22hs'),
+	(2074, 'a6dacde2-c05b-4d29-90b6-cdf9afde65f8', 10, '2024-11-22 02:47:11.318924', '2024-11-22 02:52:23.736231', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 14 23hs'),
+	(2078, 'be4d6fc0-b663-450c-82b7-667cb4e1c1c7', 10, '2024-11-22 02:49:24.558319', '2024-11-22 02:53:43.633024', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 14 23hs'),
+	(2115, '835ee11c-df26-4285-afae-96aecb02053d', 15, '2024-11-22 15:11:53.190335', '2024-11-22 15:12:45.251401', '2024-11', true, 'Berko, Diego (DiegoBerko)', 'jue 21 21hs'),
+	(2141, 'd09a520d-a0ac-42b3-a9d7-1caf3bf45d72', 60, '2024-11-24 14:13:44.99605', '2024-11-24 14:14:11.919668', '2024-11', true, 'undefined, Romina (undefined)', 'jue 23hs'),
+	(2145, '0634357f-c4d1-409a-a99d-a9b9cbb6f071', 15, '2024-11-28 21:05:33.809068', '2024-11-28 21:10:45.624085', '2024-11', true, 'De Lio, Alejandro (Migralito)', 'jue 14 21hs');
+
+
+--
+-- Data for Name: buckets; Type: TABLE DATA; Schema: storage; Owner: supabase_storage_admin
+--
+
+
+
+--
+-- Data for Name: objects; Type: TABLE DATA; Schema: storage; Owner: supabase_storage_admin
+--
+
+
+
+--
+-- Data for Name: prefixes; Type: TABLE DATA; Schema: storage; Owner: supabase_storage_admin
+--
+
+
+
+--
+-- Data for Name: s3_multipart_uploads; Type: TABLE DATA; Schema: storage; Owner: supabase_storage_admin
+--
+
+
+
+--
+-- Data for Name: s3_multipart_uploads_parts; Type: TABLE DATA; Schema: storage; Owner: supabase_storage_admin
+--
+
+
+
+--
+-- Data for Name: secrets; Type: TABLE DATA; Schema: vault; Owner: supabase_admin
+--
+
+
+
+--
+-- Name: refresh_tokens_id_seq; Type: SEQUENCE SET; Schema: auth; Owner: supabase_auth_admin
+--
+
+SELECT pg_catalog.setval('"auth"."refresh_tokens_id_seq"', 1, false);
+
+
+--
+-- Name: key_key_id_seq; Type: SEQUENCE SET; Schema: pgsodium; Owner: supabase_admin
+--
+
+SELECT pg_catalog.setval('"pgsodium"."key_key_id_seq"', 1, false);
+
+
+--
+-- Name: attendances_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
+--
+
+SELECT pg_catalog.setval('"public"."attendances_id_seq"', 53, true);
+
+
+--
+-- Name: payments_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
+--
+
+SELECT pg_catalog.setval('"public"."payments_id_seq"', 119, true);
+
+
+--
+-- PostgreSQL database dump complete
+--
+
+RESET ALL;
