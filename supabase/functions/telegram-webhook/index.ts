@@ -47,13 +47,10 @@ const CMD_CP = "cper";
 const CmdAsist = "asist";
 
 const VALID_CATEGORIES = [
-    "esc-1",
     "esc-2",
     "u-14",
-    "cat-c",
     "cat-b",
-    "cat-a",
-    "other",
+    "cat-a"
 ];
 
 const supabaseAdmin = createClient(
@@ -937,12 +934,10 @@ type Middleware<T> = (ctx: CommandContext<Context>) => Promise<T>;
 
 function selectCategoriesKeyboard(cmd: string) {
     return new InlineKeyboard()
-        .text("Escuela 1", `${cmd} cat esc-1`)
-        .row().text("Escuela 2", `${cmd} cat esc-2`)
-        .row().text("Menores", `${cmd} cat u-14`)
-        .row().text("Cat C", `${cmd} cat cat-c`)
-        .row().text("Cat B", `${cmd} cat cat-b`)
-        .row().text("Cat A", `${cmd} cat cat-a`)
+        .text("Menores", `${cmd} cat u-14`)
+        .row().text("Escuela (jue 21hs)", `${cmd} cat esc-2`)
+        .row().text("Intermedio (jue 22hs)", `${cmd} cat cat-b`)
+        .row().text("Avanzados (jue 23hs)", `${cmd} cat cat-a`)
         .row().text("Cancelar", "cancelar");
 }
 
@@ -1130,15 +1125,12 @@ function hoursFor(day: number) {
 
 function catToSlot(category: string): string {
     switch (category) {
-        case "cat-c":
+        case "esc-2":
             return "jue 21hs";
         case "cat-b":
             return "jue 22hs";
         case "cat-a":
             return "jue 23hs";
-        case "esc-1":
-            return "dom 10hs";
-        case "esc-2":
         case "u-14":
             return "dom 11hs";
         default:
@@ -1149,15 +1141,13 @@ function catToSlot(category: string): string {
 function slotToCat(slot: string): string[] {
     switch (slot) {
         case "jue 21hs":
-            return ["cat-c"];
+            return ["esc-2"];
         case "jue 22hs":
             return ["cat-b"];
         case "jue 23hs":
             return ["cat-a"];
-        case "dom 10hs":
-            return ["esc-1"];
         case "dom 11hs":
-            return ["esc-2", "u-14"];
+            return ["u-14"];
         default:
             throw new Error(`Unexpected slot ${slot}`);
     }
