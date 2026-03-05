@@ -1,0 +1,14 @@
+{
+  "imports": {
+    "@oak/oak": "jsr:@oak/oak@^17.1.4",
+    "@supabase/supabase-js": "jsr:@supabase/supabase-js@2",
+    "grammy": "https://deno.land/x/grammy@v1.31.0/mod.ts",
+    "grammy-types": "https://deno.land/x/grammy_types@v3.15.0/mod.ts",
+    "grammy-types/markup": "https://deno.land/x/grammy_types@v3.15.0/markup.ts",
+    "lodash-es": "https://deno.land/x/lodash@4.17.15-es/lodash.js"
+  },
+  "compilerOptions": {
+    "lib": ["deno.ns", "dom"],
+    "strict": false
+  }
+}

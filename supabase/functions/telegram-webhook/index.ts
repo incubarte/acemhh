@@ -3,7 +3,7 @@
 // This enables autocomplete, go to definition, etc.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import {Application} from "jsr:@oak/oak/application";
+import { Application } from "jsr:@oak/oak/application";
 import {
     Bot,
     CallbackQueryContext,
@@ -12,16 +12,14 @@ import {
     Filter,
     InlineKeyboard,
     webhookCallback,
-} from "https://deno.land/x/grammy@v1.31.0/mod.ts";
+} from "https://deno.land/x/grammy@v1.40.0/mod.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import {
+import type {
     CallbackQuery,
     InlineKeyboardButton,
-} from "https://deno.land/x/grammy_types@v3.15.0/markup.ts";
-import {
     Message,
     ParseMode,
-} from "https://deno.land/x/grammy_types@v3.15.0/mod.ts";
+} from "https://deno.land/x/grammy@v1.40.0/types.ts";
 import { sortBy, sum } from "https://deno.land/x/lodash@4.17.15-es/lodash.js";
 
 console.log("Hello from telegram-webhook!");
@@ -32,6 +30,7 @@ const TitleAddPayment = "Registro de pago";
 const TitleListPayments = "Lista de pagos del mes";
 const TitleAttendance = "Registro de asistencia";
 const TitleOperationCancelled = "OPERACION CANCELADA";
+const TitleOperationFinished = "OPERACION FINALIZADA";
 
 const ErrorMsgPaymentContextLost =
     "Error: no se puede recuperar la información de pago. Reintente";
@@ -45,10 +44,12 @@ const CMD_PAGO_VIEJO = "rpag";
 const CMD_RP = "rper";
 const CMD_CP = "cper";
 const CmdAsist = "asist";
+const CmdAsistPago = "asistpago";
 
 const VALID_CATEGORIES = [
     "esc-2",
     "u-14",
+    "cat-c",
     "cat-b",
     "cat-a"
 ];
@@ -67,6 +68,7 @@ bot.command(CMD_CP, catchAll(CmdConsultarPersona));
 bot.command(CMD_PAGO, catchAll(CmdPago));
 bot.command(CMD_LISTAR_PAGOS, catchAll(CmdListarPagos));
 bot.command(CmdAsist, catchAll(CmdRegistrarAsistencia));
+bot.command(CmdAsistPago, catchAll(CmdRegistrarAsistenciaPago));
 
 bot.callbackQuery(/registrarpago cat (.*)$/, catchAll(callbackPagoCategoria));
 bot.callbackQuery(/registrarpago jugador (.+)$/, catchAll(callbackPagoJugador));
@@ -79,13 +81,34 @@ bot.callbackQuery(/registrarpago monto otro/, catchAll(callbackPagoOtroMonto));
 bot.callbackQuery(/listarpagos cat (.*)$/, catchAll(callbackListarPagosCateg));
 
 const rDate = "\\d\\d\\d\\d-\\d\\d-\\d\\d";
+const rDateCompact = "\\d{8}";
 const rUuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const r = (str: string) => new RegExp(str, "i");
 bot.callbackQuery(r(`asist (${rDate})$`), catchAll(cbAsistenciaDia));
 bot.callbackQuery(r(`asist (${rDate}) (\\d\\d)$`), catchAll(cbAsistenciaSlot));
-bot.callbackQuery(r(`asist (${rDate}) (\\d\\d) (${rUuid}) ([y|n])$`), catchAll(cbAsistenciaSlot));
+bot.callbackQuery(r(`asist (${rDate}) (\\d\\d) (${rUuid}) ([yn])$`), catchAll(cbAsistenciaSlot));
+
+bot.callbackQuery(r(`apd[|](${rDateCompact})$`), catchAll(cbAsistenciaPagoDia));
+bot.callbackQuery(r(`ap[|](${rDateCompact})[|](\\d\\d)$`), catchAll(cbAsistenciaPagoSlot));
+bot.callbackQuery(
+    r(`ap[|](${rDateCompact})[|](\\d\\d)[|]([a])[|](${rUuid})[|]([yn])$`),
+    catchAll(cbAsistenciaPagoSlot),
+);
+bot.callbackQuery(
+    r(`ap[|](${rDateCompact})[|](\\d\\d)[|]([x])[|](${rUuid})$`),
+    catchAll(cbAsistenciaPagoSlot),
+);
+bot.callbackQuery(
+    r(`ap[|](${rDateCompact})[|](\\d\\d)[|]([m])[|](${rUuid})[|](\\d+)$`),
+    catchAll(cbAsistenciaPagoSlot),
+);
+bot.callbackQuery(
+    r(`ap[|](${rDateCompact})[|](\\d\\d)[|]o[|](${rUuid})$`),
+    catchAll(cbAsistenciaPagoPayOther),
+);
 
 bot.callbackQuery("cancelar", catchAll(callbackCancelar));
+bot.callbackQuery("noop", (ctx) => ctx.answerCallbackQuery());
 bot.callbackQuery(
     /.*/,
     (ctx) => console.error(`Unmatched callback to ${ctx.callbackQuery.data}`),
@@ -93,12 +116,33 @@ bot.callbackQuery(
 
 bot.on("message", OnMessage);
 
-// bot.catch((err) => console.error(err));
+bot.catch((err: unknown) => console.error(err));
+
 // bot.start();
 
 const app = new Application();
+const TelegramWebhookSecretToken = Deno.env.get("TELEGRAM_WEBHOOK_SECRET_TOKEN");
+
+app.use(async (ctx, next) => {
+    if (!TelegramWebhookSecretToken) {
+        ctx.response.status = 500;
+        ctx.response.body = "Server not configured";
+        return;
+    }
+    const token = ctx.request.headers.get("x-telegram-bot-api-secret-token");
+    if (token !== TelegramWebhookSecretToken) {
+        ctx.response.status = 401;
+        ctx.response.body = "Unauthorized";
+        return;
+    }
+
+    await next();
+});
 app.use(webhookCallback(bot, "oak"));
-app.listen({ port: 8000 });
+
+Deno.serve(async (req: Request) => {
+    return await app.handle(req) ?? new Response("Not Found", { status: 404 });
+});
 
 /* To invoke locally:
 
@@ -119,10 +163,10 @@ app.listen({ port: 8000 });
 async function CmdRegistrarPersona(ctx: CommandContext<Context>) {
     console.log(`Ejecutando comando ${CMD_RP}`);
 
-    // text = /rp nombre,apellido,dni,categoria,alias
+    // text = /rp nombre,apellido,dni,categoria
     const tokens = ctx.match.split(",");
     if (tokens.length < 4) {
-        return ctx.reply("Uso: /rp nombre,apellido,dni,categoria,alias");
+        return ctx.reply("Uso: /rp nombre,apellido,dni,categoria");
     }
 
     const [
@@ -130,7 +174,6 @@ async function CmdRegistrarPersona(ctx: CommandContext<Context>) {
         last_name,
         dni,
         categoryAnyCase,
-        maybeAlias,
         ...rest
     ] = tokens.map((_) => _.trim());
 
@@ -139,9 +182,6 @@ async function CmdRegistrarPersona(ctx: CommandContext<Context>) {
     }
 
     const category = categoryAnyCase.toLowerCase();
-    const alias = (maybeAlias && maybeAlias.length > 0)
-        ? maybeAlias.toLowerCase()
-        : (name + "." + last_name).toLowerCase().replaceAll(" ", ".");
 
     if (!VALID_CATEGORIES.includes(category)) {
         return reply(
@@ -153,7 +193,7 @@ async function CmdRegistrarPersona(ctx: CommandContext<Context>) {
     const maybeDni = dni ? { dni } : {};
     const { data, error } = await supabaseAdmin
         .from("players")
-        .insert({ name, last_name, ...maybeDni, category, alias })
+        .insert({ name, last_name, ...maybeDni, category })
         .select().single();
 
     if (error) {
@@ -196,7 +236,7 @@ async function CmdPagoViejo(ctx: CommandContext<Context>) {
         return reply(ctx, errorMsg);
     }
 
-    const concept = detalle ?? currentYearMonth();
+    const month = detalle ?? currentYearMonth();
     const [maybeName, maybeLastName] = id.split(".");
 
     const {
@@ -205,7 +245,7 @@ async function CmdPagoViejo(ctx: CommandContext<Context>) {
     } = await supabaseAdmin
         .from("players")
         .select("*")
-        .or(`dni.eq.${id},alias.ilike.${id},nick.ilike.${id},and(name.ilike.${maybeName},last_name.ilike.${maybeLastName})`)
+        .or(`dni.eq.${id},and(name.ilike.${maybeName},last_name.ilike.${maybeLastName})`)
         .single();
 
     if (player_error) {
@@ -230,7 +270,8 @@ async function CmdPagoViejo(ctx: CommandContext<Context>) {
         .insert({
             player_id: player_data.id,
             amount: monto,
-            concept,
+            concept: "monthly",
+            month,
             registered_by: GetRegisteredBy(),
         }).select().single();
 
@@ -262,7 +303,7 @@ async function CmdConsultarPersona(ctx: CommandContext<Context>) {
     const { data: playerData, error: player_error } = await supabaseAdmin
         .from("players")
         .select("*")
-        .or(`dni.eq.${id},alias.ilike.${id},nick.ilike.${id},and(name.ilike.${maybeName},last_name.ilike.${maybeLastName})`)
+        .or(`dni.eq.${id},and(name.ilike.${maybeName},last_name.ilike.${maybeLastName})`)
         .single();
 
     if (player_error) {
@@ -310,7 +351,8 @@ async function callbackPagoCategoria(ctx: CallbackQueryContext<Context>) {
         .from("players")
         .select<"*", Player>()
         .eq("category", cat)
-        .order("last_name, name");
+        .order("last_name")
+        .order("name");
 
     if (error) {
         console.error(error);
@@ -363,7 +405,7 @@ function callbackPagoJugador(ctx: CallbackQueryContext<Context>) {
     const previousToLast = previousTrainingDay(getDayBefore(last));
 
     const previousTrainos = [last, previousToLast].flatMap(
-        (day) => hoursFor(day.getDay()).map((hour) => [day, hour]),
+        (day) => slotsForDay(day).map((hour) => [day, Number(hour)]),
     ) as [Date, number][];
     const text = (d: Date, h: number) => `Invitado ${toString(d)} - ${h}hs`;
     const data = (d: Date, h: number) =>
@@ -500,6 +542,22 @@ async function callbackPagoConfirmar(ctx: CallbackQueryContext<Context>) {
 
     const header = parsePaymentMessage(maybePaymentMessage);
 
+    const chatId = ctx.callbackQuery.message?.chat?.id;
+    if (!chatId) {
+        return ctx.editMessageText(
+            paymentMessage("Error: no se pudo determinar chat_id", header),
+            {
+                reply_markup: new InlineKeyboard(),
+                parse_mode: "MarkdownV2",
+            },
+        );
+    }
+
+    const paymentId = await uuidv5(
+        "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+        `telegram:pago:${chatId}:${header.id}`,
+    );
+
     if (DryRun) {
         return ctx.editMessageText(
             paymentMessage(
@@ -525,22 +583,58 @@ async function callbackPagoConfirmar(ctx: CallbackQueryContext<Context>) {
     const { data, error } = await supabaseAdmin
         .from("payments")
         .insert([{
-            id: header.id,
+            id: paymentId,
             player_id: header.player_id,
             amount: header.amount!,
-            concept: currentYearMonth(),
+            concept: "monthly",
+            month: currentYearMonth(),
             registered_by: GetRegisteredBy(),
             slot: header.slot,
         }])
         .select().single<Payment>();
 
     if (error) {
-        console.error(error);
+        if (error.code !== "23505") {
+            console.error(error);
+            const msg = `*Operacion finalzada con errores*\n${escape(error.message)}`;
+            return ctx.editMessageText(
+                paymentMessage(msg, header),
+                {
+                    reply_markup: new InlineKeyboard(),
+                    parse_mode: "MarkdownV2",
+                },
+            );
+        }
+
+        const { data: existing, error: existingError } = await supabaseAdmin
+            .from("payments")
+            .select("*")
+            .eq("id", paymentId)
+            .single<Payment>();
+
+        if (existingError) {
+            console.error(existingError);
+            const msg = `*Operacion finalzada con errores*\n${escape(existingError.message)}`;
+            return ctx.editMessageText(
+                paymentMessage(msg, header),
+                {
+                    reply_markup: new InlineKeyboard(),
+                    parse_mode: "MarkdownV2",
+                },
+            );
+        }
+
+        const msg = `*Operacion finalizada con exito\\!*\nID de pago: ${escape(existing.id)}`;
+        return ctx.editMessageText(
+            paymentMessage(msg, header),
+            {
+                reply_markup: new InlineKeyboard(),
+                parse_mode: "MarkdownV2",
+            },
+        );
     }
 
-    const msg = error
-        ? `*Operacion finalzada con errores*\n${escape(error.message)}`
-        : `*Operacion finalizada con exito\\!*\nID de pago: ${data.id}`;
+    const msg = `*Operacion finalizada con exito\\!*\nID de pago: ${escape(data.id)}`;
     return ctx.editMessageText(
         paymentMessage(msg, header),
         {
@@ -575,7 +669,7 @@ function callbackCancelar(ctx: CallbackQueryContext<Context>) {
     } else if (title === TitleListPayments) {
         message = `*${TitleListPayments}*\n\n${TitleOperationCancelled}`;
     } else if (title === TitleAttendance) {
-        message = `*${TitleAttendance}*\n\n${TitleOperationCancelled}`;
+        message = `*${TitleAttendance}*\n\n${TitleOperationFinished}`;
     } else {
         message = TitleOperationCancelled;
     }
@@ -613,7 +707,8 @@ async function callbackListarPagosCateg(
         .from("players")
         .select<"*, payments(amount)", Player>(selectType)
         .eq("category", cat)
-        .eq("payments.concept", currentYearMonth());
+        .eq("payments.concept", "monthly")
+        .eq("payments.month", currentYearMonth());
 
     if (error) {
         console.error(error);
@@ -626,8 +721,8 @@ async function callbackListarPagosCateg(
     const aggregated = data.map((player) =>
         ({
             ...player,
-            amount: player.payments.length > 0
-                ? sum(player.payments.map((_) => _.amount))
+            amount: (player.payments?.length ?? 0) > 0
+                ? sum((player.payments ?? []).map((_) => _.amount))
                 : 0,
         }) as PlayerWithAmount
     );
@@ -666,6 +761,19 @@ function CmdRegistrarAsistencia(ctx: CommandContext<Context>) {
     );
 }
 
+function CmdRegistrarAsistenciaPago(ctx: CommandContext<Context>) {
+    console.log(`Ejecutando comando ${CmdAsistPago}`);
+
+    const date = searchNextDayWithSlots(new Date(), true);
+    return ctx.reply(
+        attendanceMessage("_Eligir sesión de entrenamiento:_"),
+        {
+            reply_markup: keyboardForChooseSessionAsistPago(date),
+            parse_mode: "MarkdownV2",
+        },
+    );
+}
+
 function cbAsistenciaDia(ctx: CallbackQueryContext<Context>) {
     const dateText = ctx.match[1];
     console.log(`Callback asistencia - dia: ${dateText}`);
@@ -676,6 +784,26 @@ function cbAsistenciaDia(ctx: CallbackQueryContext<Context>) {
         attendanceMessage("_Eligir sesión de entrenamiento:_"),
         {
             reply_markup: keyboardForChooseSession(dateWithSlots),
+            parse_mode: "MarkdownV2",
+        },
+    );
+}
+
+function cbAsistenciaPagoDia(ctx: CallbackQueryContext<Context>) {
+    const dateCompact = ctx.match[1];
+    if (!dateCompact) {
+        console.error("Callback asistencia pago - dia: missing dateCompact");
+        return ctx.answerCallbackQuery({ text: "Error: fecha invalida" });
+    }
+    const dateText = compactDateToIso(dateCompact);
+    console.log(`Callback asistencia pago - dia: ${dateText}`);
+
+    const date = new Date(Date.parse(`${dateText}T12:00:00`));
+    return safeEditMessageText(
+        ctx,
+        attendanceMessage("_Eligir sesión de entrenamiento:_"),
+        {
+            reply_markup: keyboardForChooseSessionAsistPago(date),
             parse_mode: "MarkdownV2",
         },
     );
@@ -693,7 +821,8 @@ async function cbAsistenciaSlot(ctx: CallbackQueryContext<Context>) {
         .from("players")
         .select<"*", Player>()
         .in("category", cats)
-        .order("last_name, name");
+        .order("last_name")
+        .order("name");
     if (error) {
         console.error(error);
         return reply(ctx, "Error al buscar jugadores de categoria esc-1");
@@ -707,7 +836,7 @@ async function cbAsistenciaSlot(ctx: CallbackQueryContext<Context>) {
         const attended = attendance === "y";
         const { error: insertErr } = await supabaseAdmin
             .from("attendances")
-            .insert({ slot: specificSlot, player_id, attended });
+            .insert({ session: specificSlot, player_id, attended });
 
         if (insertErr) {
             if (insertErr.code !== "23505") {
@@ -717,7 +846,7 @@ async function cbAsistenciaSlot(ctx: CallbackQueryContext<Context>) {
             const { error: updateErr } = await supabaseAdmin
                 .from("attendances")
                 .update({ attended })
-                .eq("slot", specificSlot)
+                .eq("session", specificSlot)
                 .eq("player_id", player_id);
 
             if (updateErr) {
@@ -729,7 +858,7 @@ async function cbAsistenciaSlot(ctx: CallbackQueryContext<Context>) {
     const { data: attendances, error: attendanceError } = await supabaseAdmin
         .from("attendances")
         .select<"*", Attendance>()
-        .eq("slot", specificSlot);
+        .eq("session", specificSlot);
     if (attendanceError) {
         console.error(error);
         return reply(ctx, "Error al buscar asistencias para la sesion");
@@ -746,15 +875,460 @@ async function cbAsistenciaSlot(ctx: CallbackQueryContext<Context>) {
     const kb = players.reduce(
         (_kb, player) => _kb.row().text(lbl(player), dat(player)),
         new InlineKeyboard(),
-    ).row().text("Cancelar", "cancelar");
+    ).row().text("Finalizar", "cancelar");
 
-    return ctx.editMessageText(
+    const res = await safeEditMessageText(
+        ctx,
         attendanceMessage("_Ajuste asistencia:_"),
         {
             reply_markup: kb,
             parse_mode: "MarkdownV2",
         },
     );
+
+    try {
+        await ctx.answerCallbackQuery();
+    } catch {
+        // ignore
+    }
+
+    return res;
+}
+
+async function cbAsistenciaPagoSlot(ctx: CallbackQueryContext<Context>) {
+    const match = ctx.match as unknown as string[];
+    const dateCompact = match[1];
+    const isoDate = compactDateToIso(dateCompact);
+    const hs = match[2];
+    const action = match.length >= 4 ? match[3] : undefined;
+    const player_id = match.length >= 5 ? match[4] : undefined;
+    const arg = match.length >= 6 ? match[5] : undefined;
+    console.log(
+        `Callback asistpago: ${isoDate} ${hs} ${action ?? "(none)"} ${player_id ?? ""} ${arg ?? ""}`,
+    );
+
+    const specificSlot = toSpecificSlot(isoDate, hs);
+    const genericSlot = toGenericSlot(isoDate, hs);
+    const cats = slotToCat(genericSlot);
+    const selectedMonth = isoDate.substring(0, 7);
+
+    const expandedPlayerId = action === "x" ? player_id : undefined;
+
+    if (action === "a" && player_id && arg) {
+        const attended = arg === "y";
+        const { error: insertErr } = await supabaseAdmin
+            .from("attendances")
+            .insert({ session: specificSlot, player_id, attended });
+
+        if (insertErr) {
+            if (insertErr.code !== "23505") {
+                return ctx.editMessageText("Error al marcar asistencia");
+            }
+
+            const { error: updateErr } = await supabaseAdmin
+                .from("attendances")
+                .update({ attended })
+                .eq("session", specificSlot)
+                .eq("player_id", player_id);
+
+            if (updateErr) {
+                return ctx.editMessageText("Error al marcar asistencia");
+            }
+        }
+    }
+
+    if (action === "m" && player_id && arg) {
+        const [valid, amount] = tryParseAmount(arg);
+        if (!valid) {
+            return ctx.answerCallbackQuery({ text: "Monto invalido" });
+        }
+
+        const chatId = ctx.callbackQuery.message?.chat?.id;
+        const messageId = ctx.callbackQuery.message?.message_id;
+        if (!chatId || !messageId) {
+            return ctx.editMessageText("Error al determinar chat_id/message_id");
+        }
+
+        const paymentId = await uuidv5(
+            "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+            `telegram:asistpago:${chatId}:${messageId}:${player_id}:${selectedMonth}:${genericSlot}`,
+        );
+
+        const { error: insertErr } = await supabaseAdmin
+            .from("payments")
+            .insert([{
+                id: paymentId,
+                player_id,
+                registered_by: "telegram",
+                slot: genericSlot,
+                concept: "monthly",
+                month: selectedMonth,
+                amount,
+                is_cash: true,
+            }]);
+
+        if (insertErr) {
+            if (insertErr.code !== "23505") {
+                console.error(insertErr);
+                return ctx.editMessageText("Error al registrar pago");
+            }
+
+            const { error: updateErr } = await supabaseAdmin
+                .from("payments")
+                .update({ amount })
+                .eq("id", paymentId);
+            if (updateErr) {
+                console.error(updateErr);
+                return ctx.editMessageText("Error al actualizar pago");
+            }
+        }
+    }
+
+    const kb = await buildAsistPagoKeyboard(
+        specificSlot,
+        genericSlot,
+        cats,
+        dateCompact,
+        hs,
+        expandedPlayerId,
+    );
+
+    return safeEditMessageText(
+        ctx,
+        attendanceMessage("_Ajuste asistencia:_"),
+        {
+            reply_markup: kb,
+            parse_mode: "MarkdownV2",
+        },
+    );
+}
+
+async function cbAsistenciaPagoPayOther(ctx: CallbackQueryContext<Context>) {
+    const [, dateCompact, hs, player_id] = ctx.match;
+    const isoDate = compactDateToIso(dateCompact);
+    console.log(`Callback asistpago custom amount: ${isoDate} ${hs} ${player_id}`);
+
+    const messageId = ctx.callbackQuery.message?.message_id;
+    if (!messageId) {
+        return ctx.editMessageText("Error: no se pudo determinar message_id");
+    }
+
+    await ctx.answerCallbackQuery();
+    return bot.api.sendMessage(
+        ctx.chat!.id,
+        `ASISTPAGO_CTX: ${isoDate} ${hs} ${player_id} ${messageId}\n` +
+            "Escriba monto en miles (ej: 60):",
+        {
+            reply_markup: { force_reply: true },
+        },
+    );
+}
+
+function isoDateToCompact(isoDate: string) {
+    return isoDate.replaceAll("-", "");
+}
+
+function compactDateToIso(compact: string) {
+    return `${compact.substring(0, 4)}-${compact.substring(4, 6)}-${compact.substring(6, 8)}`;
+}
+
+async function buildAsistPagoKeyboard(
+    specificSlot: string,
+    genericSlot: string,
+    cats: string[],
+    dateCompact: string,
+    hs: string,
+    expandedPlayerId?: string,
+): Promise<InlineKeyboard> {
+    const paymentThresholdForSlot = (isoDate: string, slot: string): number => {
+        void isoDate;
+        void slot;
+        return 100;
+    };
+
+    const { data: players, error } = await supabaseAdmin
+        .from("players")
+        .select("id,name,last_name")
+        .in("category", cats)
+        .order("last_name")
+        .order("name");
+    if (error) {
+        console.error(error);
+        return new InlineKeyboard().row().text("Finalizar", "cancelar");
+    }
+
+    if (!players || players.length === 0) {
+        return new InlineKeyboard().row().text("Finalizar", "cancelar");
+    }
+
+    const playerIds = players.map((p) => p.id);
+
+    const isoDate = compactDateToIso(dateCompact);
+    const selectedMonth = isoDate.substring(0, 7);
+    const monthStart = new Date(`${isoDate.substring(0, 7)}-01T00:00:00.000Z`);
+    const nextMonthStart = new Date(monthStart);
+    nextMonthStart.setUTCMonth(nextMonthStart.getUTCMonth() + 1);
+    const selectedDayStart = new Date(`${isoDate}T00:00:00.000Z`);
+    const prev3MonthsStart = new Date(monthStart);
+    prev3MonthsStart.setUTCMonth(prev3MonthsStart.getUTCMonth() - 3);
+
+    const prev3Months: string[] = (() => {
+        const res: string[] = [];
+        for (let i = 1; i <= 3; i++) {
+            const d = new Date(monthStart);
+            d.setUTCMonth(d.getUTCMonth() - i);
+            res.push(d.toISOString().substring(0, 7));
+        }
+        return res;
+    })();
+
+    const prev3AttOr = prev3Months.map((m) => `session.like.${m}-%`).join(",");
+
+    const [attRes, payRes, monthAttRes, prev3AttRes, prev3PayRes] = await Promise.all([
+        supabaseAdmin
+            .from("attendances")
+            .select<"player_id,attended", Pick<Attendance, "player_id" | "attended">>(
+                "player_id,attended",
+            )
+            .eq("session", specificSlot),
+        supabaseAdmin
+            .from("payments")
+            .select("player_id,amount,concept,slot,session,month")
+            .in("player_id", playerIds)
+            .eq("month", selectedMonth),
+        supabaseAdmin
+            .from("attendances")
+            .select("player_id,attended,session")
+            .in("player_id", playerIds)
+            .like("session", `${selectedMonth}-%`),
+        supabaseAdmin
+            .from("attendances")
+            .select("player_id,attended,session")
+            .in("player_id", playerIds)
+            .or(prev3AttOr),
+        supabaseAdmin
+            .from("payments")
+            .select("player_id,amount,concept,slot,session,month")
+            .in("player_id", playerIds)
+            .in("month", prev3Months),
+    ]);
+
+    if (attRes.error) {
+        console.error(attRes.error);
+        return new InlineKeyboard().row().text("Finalizar", "cancelar");
+    }
+    if (payRes.error) {
+        console.error(payRes.error);
+        return new InlineKeyboard().row().text("Finalizar", "cancelar");
+    }
+
+    if (monthAttRes.error) {
+        console.error(monthAttRes.error);
+        return new InlineKeyboard().row().text("Finalizar", "cancelar");
+    }
+    if (prev3AttRes.error) {
+        console.error(prev3AttRes.error);
+        return new InlineKeyboard().row().text("Finalizar", "cancelar");
+    }
+    if (prev3PayRes.error) {
+        console.error(prev3PayRes.error);
+        return new InlineKeyboard().row().text("Finalizar", "cancelar");
+    }
+
+    const attendees = (attRes.data ?? []).filter((_) => _.attended).map((_) => _.player_id);
+    const payments = payRes.data;
+
+    const parseSpecificSession = (s: string): { isoDate: string; hour: string } | null => {
+        // Expected format from toSpecificSlot(): YYYY-MM-DD HHhs
+        const parts = s.trim().split(/\s+/);
+        if (parts.length < 2) return null;
+        const [d, hRaw] = parts;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+        const hour = hRaw.replace(/hs$/i, "");
+        if (!/^\d\d$/.test(hour)) return null;
+        return { isoDate: d, hour };
+    };
+
+    const attendanceAppliesToGenericSlot = (
+        row: { session?: string | null },
+        expectedGenericSlot: string,
+    ): boolean => {
+        if (!row.session) return false;
+        const parsed = parseSpecificSession(row.session);
+        if (!parsed) return false;
+        return toGenericSlot(parsed.isoDate, parsed.hour) === expectedGenericSlot;
+    };
+
+    const paymentAppliesToGenericSlot = (
+        row: { concept?: string; slot?: string | null; session?: string | null },
+        expectedGenericSlot: string,
+    ): boolean => {
+        if (row.concept === "monthly") {
+            return (row.slot ?? "") === expectedGenericSlot;
+        }
+        if (row.concept === "session") {
+            if (!row.session) return false;
+            const parsed = parseSpecificSession(row.session);
+            if (!parsed) return false;
+            return toGenericSlot(parsed.isoDate, parsed.hour) === expectedGenericSlot;
+        }
+        return false;
+    };
+
+    const attendedCountThisMonthByPlayerId = new Map<string, number>();
+    for (
+        const row of (monthAttRes.data ?? []) as Array<
+            { player_id: string; attended?: boolean; session?: string | null }
+        >
+    ) {
+        if (!row.attended || !row.session) continue;
+        const parsed = parseSpecificSession(row.session);
+        if (!parsed) continue;
+        if (!attendanceAppliesToGenericSlot({ session: row.session }, genericSlot)) continue;
+        const d = new Date(`${parsed.isoDate}T12:00:00.000Z`);
+        if (d < monthStart) continue;
+        if (d >= selectedDayStart) continue;
+        attendedCountThisMonthByPlayerId.set(
+            row.player_id,
+            (attendedCountThisMonthByPlayerId.get(row.player_id) ?? 0) + 1,
+        );
+    }
+
+    const attendedCountPrev3ByPlayerMonth = new Map<string, number>();
+    for (
+        const row of (prev3AttRes.data ?? []) as Array<
+            { player_id: string; attended?: boolean; session?: string | null }
+        >
+    ) {
+        if (!row.attended || !row.session) continue;
+        const parsed = parseSpecificSession(row.session);
+        if (!parsed) continue;
+        if (!attendanceAppliesToGenericSlot({ session: row.session }, genericSlot)) continue;
+        const mk = parsed.isoDate.substring(0, 7);
+        const key = `${row.player_id}:${mk}`;
+        attendedCountPrev3ByPlayerMonth.set(
+            key,
+            (attendedCountPrev3ByPlayerMonth.get(key) ?? 0) + 1,
+        );
+    }
+
+    const paidAmountPrev3ByPlayerMonth = new Map<string, number>();
+    for (
+        const row of (prev3PayRes.data ?? []) as Array<
+            { player_id: string; amount?: number | string; concept?: string; slot?: string | null; session?: string | null; month?: string }
+        >
+    ) {
+        if (!row.month) continue;
+        if (!paymentAppliesToGenericSlot(row, genericSlot)) continue;
+        const mk = row.month;
+        if (!mk) continue;
+        const key = `${row.player_id}:${mk}`;
+        const amt = Number(row.amount ?? 0);
+        paidAmountPrev3ByPlayerMonth.set(
+            key,
+            (paidAmountPrev3ByPlayerMonth.get(key) ?? 0) + amt,
+        );
+    }
+
+    const paidAmountByPlayerId = new Map<string, number>();
+    for (const p of (payments ?? []) as Array<{ player_id: string; amount?: number | string; concept?: string; slot?: string | null; session?: string | null }>) {
+        if (!paymentAppliesToGenericSlot(p, genericSlot)) continue;
+        const pid = p.player_id;
+        const amt = Number(p.amount ?? 0);
+        paidAmountByPlayerId.set(pid, (paidAmountByPlayerId.get(pid) ?? 0) + amt);
+    }
+
+    const isPresent = (p: Player) => attendees.includes(p.id);
+    const paidAmount = (p: Player) => paidAmountByPlayerId.get(p.id) ?? 0;
+    const yn = (p: Player) => isPresent(p) ? "n" : "y";
+    const attendIcon = (p: Player) => isPresent(p) ? "✅" : "❌";
+
+    const threshold = paymentThresholdForSlot(isoDate, genericSlot);
+    const meetsThreshold = (p: Player) => paidAmount(p) >= threshold;
+
+    const firstSlotDayThisMonthISO = (() => {
+        const firstDayNoon = new Date(`${isoDate.substring(0, 7)}-01T12:00:00.000Z`);
+        const firstSlotDay = searchNextDayWithSlots(firstDayNoon, true);
+        return firstSlotDay.toISOString().substring(0, 10);
+    })();
+    const showMonthAttendanceCount = isoDate !== firstSlotDayThisMonthISO;
+
+    const isThief = (p: Player) => {
+        for (let i = 1; i <= 3; i++) {
+            const m = new Date(monthStart);
+            m.setUTCMonth(m.getUTCMonth() - i);
+            const mk = m.toISOString().substring(0, 7);
+            const key = `${p.id}:${mk}`;
+            const attendedCt = attendedCountPrev3ByPlayerMonth.get(key) ?? 0;
+            if (attendedCt <= 0) continue;
+            const paidAmt = paidAmountPrev3ByPlayerMonth.get(key) ?? 0;
+            if (paidAmt < threshold) return true;
+        }
+        return false;
+    };
+
+    const payIcon = (p: Player) => {
+        const amt = paidAmount(p);
+        if (amt <= 0) return "⚠️";
+        if (amt < threshold) return `⚠️ ${amt}`;
+        return `💶 ${amt}`;
+    };
+
+    const anyThief = players.some((p) => isThief(p));
+    const anyMonthAttendanceCountShown = showMonthAttendanceCount &&
+        players.some((p) =>
+            !meetsThreshold(p) && (attendedCountThisMonthByPlayerId.get(p.id) ?? 0) > 0
+        );
+
+    const owingPlayers = players.filter((p) => !meetsThreshold(p));
+    const paidPlayers = players.filter((p) => meetsThreshold(p));
+
+    const addPlayerRow = (acc: InlineKeyboard, p: Player) => {
+        const monthCt = attendedCountThisMonthByPlayerId.get(p.id) ?? 0;
+        const countLbl = (showMonthAttendanceCount && !meetsThreshold(p) && monthCt > 0)
+            ? ` (${monthCt})`
+            : "";
+        const thief = isThief(p);
+        const thiefLbl = thief ? " 🥷" : "";
+        const nameLbl = `${p.last_name}, ${p.name}${countLbl}${thiefLbl} `;
+        acc = acc.row()
+            .text(nameLbl + attendIcon(p), `ap|${dateCompact}|${hs}|a|${p.id}|${yn(p)}`);
+        if (thief) acc = acc.danger();
+        acc = acc.text(payIcon(p), `ap|${dateCompact}|${hs}|x|${p.id}`);
+
+        if (expandedPlayerId && expandedPlayerId === p.id) {
+            acc = acc.row()
+                .text("100k", `ap|${dateCompact}|${hs}|m|${p.id}|100`)
+                .text("75k", `ap|${dateCompact}|${hs}|m|${p.id}|75`)
+                .text("50k", `ap|${dateCompact}|${hs}|m|${p.id}|50`)
+                .text("25k", `ap|${dateCompact}|${hs}|m|${p.id}|25`)
+                .text("Otro", `ap|${dateCompact}|${hs}|o|${p.id}`);
+        }
+        return acc;
+    };
+
+    let kb = new InlineKeyboard();
+    kb = kb.row().text("Summary", "noop").primary();
+    const dateNoon = new Date(`${isoDate}T12:00:00.000Z`);
+    const catsLbl = cats.map(categorySlugToLabel);
+    const catLbl = catsLbl.length === 1 ? `Categoria ${catsLbl[0]}` : `Categorias ${catsLbl.join(",")}`;
+    kb = kb.row().text(`${catLbl}  |  ${strDate(dateNoon)}, ${hs}hs`, "noop");
+    if (anyThief) {
+        kb = kb.row().text("🥷 » Adeudan meses anteriores", "noop");
+    }
+    if (anyMonthAttendanceCountShown) {
+        kb = kb.row().text("(n) » Vinieron pero no pagaron", "noop");
+    }
+    kb = kb.row().text("--- Deben: ---", "noop").danger();
+    kb = owingPlayers.reduce(addPlayerRow, kb);
+
+    if (paidPlayers.length > 0) {
+        kb = kb.row().text("--- Pagaron: ---", "noop").success();
+        kb = paidPlayers.reduce(addPlayerRow, kb);
+    }
+    kb = kb.row().text("Atras", `apd|${dateCompact}`).primary();
+    kb = kb.text("Finalizar", "cancelar").primary();
+    return kb;
 }
 
 function cbAsistenciaJugador(ctx: CallbackQueryContext<Context>) {
@@ -766,24 +1340,50 @@ function cbAsistenciaJugador(ctx: CallbackQueryContext<Context>) {
     // TODO mostrar categorias
 }
 
+function slotsForDay(date: Date): string[] {
+    return (date.getDay() === 4)
+        ? ["21", "22", "23"]
+        : [];
+}
+
+function searchPrevDayWithSlots(someDate: Date, includeCurrent = false) {
+    const date = new Date(someDate);
+    if (!includeCurrent) {
+        date.setDate(date.getDate() - 1);
+    }
+    for (let i = 0; i < 14; i++) {
+        if (slotsForDay(date).length > 0) return date;
+        date.setDate(date.getDate() - 1);
+    }
+    return date;
+}
+
+function searchNextDayWithSlots(someDate: Date, includeCurrent = false) {
+    const date = new Date(someDate);
+    if (!includeCurrent) {
+        date.setDate(date.getDate() + 1);
+    }
+    for (let i = 0; i < 14; i++) {
+        if (slotsForDay(date).length > 0) return date;
+        date.setDate(date.getDate() + 1);
+    }
+    return date;
+}
+
 function searchLastDayWithSlots(someDate: Date) {
     const date = new Date(someDate);
-    while (date.getDay() !== 0 && date.getDay() !== 4) {
+    while (slotsForDay(date).length === 0) {
         date.setDate(date.getDate() - 1);
     }
     return date;
 }
 
 function keyboardForChooseSession(date: Date) {
-    const prevDay = new Date(date);
-    prevDay.setDate(prevDay.getDate() - 1);
-    const prevDateISO = `${prevDay.toISOString().substring(0, 10)}`;
+    const noonDate = new Date(Date.parse(`${date.toISOString().substring(0, 10)}T12:00:00`));
+    const prevSlotDay = searchPrevDayWithSlots(noonDate);
+    const prevDateISO = `${prevSlotDay.toISOString().substring(0, 10)}`;
 
-    const slots = (date.getDay() === 0)
-        ? ["10", "11", "23"]
-        : (date.getDay() === 4)
-        ? ["21", "22", "23"]
-        : [];
+    const slots = slotsForDay(date);
 
     const dateISO = date.toISOString().substring(0, 10);
     return slots.reduce(
@@ -799,6 +1399,53 @@ function keyboardForChooseSession(date: Date) {
     ).row()
         .text(`« Dia anterior`, `${CmdAsist} ${prevDateISO}`)
         .text("Cancelar", "cancelar");
+}
+
+function keyboardForChooseSessionWithCmd(cmd: string, date: Date) {
+    const noonDate = new Date(Date.parse(`${date.toISOString().substring(0, 10)}T12:00:00`));
+    const prevSlotDay = searchPrevDayWithSlots(noonDate);
+    const prevDateISO = `${prevSlotDay.toISOString().substring(0, 10)}`;
+
+    const slots = slotsForDay(date);
+
+    const dateISO = date.toISOString().substring(0, 10);
+    return slots.reduce(
+        (kb, slot) =>
+            kb.row().text(
+                `${slot}hs`,
+                `${cmd} ${dateISO} ${slot}`,
+            ),
+        new InlineKeyboard().text(
+            strDate(date),
+            `${cmd} dummy`,
+        ),
+    ).row()
+        .text(`« Dia anterior`, `${cmd} ${prevDateISO}`)
+        .text("Cancelar", "cancelar");
+}
+
+function keyboardForChooseSessionAsistPago(date: Date) {
+    const noonDate = new Date(Date.parse(`${date.toISOString().substring(0, 10)}T12:00:00`));
+    const prevSlotDay = searchPrevDayWithSlots(noonDate);
+    const prevDateISO = `${prevSlotDay.toISOString().substring(0, 10)}`;
+    const prevDateCompact = isoDateToCompact(prevDateISO);
+
+    const nextSlotDay = searchNextDayWithSlots(noonDate);
+    const nextDateISO = `${nextSlotDay.toISOString().substring(0, 10)}`;
+    const nextDateCompact = isoDateToCompact(nextDateISO);
+
+    const slots = slotsForDay(date);
+
+    const dateISO = date.toISOString().substring(0, 10);
+    const dateCompact = isoDateToCompact(dateISO);
+
+    return slots.reduce(
+        (kb, slot) => kb.row().text(`${slot}hs`, `ap|${dateCompact}|${slot}`),
+        new InlineKeyboard().text(strDate(date), `apd|${dateCompact}`),
+    ).row()
+        .text(`« Antes`, `apd|${prevDateCompact}`)
+        .text("Finalizar", "cancelar")
+        .text(`Despues »`, `apd|${nextDateCompact}`);
 }
 
 function attendanceMessage(msg: string, h: Partial<HeaderAttendance> = {}) {
@@ -832,7 +1479,7 @@ function parseAttendanceMessage(text: string): Partial<HeaderAttendance> {
         slot: Number(arr[1]),
     }));
 
-    const jsonCategories = mapOrEmpty(RegexCategories, l2, (arr) => ({
+    const jsonCategories = mapOrEmpty(RegexCategories, l3, (arr) => ({
         categories: arr[1].split(","),
     }));
 
@@ -847,11 +1494,87 @@ function parseAttendanceMessage(text: string): Partial<HeaderAttendance> {
 // DEFAULT MESSAGE HANDLER
 // ////////////////////////////////////
 
-function OnMessage(
+async function OnMessage(
     ctx: Filter<Context, "message">,
 ): Promise<Message.TextMessage> {
     const repliedText = ctx.update.message?.reply_to_message?.text;
     if (repliedText) {
+        if (repliedText.includes("ASISTPAGO_CTX:") || repliedText.includes("ASISTPAGO\\_CTX:")) {
+            const match = new RegExp(
+                `ASISTPAGO\\_?CTX: (${rDate}) (\\d\\d) (${rUuid}) (\\d+)`,
+                "i",
+            ).exec(repliedText);
+            if (!match) {
+                return reply(ctx, "Error: contexto asistpago invalido");
+            }
+            const [, isoDate, hs, player_id, rosterMessageIdStr] = match;
+            const rosterMessageId = Number.parseInt(rosterMessageIdStr, 10);
+
+            const [valid, amount] = ctx.message?.text
+                ? tryParseAmount(ctx.message.text)
+                : [false, -1];
+            if (!valid) {
+                return reply(ctx, "Monto ingresado no valido");
+            }
+
+            const selectedMonth = isoDate.substring(0, 7);
+            const genericSlot = toGenericSlot(isoDate, hs);
+            const cats = slotToCat(genericSlot);
+            const paymentId = await uuidv5(
+                "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+                `telegram:asistpago:${ctx.chat!.id}:${rosterMessageId}:${player_id}:${selectedMonth}:${genericSlot}`,
+            );
+
+            const { error: insertErr } = await supabaseAdmin
+                .from("payments")
+                .insert([{
+                    id: paymentId,
+                    player_id,
+                    registered_by: "telegram",
+                    slot: genericSlot,
+                    concept: "monthly",
+                    month: selectedMonth,
+                    amount,
+                    is_cash: true,
+                }]);
+
+            if (insertErr) {
+                if (insertErr.code !== "23505") {
+                    console.error(insertErr);
+                    return reply(ctx, "Error al registrar pago");
+                }
+
+                const { error: updateErr } = await supabaseAdmin
+                    .from("payments")
+                    .update({ amount })
+                    .eq("id", paymentId);
+                if (updateErr) {
+                    console.error(updateErr);
+                    return reply(ctx, "Error al actualizar pago");
+                }
+            }
+
+            const specificSlot = toSpecificSlot(isoDate, hs);
+            const kb = await buildAsistPagoKeyboard(
+                specificSlot,
+                genericSlot,
+                cats,
+                isoDateToCompact(isoDate),
+                hs,
+            );
+            await bot.api.editMessageText(
+                ctx.chat!.id,
+                rosterMessageId,
+                attendanceMessage("_Ajuste asistencia:_"),
+                {
+                    parse_mode: "MarkdownV2",
+                    reply_markup: kb,
+                },
+            );
+
+            return reply(ctx, "Pago registrado");
+        }
+
         const header = parsePaymentMessage(repliedText);
         if (header.cat && header.player_id) {
             const [valid, amount] = ctx.message?.text
@@ -877,7 +1600,7 @@ function OnMessage(
 }
 
 function reply(
-    ctx: CommandContext<Context> | CallbackQueryContext<Context>,
+    ctx: Context,
     msg: string,
 ) {
     // deno-lint-ignore no-explicit-any
@@ -885,6 +1608,26 @@ function reply(
         return;
     }
     return ctx.reply(msg);
+}
+
+async function safeEditMessageText(
+    ctx: CallbackQueryContext<Context>,
+    text: string,
+    extra: Parameters<CallbackQueryContext<Context>["editMessageText"]>[1],
+) {
+    try {
+        return await ctx.editMessageText(text, extra);
+    } catch (err) {
+        const msg = String(err);
+        if (msg.includes("message is not modified")) {
+            try {
+                return await ctx.answerCallbackQuery();
+            } catch {
+                return;
+            }
+        }
+        throw err;
+    }
 }
 
 // ////////////////////////////////////
@@ -908,7 +1651,7 @@ type HeaderAttendance = {
 };
 
 type Attendance = {
-    slot: string;
+    session: string;
     player_id: string;
     attended: boolean;
 };
@@ -917,7 +1660,7 @@ type Player = {
     id: string;
     name: string;
     last_name: string;
-    payments: Payment[];
+    payments?: Payment[];
 };
 
 type Payment = {
@@ -925,6 +1668,38 @@ type Payment = {
     player_id: string;
     amount: number;
 };
+
+async function uuidv5(namespace: string, name: string): Promise<string> {
+    const nsBytes = uuidToBytes(namespace);
+    const nameBytes = new TextEncoder().encode(name);
+
+    const data = new Uint8Array(nsBytes.length + nameBytes.length);
+    data.set(nsBytes, 0);
+    data.set(nameBytes, nsBytes.length);
+
+    const hash = new Uint8Array(await crypto.subtle.digest("SHA-1", data));
+    const bytes = hash.slice(0, 16);
+
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    return bytesToUuid(bytes);
+}
+
+function uuidToBytes(uuid: string): Uint8Array {
+    const hex = uuid.replaceAll("-", "");
+    if (hex.length !== 32) throw new Error(`Invalid UUID: ${uuid}`);
+    const bytes = new Uint8Array(16);
+    for (let i = 0; i < 16; i++) {
+        bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+    }
+    return bytes;
+}
+
+function bytesToUuid(bytes: Uint8Array): string {
+    const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+    return `${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}`;
+}
 
 type Middleware<T> = (ctx: CommandContext<Context>) => Promise<T>;
 
@@ -935,20 +1710,30 @@ type Middleware<T> = (ctx: CommandContext<Context>) => Promise<T>;
 function selectCategoriesKeyboard(cmd: string) {
     return new InlineKeyboard()
         .text("Menores", `${cmd} cat u-14`)
-        .row().text("Escuela (jue 21hs)", `${cmd} cat esc-2`)
-        .row().text("Intermedio (jue 22hs)", `${cmd} cat cat-b`)
-        .row().text("Avanzados (jue 23hs)", `${cmd} cat cat-a`)
+        .row().text("Cat A (jue 21hs)", `${cmd} cat cat-a`)
+        .row().text("Cat B (jue 22hs)", `${cmd} cat cat-b`)
+        .row().text("Cat C (jue 23hs)", `${cmd} cat cat-c`)
         .row().text("Cancelar", "cancelar");
 }
 
-function catchAll<T>(f: Middleware<T>): Middleware<T | Message.TextMessage> {
-    return async (ctx) => {
+function categorySlugToLabel(c: string): string {
+    if (c === "cat-a") return "A";
+    if (c === "cat-b") return "B";
+    if (c === "cat-c") return "C";
+    return c;
+}
+
+function catchAll<C extends CommandContext<Context> | CallbackQueryContext<Context>, T>(
+    f: (ctx: C) => Promise<T>,
+): (ctx: C) => Promise<T | Message.TextMessage> {
+    return async (ctx: C) => {
         try {
             return await f(ctx);
-        } catch (error) {
+        } catch (error: unknown) {
             console.error(error);
+            const msg = error instanceof Error ? error.message : String(error);
             return await ctx.reply(
-                `Error while executing handler: ${error.message}`,
+                `Error while executing handler: ${msg}`,
             );
         }
     };
@@ -1105,7 +1890,7 @@ function toString(date: Date): string {
 // returns: "Hoy" | "jueves, 3 de marzo"
 function strDate(d: Date) {
     return (d.toLocaleDateString() == new Date().toLocaleDateString())
-        ? "Hoy"
+        ? `Hoy (${d.toLocaleDateString("es-AR", { month: "long", day: "numeric" })})`
         : d.toLocaleDateString("es-AR", {
             weekday: "long",
             day: "numeric",
@@ -1117,19 +1902,13 @@ function toISODate(date: Date) {
     return date.toISOString().substring(0, 10);
 }
 
-function hoursFor(day: number) {
-    if (day === 0) return [23, 11, 10];
-    else if (day === 4) return [23, 22, 21];
-    else throw new Error(`Unexpected training day ${day}`);
-}
-
 function catToSlot(category: string): string {
     switch (category) {
-        case "esc-2":
+        case "cat-a":
             return "jue 21hs";
         case "cat-b":
             return "jue 22hs";
-        case "cat-a":
+        case "cat-c":
             return "jue 23hs";
         case "u-14":
             return "dom 11hs";
@@ -1141,11 +1920,11 @@ function catToSlot(category: string): string {
 function slotToCat(slot: string): string[] {
     switch (slot) {
         case "jue 21hs":
-            return ["esc-2"];
+            return ["cat-a"];
         case "jue 22hs":
             return ["cat-b"];
         case "jue 23hs":
-            return ["cat-a"];
+            return ["cat-c"];
         case "dom 11hs":
             return ["u-14"];
         default:
@@ -1154,13 +1933,9 @@ function slotToCat(slot: string): string[] {
 }
 
 function toSpecificSlot(isoDate: string, hour: string): string {
-    const date = new Date(`${isoDate}T${hour}:00`);
-    return date.toLocaleString("es-AR", {
-        weekday: "short",
-        day: "numeric",
-        hour: "numeric",
-        hour12: false,
-    }).replace(",", "") + "hs";
+    // Must uniquely identify a single training session.
+    // Using weekday+day-of-month caused collisions across months (e.g. 2026-03-05 vs 2026-02-05).
+    return `${isoDate} ${hour}hs`;
 }
 
 function toGenericSlot(isoDate: string, hour: string): string {

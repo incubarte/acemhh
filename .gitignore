@@ -4,3 +4,5 @@ supabase/.branches/
 supabase/functions/.env
 supabase/functions/.env.local
 acemhh.bak/
+db_pass
+.windsurf
