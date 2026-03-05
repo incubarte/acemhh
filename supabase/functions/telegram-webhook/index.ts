@@ -258,21 +258,23 @@ async function CmdPagoViejo(ctx: CommandContext<Context>) {
 
     function GetRegisteredBy() {
         try {
-            const from = ctx.update.message!.from;
-            return `${from.last_name}, ${from.first_name} (${from.username})`;
+            return telegramRegisteredBy(ctx);
         } catch (error) {
             console.error(error);
             return "[unknown]";
         }
     }
 
+    const slot = catToSlot(player_data.category);
     const { data: paymentData, error } = await supabaseAdmin.from("payments")
         .insert({
+            id: crypto.randomUUID(),
             player_id: player_data.id,
             amount: monto,
             concept: "monthly",
             month,
             registered_by: GetRegisteredBy(),
+            slot,
         }).select().single();
 
     if (error) {
@@ -553,9 +555,22 @@ async function callbackPagoConfirmar(ctx: CallbackQueryContext<Context>) {
         );
     }
 
-    const paymentId = await uuidv5(
+    const maybeSessionMatch = new RegExp(`^(${rDate}) (\\d\\d)hs$`, "i").exec(
+        header.slot ?? "",
+    );
+    const isSessionPayment = Boolean(maybeSessionMatch);
+    const sessionIsoDate = isSessionPayment ? maybeSessionMatch![1] : undefined;
+    const sessionHour = isSessionPayment ? maybeSessionMatch![2] : undefined;
+    const paymentConcept = isSessionPayment ? "session" : "monthly";
+    const paymentMonth = isSessionPayment ? sessionIsoDate!.substring(0, 7) : currentYearMonth();
+    const paymentSlot = isSessionPayment
+        ? toGenericSlot(sessionIsoDate!, sessionHour!)
+        : header.slot;
+    const paymentSession = isSessionPayment ? header.slot : null;
+
+    const paymentId = await _uuidv5(
         "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-        `telegram:pago:${chatId}:${header.id}`,
+        `telegram:pago:${chatId}:${header.id}:${header.amount}:${paymentConcept}:${paymentMonth}:${paymentSlot}:${paymentSession ?? ""}`,
     );
 
     if (DryRun) {
@@ -571,32 +586,24 @@ async function callbackPagoConfirmar(ctx: CallbackQueryContext<Context>) {
         );
     }
 
-    function GetRegisteredBy() {
-        try {
-            const from = ctx.update.callback_query.from;
-            return `${from.last_name}, ${from.first_name} (${from.username})`;
-        } catch (error) {
-            console.error(error);
-            return "[unknown]";
-        }
-    }
+    const registeredBy = telegramRegisteredBy(ctx);
     const { data, error } = await supabaseAdmin
         .from("payments")
         .insert([{
             id: paymentId,
             player_id: header.player_id,
             amount: header.amount!,
-            concept: "monthly",
-            month: currentYearMonth(),
-            registered_by: GetRegisteredBy(),
-            slot: header.slot,
+            concept: paymentConcept,
+            month: paymentMonth,
+            registered_by: registeredBy,
+            slot: paymentSlot,
+            session: paymentSession,
         }])
         .select().single<Payment>();
 
     if (error) {
-        if (error.code !== "23505") {
-            console.error(error);
-            const msg = `*Operacion finalzada con errores*\n${escape(error.message)}`;
+        if (error.code === "23505") {
+            const msg = `*Operacion finalizada con exito\!*\nID de pago: ${escape(paymentId)}`;
             return ctx.editMessageText(
                 paymentMessage(msg, header),
                 {
@@ -605,26 +612,8 @@ async function callbackPagoConfirmar(ctx: CallbackQueryContext<Context>) {
                 },
             );
         }
-
-        const { data: existing, error: existingError } = await supabaseAdmin
-            .from("payments")
-            .select("*")
-            .eq("id", paymentId)
-            .single<Payment>();
-
-        if (existingError) {
-            console.error(existingError);
-            const msg = `*Operacion finalzada con errores*\n${escape(existingError.message)}`;
-            return ctx.editMessageText(
-                paymentMessage(msg, header),
-                {
-                    reply_markup: new InlineKeyboard(),
-                    parse_mode: "MarkdownV2",
-                },
-            );
-        }
-
-        const msg = `*Operacion finalizada con exito\\!*\nID de pago: ${escape(existing.id)}`;
+        console.error(error);
+        const msg = `*Operacion finalzada con errores*\n${escape(error.message)}`;
         return ctx.editMessageText(
             paymentMessage(msg, header),
             {
@@ -949,17 +938,18 @@ async function cbAsistenciaPagoSlot(ctx: CallbackQueryContext<Context>) {
             return ctx.editMessageText("Error al determinar chat_id/message_id");
         }
 
-        const paymentId = await uuidv5(
+        const paymentId = await _uuidv5(
             "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
             `telegram:asistpago:${chatId}:${messageId}:${player_id}:${selectedMonth}:${genericSlot}`,
         );
 
+        const registeredBy = telegramRegisteredBy(ctx);
         const { error: insertErr } = await supabaseAdmin
             .from("payments")
             .insert([{
                 id: paymentId,
                 player_id,
-                registered_by: "telegram",
+                registered_by: registeredBy,
                 slot: genericSlot,
                 concept: "monthly",
                 month: selectedMonth,
@@ -968,18 +958,12 @@ async function cbAsistenciaPagoSlot(ctx: CallbackQueryContext<Context>) {
             }]);
 
         if (insertErr) {
-            if (insertErr.code !== "23505") {
-                console.error(insertErr);
-                return ctx.editMessageText("Error al registrar pago");
-            }
-
-            const { error: updateErr } = await supabaseAdmin
-                .from("payments")
-                .update({ amount })
-                .eq("id", paymentId);
-            if (updateErr) {
-                console.error(updateErr);
-                return ctx.editMessageText("Error al actualizar pago");
+            if (insertErr.code === "23505") {
+                // Duplicate tap: payment already registered
+                await ctx.answerCallbackQuery({ text: "Pago ya registrado" });
+            } else {
+            console.error(insertErr);
+            return ctx.editMessageText("Error al registrar pago");
             }
         }
     }
@@ -1068,49 +1052,27 @@ async function buildAsistPagoKeyboard(
     const monthStart = new Date(`${isoDate.substring(0, 7)}-01T00:00:00.000Z`);
     const nextMonthStart = new Date(monthStart);
     nextMonthStart.setUTCMonth(nextMonthStart.getUTCMonth() + 1);
-    const selectedDayStart = new Date(`${isoDate}T00:00:00.000Z`);
-    const prev3MonthsStart = new Date(monthStart);
-    prev3MonthsStart.setUTCMonth(prev3MonthsStart.getUTCMonth() - 3);
-
-    const prev3Months: string[] = (() => {
-        const res: string[] = [];
-        for (let i = 1; i <= 3; i++) {
-            const d = new Date(monthStart);
-            d.setUTCMonth(d.getUTCMonth() - i);
-            res.push(d.toISOString().substring(0, 7));
-        }
-        return res;
-    })();
-
-    const prev3AttOr = prev3Months.map((m) => `session.like.${m}-%`).join(",");
-
-    const [attRes, payRes, monthAttRes, prev3AttRes, prev3PayRes] = await Promise.all([
+    const monthStartNoon = new Date(`${selectedMonth}-01T12:00:00.000Z`);
+    const selectedDayStartNoon = new Date(`${isoDate}T12:00:00.000Z`);
+    const [attRes, payRes, monthAttRes] = await Promise.all([
         supabaseAdmin
             .from("attendances")
             .select<"player_id,attended", Pick<Attendance, "player_id" | "attended">>(
                 "player_id,attended",
             )
+            .in("player_id", playerIds)
             .eq("session", specificSlot),
         supabaseAdmin
             .from("payments")
             .select("player_id,amount,concept,slot,session,month")
             .in("player_id", playerIds)
-            .eq("month", selectedMonth),
+            .eq("month", selectedMonth)
+            .eq("slot", genericSlot),
         supabaseAdmin
             .from("attendances")
             .select("player_id,attended,session")
             .in("player_id", playerIds)
             .like("session", `${selectedMonth}-%`),
-        supabaseAdmin
-            .from("attendances")
-            .select("player_id,attended,session")
-            .in("player_id", playerIds)
-            .or(prev3AttOr),
-        supabaseAdmin
-            .from("payments")
-            .select("player_id,amount,concept,slot,session,month")
-            .in("player_id", playerIds)
-            .in("month", prev3Months),
     ]);
 
     if (attRes.error) {
@@ -1124,14 +1086,6 @@ async function buildAsistPagoKeyboard(
 
     if (monthAttRes.error) {
         console.error(monthAttRes.error);
-        return new InlineKeyboard().row().text("Finalizar", "cancelar");
-    }
-    if (prev3AttRes.error) {
-        console.error(prev3AttRes.error);
-        return new InlineKeyboard().row().text("Finalizar", "cancelar");
-    }
-    if (prev3PayRes.error) {
-        console.error(prev3PayRes.error);
         return new InlineKeyboard().row().text("Finalizar", "cancelar");
     }
 
@@ -1159,21 +1113,7 @@ async function buildAsistPagoKeyboard(
         return toGenericSlot(parsed.isoDate, parsed.hour) === expectedGenericSlot;
     };
 
-    const paymentAppliesToGenericSlot = (
-        row: { concept?: string; slot?: string | null; session?: string | null },
-        expectedGenericSlot: string,
-    ): boolean => {
-        if (row.concept === "monthly") {
-            return (row.slot ?? "") === expectedGenericSlot;
-        }
-        if (row.concept === "session") {
-            if (!row.session) return false;
-            const parsed = parseSpecificSession(row.session);
-            if (!parsed) return false;
-            return toGenericSlot(parsed.isoDate, parsed.hour) === expectedGenericSlot;
-        }
-        return false;
-    };
+    const isPresent = (p: Player) => attendees.includes(p.id);
 
     const attendedCountThisMonthByPlayerId = new Map<string, number>();
     for (
@@ -1182,63 +1122,29 @@ async function buildAsistPagoKeyboard(
         >
     ) {
         if (!row.attended || !row.session) continue;
+        if (!attendanceAppliesToGenericSlot({ session: row.session }, genericSlot)) continue;
         const parsed = parseSpecificSession(row.session);
         if (!parsed) continue;
-        if (!attendanceAppliesToGenericSlot({ session: row.session }, genericSlot)) continue;
         const d = new Date(`${parsed.isoDate}T12:00:00.000Z`);
-        if (d < monthStart) continue;
-        if (d >= selectedDayStart) continue;
+        if (d < monthStartNoon) continue;
+        if (d >= selectedDayStartNoon) continue;
         attendedCountThisMonthByPlayerId.set(
             row.player_id,
             (attendedCountThisMonthByPlayerId.get(row.player_id) ?? 0) + 1,
         );
     }
 
-    const attendedCountPrev3ByPlayerMonth = new Map<string, number>();
-    for (
-        const row of (prev3AttRes.data ?? []) as Array<
-            { player_id: string; attended?: boolean; session?: string | null }
-        >
-    ) {
-        if (!row.attended || !row.session) continue;
-        const parsed = parseSpecificSession(row.session);
-        if (!parsed) continue;
-        if (!attendanceAppliesToGenericSlot({ session: row.session }, genericSlot)) continue;
-        const mk = parsed.isoDate.substring(0, 7);
-        const key = `${row.player_id}:${mk}`;
-        attendedCountPrev3ByPlayerMonth.set(
-            key,
-            (attendedCountPrev3ByPlayerMonth.get(key) ?? 0) + 1,
-        );
-    }
-
-    const paidAmountPrev3ByPlayerMonth = new Map<string, number>();
-    for (
-        const row of (prev3PayRes.data ?? []) as Array<
-            { player_id: string; amount?: number | string; concept?: string; slot?: string | null; session?: string | null; month?: string }
-        >
-    ) {
-        if (!row.month) continue;
-        if (!paymentAppliesToGenericSlot(row, genericSlot)) continue;
-        const mk = row.month;
-        if (!mk) continue;
-        const key = `${row.player_id}:${mk}`;
-        const amt = Number(row.amount ?? 0);
-        paidAmountPrev3ByPlayerMonth.set(
-            key,
-            (paidAmountPrev3ByPlayerMonth.get(key) ?? 0) + amt,
-        );
-    }
-
     const paidAmountByPlayerId = new Map<string, number>();
-    for (const p of (payments ?? []) as Array<{ player_id: string; amount?: number | string; concept?: string; slot?: string | null; session?: string | null }>) {
-        if (!paymentAppliesToGenericSlot(p, genericSlot)) continue;
-        const pid = p.player_id;
-        const amt = Number(p.amount ?? 0);
+    for (
+        const row of (payments ?? []) as Array<
+            { player_id: string; amount?: number | string; concept?: string; slot?: string | null; session?: string | null }
+        >
+    ) {
+        const pid = row.player_id;
+        const amt = Number(row.amount ?? 0);
         paidAmountByPlayerId.set(pid, (paidAmountByPlayerId.get(pid) ?? 0) + amt);
     }
 
-    const isPresent = (p: Player) => attendees.includes(p.id);
     const paidAmount = (p: Player) => paidAmountByPlayerId.get(p.id) ?? 0;
     const yn = (p: Player) => isPresent(p) ? "n" : "y";
     const attendIcon = (p: Player) => isPresent(p) ? "✅" : "❌";
@@ -1253,28 +1159,12 @@ async function buildAsistPagoKeyboard(
     })();
     const showMonthAttendanceCount = isoDate !== firstSlotDayThisMonthISO;
 
-    const isThief = (p: Player) => {
-        for (let i = 1; i <= 3; i++) {
-            const m = new Date(monthStart);
-            m.setUTCMonth(m.getUTCMonth() - i);
-            const mk = m.toISOString().substring(0, 7);
-            const key = `${p.id}:${mk}`;
-            const attendedCt = attendedCountPrev3ByPlayerMonth.get(key) ?? 0;
-            if (attendedCt <= 0) continue;
-            const paidAmt = paidAmountPrev3ByPlayerMonth.get(key) ?? 0;
-            if (paidAmt < threshold) return true;
-        }
-        return false;
-    };
-
     const payIcon = (p: Player) => {
         const amt = paidAmount(p);
         if (amt <= 0) return "⚠️";
         if (amt < threshold) return `⚠️ ${amt}`;
         return `💶 ${amt}`;
     };
-
-    const anyThief = players.some((p) => isThief(p));
     const anyMonthAttendanceCountShown = showMonthAttendanceCount &&
         players.some((p) =>
             !meetsThreshold(p) && (attendedCountThisMonthByPlayerId.get(p.id) ?? 0) > 0
@@ -1288,12 +1178,9 @@ async function buildAsistPagoKeyboard(
         const countLbl = (showMonthAttendanceCount && !meetsThreshold(p) && monthCt > 0)
             ? ` (${monthCt})`
             : "";
-        const thief = isThief(p);
-        const thiefLbl = thief ? " 🥷" : "";
-        const nameLbl = `${p.last_name}, ${p.name}${countLbl}${thiefLbl} `;
+        const nameLbl = `${p.last_name}, ${p.name}${countLbl} `;
         acc = acc.row()
             .text(nameLbl + attendIcon(p), `ap|${dateCompact}|${hs}|a|${p.id}|${yn(p)}`);
-        if (thief) acc = acc.danger();
         acc = acc.text(payIcon(p), `ap|${dateCompact}|${hs}|x|${p.id}`);
 
         if (expandedPlayerId && expandedPlayerId === p.id) {
@@ -1313,9 +1200,6 @@ async function buildAsistPagoKeyboard(
     const catsLbl = cats.map(categorySlugToLabel);
     const catLbl = catsLbl.length === 1 ? `Categoria ${catsLbl[0]}` : `Categorias ${catsLbl.join(",")}`;
     kb = kb.row().text(`${catLbl}  |  ${strDate(dateNoon)}, ${hs}hs`, "noop");
-    if (anyThief) {
-        kb = kb.row().text("🥷 » Adeudan meses anteriores", "noop");
-    }
     if (anyMonthAttendanceCountShown) {
         kb = kb.row().text("(n) » Vinieron pero no pagaron", "noop");
     }
@@ -1520,17 +1404,18 @@ async function OnMessage(
             const selectedMonth = isoDate.substring(0, 7);
             const genericSlot = toGenericSlot(isoDate, hs);
             const cats = slotToCat(genericSlot);
-            const paymentId = await uuidv5(
+            const paymentId = await _uuidv5(
                 "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
                 `telegram:asistpago:${ctx.chat!.id}:${rosterMessageId}:${player_id}:${selectedMonth}:${genericSlot}`,
             );
 
+            const registeredBy = telegramRegisteredBy(ctx);
             const { error: insertErr } = await supabaseAdmin
                 .from("payments")
                 .insert([{
                     id: paymentId,
                     player_id,
-                    registered_by: "telegram",
+                    registered_by: registeredBy,
                     slot: genericSlot,
                     concept: "monthly",
                     month: selectedMonth,
@@ -1539,19 +1424,12 @@ async function OnMessage(
                 }]);
 
             if (insertErr) {
-                if (insertErr.code !== "23505") {
-                    console.error(insertErr);
-                    return reply(ctx, "Error al registrar pago");
+                if (insertErr.code === "23505") {
+                    // Duplicate send: payment already registered
+                    return reply(ctx, "Pago ya registrado");
                 }
-
-                const { error: updateErr } = await supabaseAdmin
-                    .from("payments")
-                    .update({ amount })
-                    .eq("id", paymentId);
-                if (updateErr) {
-                    console.error(updateErr);
-                    return reply(ctx, "Error al actualizar pago");
-                }
+                console.error(insertErr);
+                return reply(ctx, "Error al registrar pago");
             }
 
             const specificSlot = toSpecificSlot(isoDate, hs);
@@ -1669,7 +1547,7 @@ type Payment = {
     amount: number;
 };
 
-async function uuidv5(namespace: string, name: string): Promise<string> {
+async function _uuidv5(namespace: string, name: string): Promise<string> {
     const nsBytes = uuidToBytes(namespace);
     const nameBytes = new TextEncoder().encode(name);
 
@@ -1721,6 +1599,19 @@ function categorySlugToLabel(c: string): string {
     if (c === "cat-b") return "B";
     if (c === "cat-c") return "C";
     return c;
+}
+
+function telegramRegisteredBy(ctx: Context): string {
+    try {
+        const from = ctx.from;
+        if (!from) return "[unknown]";
+        const name = `${from.first_name}${from.last_name ? ` ${from.last_name}` : ""}`;
+        const uname = from.username ? `@${from.username}` : "";
+        return `${name}${uname ? ` (${uname})` : ""} [id=${from.id}]`;
+    } catch (error) {
+        console.error(error);
+        return "[unknown]";
+    }
 }
 
 function catchAll<C extends CommandContext<Context> | CallbackQueryContext<Context>, T>(

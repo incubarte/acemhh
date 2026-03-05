@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS "public"."payments" (
     "month" "text" NOT NULL,
     "is_cash" boolean DEFAULT true NOT NULL,
     "registered_by" "text" NOT NULL,
-    "slot" "text",
+    "slot" "text" NOT NULL,
     "session" "text"
 );
 
@@ -64,7 +64,7 @@ ALTER TABLE ONLY "public"."payments" ADD CONSTRAINT "payments_amount_positive" C
 ALTER TABLE ONLY "public"."payments" ADD CONSTRAINT "payments_concept_not_empty" CHECK (("concept" <> ''));
 ALTER TABLE ONLY "public"."payments" ADD CONSTRAINT "payments_month_not_empty" CHECK (("month" <> ''));
 ALTER TABLE ONLY "public"."payments" ADD CONSTRAINT "payments_concept_valid" CHECK (("concept" = ANY (ARRAY['monthly'::text, 'session'::text])));
-ALTER TABLE ONLY "public"."payments" ADD CONSTRAINT "payments_slot_or_session_required" CHECK ((("concept" = 'monthly'::text) AND ("slot" IS NOT NULL) AND ("session" IS NULL)) OR (("concept" = 'session'::text) AND ("session" IS NOT NULL) AND ("slot" IS NULL)));
+ALTER TABLE ONLY "public"."payments" ADD CONSTRAINT "payments_concept_session_rules" CHECK ((("concept" = 'monthly'::text) AND ("session" IS NULL)) OR (("concept" = 'session'::text) AND ("session" IS NOT NULL)));
 ALTER TABLE ONLY "public"."payments" ADD CONSTRAINT "payments_registered_by_not_empty" CHECK (("registered_by" <> ''));
 
 CREATE UNIQUE INDEX "attendances_session_player_id_idx" ON "public"."attendances" USING "btree" ("session", "player_id");
