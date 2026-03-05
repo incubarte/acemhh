@@ -1301,7 +1301,7 @@ async function buildAsistPagoKeyboard(
                 .text("100k", `ap|${dateCompact}|${hs}|m|${p.id}|100`)
                 .text("75k", `ap|${dateCompact}|${hs}|m|${p.id}|75`)
                 .text("50k", `ap|${dateCompact}|${hs}|m|${p.id}|50`)
-                .text("25k", `ap|${dateCompact}|${hs}|m|${p.id}|25`)
+                .text("30k", `ap|${dateCompact}|${hs}|m|${p.id}|30`)
                 .text("Otro", `ap|${dateCompact}|${hs}|o|${p.id}`);
         }
         return acc;
