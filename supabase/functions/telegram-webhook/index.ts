@@ -740,7 +740,7 @@ async function callbackListarPagosCateg(
 function CmdRegistrarAsistencia(ctx: CommandContext<Context>) {
     console.log(`Ejecutando comando ${CmdAsist}`);
 
-    const date = searchLastDayWithSlots(new Date());
+    const date = searchPrevDayWithSlots(new Date(), true);
     return ctx.reply(
         attendanceMessage("_Eligir sesión de entrenamiento:_"),
         {
@@ -753,7 +753,7 @@ function CmdRegistrarAsistencia(ctx: CommandContext<Context>) {
 function CmdRegistrarAsistenciaPago(ctx: CommandContext<Context>) {
     console.log(`Ejecutando comando ${CmdAsistPago}`);
 
-    const date = searchNextDayWithSlots(new Date(), true);
+    const date = searchPrevDayWithSlots(new Date(), true);
     return ctx.reply(
         attendanceMessage("_Eligir sesión de entrenamiento:_"),
         {
@@ -768,7 +768,7 @@ function cbAsistenciaDia(ctx: CallbackQueryContext<Context>) {
     console.log(`Callback asistencia - dia: ${dateText}`);
 
     const date = new Date(Date.parse(`${dateText}T12:00:00`));
-    const dateWithSlots = searchLastDayWithSlots(date);
+    const dateWithSlots = searchPrevDayWithSlots(date, true);
     return ctx.editMessageText(
         attendanceMessage("_Eligir sesión de entrenamiento:_"),
         {
@@ -1250,14 +1250,6 @@ function searchNextDayWithSlots(someDate: Date, includeCurrent = false) {
     for (let i = 0; i < 14; i++) {
         if (slotsForDay(date).length > 0) return date;
         date.setDate(date.getDate() + 1);
-    }
-    return date;
-}
-
-function searchLastDayWithSlots(someDate: Date) {
-    const date = new Date(someDate);
-    while (slotsForDay(date).length === 0) {
-        date.setDate(date.getDate() - 1);
     }
     return date;
 }
