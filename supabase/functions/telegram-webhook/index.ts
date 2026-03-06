@@ -885,6 +885,7 @@ async function cbAsistenciaSlot(ctx: CallbackQueryContext<Context>) {
 }
 
 async function cbAsistenciaPagoSlot(ctx: CallbackQueryContext<Context>) {
+    const t0Full = Date.now();
     const match = ctx.match as unknown as string[];
     const dateCompact = match[1];
     const isoDate = compactDateToIso(dateCompact);
@@ -903,88 +904,175 @@ async function cbAsistenciaPagoSlot(ctx: CallbackQueryContext<Context>) {
 
     const expandedPlayerId = action === "x" ? player_id : undefined;
 
-    if (action === "a" && player_id && arg) {
-        const attended = arg === "y";
-        const { error: insertErr } = await supabaseAdmin
-            .from("attendances")
-            .insert({ session: specificSlot, player_id, attended });
-
-        if (insertErr) {
-            if (insertErr.code !== "23505") {
-                return ctx.editMessageText("Error al marcar asistencia");
-            }
-
-            const { error: updateErr } = await supabaseAdmin
-                .from("attendances")
-                .update({ attended })
-                .eq("session", specificSlot)
-                .eq("player_id", player_id);
-
-            if (updateErr) {
-                return ctx.editMessageText("Error al marcar asistencia");
-            }
-        }
+    let tAfterAnswer = Date.now();
+    try {
+        await ctx.answerCallbackQuery();
+        tAfterAnswer = Date.now();
+    } catch {
+        // ignore
+        tAfterAnswer = Date.now();
     }
 
-    if (action === "m" && player_id && arg) {
-        const [valid, amount] = tryParseAmount(arg);
-        if (!valid) {
-            return ctx.answerCallbackQuery({ text: "Monto invalido" });
-        }
+    const t0 = tAfterAnswer;
+    let tAfterWrite = t0;
+    let tAfterBuildKb = t0;
+    let optimisticSucceeded = false;
+    let optimisticKeyboard: InlineKeyboardButton[][] | null = null;
 
-        const chatId = ctx.callbackQuery.message?.chat?.id;
-        const messageId = ctx.callbackQuery.message?.message_id;
-        if (!chatId || !messageId) {
-            return ctx.editMessageText("Error al determinar chat_id/message_id");
-        }
+    const tryOptimisticToggle = async () => {
+        if (action !== "a" || !player_id) return;
+        const message = ctx.callbackQuery.message;
+        const chatId = message?.chat?.id;
+        const messageId = message?.message_id;
+        const inlineKb = message?.reply_markup?.inline_keyboard;
+        if (!chatId || !messageId || !inlineKb) return;
 
-        const paymentId = await _uuidv5(
-            "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-            `telegram:asistpago:${chatId}:${messageId}:${player_id}:${selectedMonth}:${genericSlot}`,
+        const oldPrefix = `ap|${dateCompact}|${hs}|a|${player_id}|`;
+        type InlineCallbackButton = Extract<InlineKeyboardButton, { callback_data: string }>;
+        const isCallbackButton = (b: InlineKeyboardButton): b is InlineCallbackButton => {
+            return "callback_data" in b;
+        };
+
+        const newKb: InlineKeyboardButton[][] = inlineKb.map((row) =>
+            row.map((btn) => {
+                if (!isCallbackButton(btn)) return btn;
+                if (!btn.callback_data.startsWith(oldPrefix)) return btn;
+                const next = btn.callback_data.substring(oldPrefix.length);
+                if (next !== "y" && next !== "n") return btn;
+                const flipped = next === "y" ? "n" : "y";
+
+                const oldIcon = btn.text.startsWith("🙂")
+                    ? "🙂"
+                    : (btn.text.startsWith("🫥") ? "🫥" : "");
+
+                if (!oldIcon) {
+                    return { ...btn, callback_data: `${oldPrefix}${flipped}` };
+                }
+
+                const newIcon = oldIcon === "🙂" ? "🫥" : "🙂";
+                const restText = btn.text.substring(oldIcon.length);
+                return {
+                    ...btn,
+                    text: `${newIcon}${restText}`,
+                    callback_data: `${oldPrefix}${flipped}`,
+                };
+            })
         );
 
-        const registeredBy = telegramRegisteredBy(ctx);
-        const { error: insertErr } = await supabaseAdmin
-            .from("payments")
-            .insert([{
-                id: paymentId,
-                player_id,
-                registered_by: registeredBy,
-                slot: genericSlot,
-                concept: "monthly",
-                month: selectedMonth,
-                amount,
-                is_cash: true,
-            }]);
+        optimisticKeyboard = newKb;
+        optimisticSucceeded = await safeEditMessageReplyMarkup(chatId, messageId, newKb);
+    };
 
-        if (insertErr) {
-            if (insertErr.code === "23505") {
-                // Duplicate tap: payment already registered
-                await ctx.answerCallbackQuery({ text: "Pago ya registrado" });
-            } else {
-            console.error(insertErr);
-            return ctx.editMessageText("Error al registrar pago");
+    await tryOptimisticToggle();
+
+    try {
+        if (action === "a" && player_id && arg) {
+            const attended = arg === "y";
+            const { error: upsertErr } = await supabaseAdmin
+                .from("attendances")
+                .upsert(
+                    { session: specificSlot, player_id, attended },
+                    { onConflict: "session,player_id" },
+                );
+            if (upsertErr) {
+                console.error(upsertErr);
+                throw upsertErr;
             }
+
+            tAfterWrite = Date.now();
         }
+
+        if (action === "m" && player_id && arg) {
+            const [valid, amount] = tryParseAmount(arg);
+            if (!valid) {
+                return ctx.answerCallbackQuery({ text: "Monto invalido" });
+            }
+
+            const chatId = ctx.callbackQuery.message?.chat?.id;
+            const messageId = ctx.callbackQuery.message?.message_id;
+            if (!chatId || !messageId) {
+                return ctx.editMessageText("Error al determinar chat_id/message_id");
+            }
+
+            const paymentId = await _uuidv5(
+                "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+                `telegram:asistpago:${chatId}:${messageId}:${player_id}:${selectedMonth}:${genericSlot}`,
+            );
+
+            const registeredBy = telegramRegisteredBy(ctx);
+            const { error: insertErr } = await supabaseAdmin
+                .from("payments")
+                .insert([{
+                    id: paymentId,
+                    player_id,
+                    registered_by: registeredBy,
+                    slot: genericSlot,
+                    concept: "monthly",
+                    month: selectedMonth,
+                    amount,
+                    is_cash: true,
+                }]);
+
+            if (insertErr) {
+                if (insertErr.code === "23505") {
+                    await ctx.answerCallbackQuery({ text: "Pago ya registrado" });
+                } else {
+                    console.error(insertErr);
+                    throw insertErr;
+                }
+            }
+
+            tAfterWrite = Date.now();
+        }
+
+        const kb = await buildAsistPagoKeyboard(
+            specificSlot,
+            genericSlot,
+            cats,
+            dateCompact,
+            hs,
+            expandedPlayerId,
+        );
+
+        tAfterBuildKb = Date.now();
+
+        if (
+            action === "a" && optimisticSucceeded && optimisticKeyboard &&
+            inlineKeyboardEquals((kb as unknown as InlineKeyboard).inline_keyboard, optimisticKeyboard)
+        ) {
+            const tDone = Date.now();
+            console.log(
+                `asistpago_timing action=${action ?? "(none)"} write=${tAfterWrite - t0}ms buildKb=${tAfterBuildKb - tAfterWrite}ms edit=0ms total=${tDone - t0}ms (skipped_rerender_equal)`,
+            );
+            console.log(
+                `asistpago_full_timing action=${action ?? "(none)"} answerCbq=${tAfterAnswer - t0Full}ms handler=${tDone - tAfterAnswer}ms fullTotal=${tDone - t0Full}ms (skipped_rerender_equal)`,
+            );
+            return;
+        }
+
+        const res = await safeEditMessageText(
+            ctx,
+            attendanceMessage("_Ajuste asistencia:_"),
+            {
+                reply_markup: kb,
+                parse_mode: "MarkdownV2",
+            },
+        );
+
+        const tAfterEdit = Date.now();
+        console.log(
+            `asistpago_timing action=${action ?? "(none)"} write=${tAfterWrite - t0}ms buildKb=${tAfterBuildKb - tAfterWrite}ms edit=${tAfterEdit - tAfterBuildKb}ms total=${tAfterEdit - t0}ms`,
+        );
+        console.log(
+            `asistpago_full_timing action=${action ?? "(none)"} answerCbq=${tAfterAnswer - t0Full}ms handler=${tAfterEdit - tAfterAnswer}ms fullTotal=${tAfterEdit - t0Full}ms`,
+        );
+        return res;
+    } catch {
+        return ctx.editMessageText(
+            "Error al procesar la accion. Reintente.",
+            NoKeyboard,
+        );
     }
-
-    const kb = await buildAsistPagoKeyboard(
-        specificSlot,
-        genericSlot,
-        cats,
-        dateCompact,
-        hs,
-        expandedPlayerId,
-    );
-
-    return safeEditMessageText(
-        ctx,
-        attendanceMessage("_Ajuste asistencia:_"),
-        {
-            reply_markup: kb,
-            parse_mode: "MarkdownV2",
-        },
-    );
 }
 
 async function cbAsistenciaPagoPayOther(ctx: CallbackQueryContext<Context>) {
@@ -1008,6 +1096,11 @@ async function cbAsistenciaPagoPayOther(ctx: CallbackQueryContext<Context>) {
     );
 }
 
+const playersCacheByCatsKey = new Map<
+    string,
+    { ts: number; players: Array<Pick<Player, "id" | "name" | "last_name">> }
+>();
+
 function isoDateToCompact(isoDate: string) {
     return isoDate.replaceAll("-", "");
 }
@@ -1024,21 +1117,44 @@ async function buildAsistPagoKeyboard(
     hs: string,
     expandedPlayerId?: string,
 ): Promise<InlineKeyboard> {
+    const t0 = Date.now();
+    let tAfterPlayers = t0;
+    let tAfterFetches = t0;
+    let tAfterProcess = t0;
+    let tAfterKb = t0;
+    let playersCacheHit = false;
+
     const paymentThresholdForSlot = (isoDate: string, slot: string): number => {
         void isoDate;
         void slot;
         return 100;
     };
 
-    const { data: players, error } = await supabaseAdmin
-        .from("players")
-        .select("id,name,last_name")
-        .in("category", cats)
-        .order("last_name")
-        .order("name");
-    if (error) {
-        console.error(error);
-        return new InlineKeyboard().row().text("Finalizar", "cancelar");
+    const catsKey = [...cats].sort().join(",");
+    const cachedPlayers = playersCacheByCatsKey.get(catsKey);
+    const cacheTtlMs = 5 * 60 * 1000;
+    let players: Array<Pick<Player, "id" | "name" | "last_name">> | null = null;
+
+    if (cachedPlayers && (Date.now() - cachedPlayers.ts) < cacheTtlMs) {
+        playersCacheHit = true;
+        players = cachedPlayers.players;
+        tAfterPlayers = Date.now();
+    } else {
+        const { data: playersData, error } = await supabaseAdmin
+            .from("players")
+            .select("id,name,last_name")
+            .in("category", cats)
+            .order("last_name")
+            .order("name");
+        tAfterPlayers = Date.now();
+        if (error) {
+            console.error(error);
+            return new InlineKeyboard().row().text("Finalizar", "cancelar");
+        }
+        players = playersData;
+        if (players) {
+            playersCacheByCatsKey.set(catsKey, { ts: Date.now(), players });
+        }
     }
 
     if (!players || players.length === 0) {
@@ -1054,14 +1170,8 @@ async function buildAsistPagoKeyboard(
     nextMonthStart.setUTCMonth(nextMonthStart.getUTCMonth() + 1);
     const monthStartNoon = new Date(`${selectedMonth}-01T12:00:00.000Z`);
     const selectedDayStartNoon = new Date(`${isoDate}T12:00:00.000Z`);
-    const [attRes, payRes, monthAttRes] = await Promise.all([
-        supabaseAdmin
-            .from("attendances")
-            .select<"player_id,attended", Pick<Attendance, "player_id" | "attended">>(
-                "player_id,attended",
-            )
-            .in("player_id", playerIds)
-            .eq("session", specificSlot),
+    const expectedWeekday = selectedDayStartNoon.getUTCDay();
+    const [payRes, monthAttRes] = await Promise.all([
         supabaseAdmin
             .from("payments")
             .select("player_id,amount,concept,slot,session,month")
@@ -1072,13 +1182,11 @@ async function buildAsistPagoKeyboard(
             .from("attendances")
             .select("player_id,attended,session")
             .in("player_id", playerIds)
-            .like("session", `${selectedMonth}-%`),
+            .eq("attended", true)
+            // Only fetch attendances for this month AND this hour to avoid scanning unrelated sessions
+            .like("session", `${selectedMonth}-% ${hs}hs`),
     ]);
-
-    if (attRes.error) {
-        console.error(attRes.error);
-        return new InlineKeyboard().row().text("Finalizar", "cancelar");
-    }
+    tAfterFetches = Date.now();
     if (payRes.error) {
         console.error(payRes.error);
         return new InlineKeyboard().row().text("Finalizar", "cancelar");
@@ -1089,28 +1197,20 @@ async function buildAsistPagoKeyboard(
         return new InlineKeyboard().row().text("Finalizar", "cancelar");
     }
 
-    const attendees = (attRes.data ?? []).filter((_) => _.attended).map((_) => _.player_id);
+    const attendees = (monthAttRes.data ?? [])
+        .filter((_) => _.session === specificSlot)
+        .map((_) => _.player_id);
     const payments = payRes.data;
 
-    const parseSpecificSession = (s: string): { isoDate: string; hour: string } | null => {
+    const parseSpecificSessionFast = (s: string): { isoDate: string; hour: string } | null => {
         // Expected format from toSpecificSlot(): YYYY-MM-DD HHhs
-        const parts = s.trim().split(/\s+/);
-        if (parts.length < 2) return null;
-        const [d, hRaw] = parts;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
-        const hour = hRaw.replace(/hs$/i, "");
-        if (!/^\d\d$/.test(hour)) return null;
-        return { isoDate: d, hour };
-    };
-
-    const attendanceAppliesToGenericSlot = (
-        row: { session?: string | null },
-        expectedGenericSlot: string,
-    ): boolean => {
-        if (!row.session) return false;
-        const parsed = parseSpecificSession(row.session);
-        if (!parsed) return false;
-        return toGenericSlot(parsed.isoDate, parsed.hour) === expectedGenericSlot;
+        // Use fixed positions to avoid regex/split overhead in hot loops.
+        if (s.length < 14) return null;
+        if (s[4] !== "-" || s[7] !== "-" || s[10] !== " ") return null;
+        const iso = s.slice(0, 10);
+        const hour = s.slice(11, 13);
+        if (s.slice(13, 15) !== "hs") return null;
+        return { isoDate: iso, hour };
     };
 
     const isPresent = (p: Player) => attendees.includes(p.id);
@@ -1121,11 +1221,12 @@ async function buildAsistPagoKeyboard(
             { player_id: string; attended?: boolean; session?: string | null }
         >
     ) {
-        if (!row.attended || !row.session) continue;
-        if (!attendanceAppliesToGenericSlot({ session: row.session }, genericSlot)) continue;
-        const parsed = parseSpecificSession(row.session);
+        if (!row.session) continue;
+        const parsed = parseSpecificSessionFast(row.session);
         if (!parsed) continue;
+        if (parsed.hour !== hs) continue;
         const d = new Date(`${parsed.isoDate}T12:00:00.000Z`);
+        if (d.getUTCDay() !== expectedWeekday) continue;
         if (d < monthStartNoon) continue;
         if (d >= selectedDayStartNoon) continue;
         attendedCountThisMonthByPlayerId.set(
@@ -1145,9 +1246,11 @@ async function buildAsistPagoKeyboard(
         paidAmountByPlayerId.set(pid, (paidAmountByPlayerId.get(pid) ?? 0) + amt);
     }
 
+    tAfterProcess = Date.now();
+
     const paidAmount = (p: Player) => paidAmountByPlayerId.get(p.id) ?? 0;
     const yn = (p: Player) => isPresent(p) ? "n" : "y";
-    const attendIcon = (p: Player) => isPresent(p) ? "✅" : "❌";
+    const attendIcon = (p: Player) => isPresent(p) ? "🙂" : "🫥";
 
     const threshold = paymentThresholdForSlot(isoDate, genericSlot);
     const meetsThreshold = (p: Player) => paidAmount(p) >= threshold;
@@ -1161,7 +1264,7 @@ async function buildAsistPagoKeyboard(
 
     const payIcon = (p: Player) => {
         const amt = paidAmount(p);
-        if (amt <= 0) return "⚠️";
+        if (amt <= 0) return "Registrar Pago";
         if (amt < threshold) return `⚠️ ${amt}`;
         return `💶 ${amt}`;
     };
@@ -1173,14 +1276,27 @@ async function buildAsistPagoKeyboard(
     const owingPlayers = players.filter((p) => !meetsThreshold(p));
     const paidPlayers = players.filter((p) => meetsThreshold(p));
 
+    const shortenLastName = (last: string): string => {
+        if (last === "Burgess-Webb") return "Burgess-W";
+        if (last === "Burguess-Webb") return "Burguess-W";
+        return last;
+    };
+
+    const shortenFirstName = (name: string): string => {
+        if (name === "Maximiliano") return "Maxi";
+        return name;
+    };
+
     const addPlayerRow = (acc: InlineKeyboard, p: Player) => {
         const monthCt = attendedCountThisMonthByPlayerId.get(p.id) ?? 0;
         const countLbl = (showMonthAttendanceCount && !meetsThreshold(p) && monthCt > 0)
             ? ` (${monthCt})`
             : "";
-        const nameLbl = `${p.last_name}, ${p.name}${countLbl} `;
+        const lastNameLbl = shortenLastName(p.last_name);
+        const firstNameLbl = shortenFirstName(p.name);
+        const nameLbl = `${lastNameLbl}, ${firstNameLbl}${countLbl} `;
         acc = acc.row()
-            .text(nameLbl + attendIcon(p), `ap|${dateCompact}|${hs}|a|${p.id}|${yn(p)}`);
+            .text(`${attendIcon(p)} ${nameLbl}`, `ap|${dateCompact}|${hs}|a|${p.id}|${yn(p)}`);
         acc = acc.text(payIcon(p), `ap|${dateCompact}|${hs}|x|${p.id}`);
 
         if (expandedPlayerId && expandedPlayerId === p.id) {
@@ -1212,6 +1328,12 @@ async function buildAsistPagoKeyboard(
     }
     kb = kb.row().text("Atras", `apd|${dateCompact}`).primary();
     kb = kb.text("Finalizar", "cancelar").primary();
+
+    tAfterKb = Date.now();
+    console.log(
+        `asistpago_buildkb_timing players=${players.length} att=${attendees.length} pay=${payRes.data?.length ?? 0} monthAtt=${monthAttRes.data?.length ?? 0} cacheHit=${playersCacheHit} ` +
+            `playersQ=${tAfterPlayers - t0}ms fetchQ=${tAfterFetches - tAfterPlayers}ms process=${tAfterProcess - tAfterFetches}ms kb=${tAfterKb - tAfterProcess}ms total=${tAfterKb - t0}ms`,
+    );
     return kb;
 }
 
@@ -1498,6 +1620,43 @@ async function safeEditMessageText(
         }
         throw err;
     }
+}
+
+async function safeEditMessageReplyMarkup(
+    chatId: number,
+    messageId: number,
+    inline_keyboard: InlineKeyboardButton[][],
+) {
+    try {
+        await bot.api.editMessageReplyMarkup(
+            chatId,
+            messageId,
+            { reply_markup: { inline_keyboard } },
+        );
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function inlineKeyboardEquals(
+    a: InlineKeyboardButton[][] | undefined,
+    b: InlineKeyboardButton[][],
+): boolean {
+    if (!a) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        const ar = a[i];
+        const br = b[i];
+        if (ar.length !== br.length) return false;
+        for (let j = 0; j < ar.length; j++) {
+            const ab = ar[j] as unknown as { text?: string; callback_data?: string };
+            const bb = br[j] as unknown as { text?: string; callback_data?: string };
+            if ((ab.text ?? "") !== (bb.text ?? "")) return false;
+            if ((ab.callback_data ?? "") !== (bb.callback_data ?? "")) return false;
+        }
+    }
+    return true;
 }
 
 // ////////////////////////////////////
