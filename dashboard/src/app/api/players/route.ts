@@ -1,19 +1,9 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { verifySessionCookieValue } from "@/lib/telegramAuth";
+import { withPermission } from "@/lib/authMiddleware";
 
-function requireAuth() {
-  const v = cookies().get("dash_session")?.value;
-  if (!v) return null;
-  return verifySessionCookieValue(v);
-}
-
-export async function GET(req: Request) {
+export const GET = withPermission('api', '/api/players', 'GET', async (sess, req) => {
   try {
-    const sess = requireAuth();
-    if (!sess) return new NextResponse("Unauthorized", { status: 401 });
-
     const { searchParams } = new URL(req.url);
     const id = (searchParams.get("id") || "").trim();
     if (id) {
@@ -51,12 +41,10 @@ export async function GET(req: Request) {
       process.env.NODE_ENV === "production" || !stack ? msg : `${msg}\n\n${stack}`;
     return new NextResponse(body, { status: 500 });
   }
-}
+});
 
-export async function POST(req: Request) {
+export const POST = withPermission('api', '/api/players', 'POST', async (sess, req) => {
   try {
-    const sess = requireAuth();
-    if (!sess) return new NextResponse("Unauthorized", { status: 401 });
 
     const body = (await req.json()) as {
       name: string;
@@ -95,4 +83,4 @@ export async function POST(req: Request) {
       process.env.NODE_ENV === "production" || !stack ? msg : `${msg}\n\n${stack}`;
     return new NextResponse(body, { status: 500 });
   }
-}
+});

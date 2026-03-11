@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
+import ProtectedPage from "../components/ProtectedPage";
 
 type Player = {
   id: string;
@@ -38,7 +39,7 @@ function yearMonthFor(month: number) {
   return `${y}-${m}`;
 }
 
-export default function PaymentsPage() {
+function PaymentsPageContent() {
   const sp = useSearchParams();
   const [step, setStep] = useState<Step>({ kind: "search" });
   const [q, setQ] = useState("");
@@ -48,6 +49,7 @@ export default function PaymentsPage() {
   const [customAmount, setCustomAmount] = useState("");
   const [showCustomAmount, setShowCustomAmount] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [successTimeoutId, setSuccessTimeoutId] = useState<NodeJS.Timeout | null>(null);
 
   const suggestions = useMemo(
     () => [
@@ -160,8 +162,9 @@ export default function PaymentsPage() {
 
   if (step.kind === "search") {
     return (
-      <div>
-        <h1>Registrar Pago</h1>
+      <ProtectedPage requiredPage="/payments">
+        <div>
+          <h1>Registrar Pago</h1>
         <h2 style={{ fontSize: "1.1rem", fontWeight: 500, marginTop: 16, marginBottom: 8 }}>Buscar jugador</h2>
 
         <div style={{ marginTop: 12 }}>
@@ -211,13 +214,15 @@ export default function PaymentsPage() {
           </Link>
         </div>
       </div>
+      </ProtectedPage>
     );
   }
 
   if (step.kind === "concept") {
     return (
-      <div>
-        <h1>Registrar Pago</h1>
+      <ProtectedPage requiredPage="/payments">
+        <div>
+          <h1>Registrar Pago</h1>
         <div className="card" style={{ marginTop: 12 }}>
           <div><strong>Jugador:</strong> {step.player.last_name}, {step.player.name}</div>
         </div>
@@ -235,6 +240,7 @@ export default function PaymentsPage() {
           </button>
         </div>
       </div>
+      </ProtectedPage>
     );
   }
 
@@ -243,8 +249,9 @@ export default function PaymentsPage() {
       setStep({ kind: "summary", player: step.player, concept: step.concept, amount: amt, month });
 
     return (
-      <div>
-        <h1>Registrar Pago</h1>
+      <ProtectedPage requiredPage="/payments">
+        <div>
+          <h1>Registrar Pago</h1>
         <div className="card" style={{ marginTop: 12 }}>
           <div><strong>Jugador:</strong> {step.player.last_name}, {step.player.name}</div>
           <div><strong>Concepto:</strong> Cuota social</div>
@@ -314,6 +321,7 @@ export default function PaymentsPage() {
           </button>
         </div>
       </div>
+      </ProtectedPage>
     );
   }
 
@@ -336,32 +344,29 @@ export default function PaymentsPage() {
         return;
       }
       setShowSuccess(true);
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         setShowSuccess(false);
         setQ("");
         setPlayers([]);
         setStep({ kind: "search" });
-      }, 2000);
+      }, 4000);
+      setSuccessTimeoutId(timeoutId);
+    };
+
+    const handleSuccessClick = () => {
+      if (successTimeoutId) {
+        clearTimeout(successTimeoutId);
+      }
+      setShowSuccess(false);
+      setQ("");
+      setPlayers([]);
+      setStep({ kind: "search" });
     };
 
     return (
-      <div>
-        <h1>Registrar Pago</h1>
-
-        {showSuccess && (
-          <div style={{
-            marginTop: 12,
-            padding: 16,
-            borderRadius: 12,
-            background: "linear-gradient(135deg, rgba(36, 179, 91, 0.2), rgba(15, 122, 68, 0.15))",
-            border: "1px solid rgba(36, 179, 91, 0.4)",
-            textAlign: "center",
-            fontWeight: 600,
-            color: "var(--acemhh-green-3)"
-          }}>
-            ✓ Pago registrado exitosamente
-          </div>
-        )}
+      <ProtectedPage requiredPage="/payments">
+        <div>
+          <h1>Registrar Pago</h1>
 
         <div className="card" style={{ marginTop: 12 }}>
           <div><strong>Jugador:</strong> {step.player.last_name}, {step.player.name}</div>
@@ -371,17 +376,46 @@ export default function PaymentsPage() {
 
         {err ? <p style={{ marginTop: 12, color: "crimson" }}>{err}</p> : null}
 
-        <div className="row" style={{ marginTop: 16 }}>
-          <button className="btnPrimary" onClick={confirm} disabled={loading}>
-            Confirmar
-          </button>
-          <button onClick={() => setStep({ kind: "amount", player: step.player, concept: step.concept })} disabled={loading}>
-            Cancelar
-          </button>
-        </div>
+        {!showSuccess && (
+          <div className="row" style={{ marginTop: 16 }}>
+            <button className="btnPrimary" onClick={confirm} disabled={loading}>
+              Confirmar
+            </button>
+            <button onClick={() => setStep({ kind: "amount", player: step.player, concept: step.concept })} disabled={loading}>
+              Cancelar
+            </button>
+          </div>
+        )}
+
+        {showSuccess && (
+          <div 
+            onClick={handleSuccessClick}
+            style={{
+              marginTop: 16,
+              padding: 16,
+              borderRadius: 12,
+              background: "linear-gradient(135deg, rgba(36, 179, 91, 0.2), rgba(15, 122, 68, 0.15))",
+              border: "1px solid rgba(36, 179, 91, 0.4)",
+              textAlign: "center",
+              fontWeight: 600,
+              color: "var(--acemhh-green-3)",
+              cursor: "pointer"
+            }}>
+            ✓ Pago registrado exitosamente
+          </div>
+        )}
       </div>
+      </ProtectedPage>
     );
   }
 
   return null;
+}
+
+export default function PaymentsPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: "20px", textAlign: "center" }}>Cargando...</div>}>
+      <PaymentsPageContent />
+    </Suspense>
+  );
 }

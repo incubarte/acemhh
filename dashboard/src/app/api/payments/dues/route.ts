@@ -1,15 +1,8 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { verifySessionCookieValue } from "@/lib/telegramAuth";
+import { withPermission, type AuthSession } from "@/lib/authMiddleware";
 
-function requireAuth() {
-  const v = cookies().get("dash_session")?.value;
-  if (!v) return null;
-  return verifySessionCookieValue(v);
-}
-
-function formatRegisteredBy(sess: ReturnType<typeof requireAuth>): string {
+function formatRegisteredBy(sess: AuthSession | null): string {
   if (!sess) return "[unknown]";
   const name = `${sess.first_name}${sess.last_name ? ` ${sess.last_name}` : ""}`.trim();
   const uname = sess.username ? `@${sess.username}` : "";
@@ -24,9 +17,7 @@ function currentYearMonth() {
   return `${y}-${m}`;
 }
 
-export async function POST(req: Request) {
-  const sess = requireAuth();
-  if (!sess) return new NextResponse("Unauthorized", { status: 401 });
+export const POST = withPermission('api', '/api/payments/dues', 'POST', async (sess, req) => {
 
   const body = (await req.json()) as { player_id: string; amount: number; month?: string };
   if (!body?.player_id || !body?.amount) {
@@ -62,4 +53,4 @@ export async function POST(req: Request) {
 
   if (error) return new NextResponse(error.message, { status: 500 });
   return NextResponse.json({ ok: true });
-}
+});
