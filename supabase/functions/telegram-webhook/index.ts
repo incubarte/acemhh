@@ -45,6 +45,7 @@ const CMD_RP = "rper";
 const CMD_CP = "cper";
 const CmdAsist = "asist";
 const CmdAsistPago = "asistpago";
+const CMD_ANUAL = "anual";
 
 const VALID_CATEGORIES = [
     "esc-2",
@@ -69,6 +70,7 @@ bot.command(CMD_PAGO, catchAll(CmdPago));
 bot.command(CMD_LISTAR_PAGOS, catchAll(CmdListarPagos));
 bot.command(CmdAsist, catchAll(CmdRegistrarAsistencia));
 bot.command(CmdAsistPago, catchAll(CmdRegistrarAsistenciaPago));
+bot.command(CMD_ANUAL, catchAll(CmdAnual));
 
 bot.callbackQuery(/registrarpago cat (.*)$/, catchAll(callbackPagoCategoria));
 bot.callbackQuery(/registrarpago jugador (.+)$/, catchAll(callbackPagoJugador));
@@ -118,31 +120,36 @@ bot.on("message", OnMessage);
 
 bot.catch((err: unknown) => console.error(err));
 
-// bot.start();
+const TelegramOperationMode = (Deno.env.get("TELEGRAM_OPERATION_MODE") ?? "setWebhook").trim();
 
-const app = new Application();
-const TelegramWebhookSecretToken = Deno.env.get("TELEGRAM_WEBHOOK_SECRET_TOKEN");
+if (TelegramOperationMode === "getUpdates") {
+    bot.start();
+    console.log("Using long-polling mode")
+} else {
+    const app = new Application();
+    const TelegramWebhookSecretToken = Deno.env.get("TELEGRAM_WEBHOOK_SECRET_TOKEN");
 
-app.use(async (ctx, next) => {
-    if (!TelegramWebhookSecretToken) {
-        ctx.response.status = 500;
-        ctx.response.body = "Server not configured";
-        return;
-    }
-    const token = ctx.request.headers.get("x-telegram-bot-api-secret-token");
-    if (token !== TelegramWebhookSecretToken) {
-        ctx.response.status = 401;
-        ctx.response.body = "Unauthorized";
-        return;
-    }
+    app.use(async (ctx, next) => {
+        if (!TelegramWebhookSecretToken) {
+            ctx.response.status = 500;
+            ctx.response.body = "Server not configured";
+            return;
+        }
+        const token = ctx.request.headers.get("x-telegram-bot-api-secret-token");
+        if (token !== TelegramWebhookSecretToken) {
+            ctx.response.status = 401;
+            ctx.response.body = "Unauthorized";
+            return;
+        }
 
-    await next();
-});
-app.use(webhookCallback(bot, "oak"));
+        await next();
+    });
+    app.use(webhookCallback(bot, "oak"));
 
-Deno.serve(async (req: Request) => {
-    return await app.handle(req) ?? new Response("Not Found", { status: 404 });
-});
+    Deno.serve(async (req: Request) => {
+        return await app.handle(req) ?? new Response("Not Found", { status: 404 });
+    });
+}
 
 /* To invoke locally:
 
@@ -159,6 +166,24 @@ Deno.serve(async (req: Request) => {
 // ////////////////////////////////////
 // HANDLERS - PAGO
 // ////////////////////////////////////
+
+async function CmdAnual(ctx: CommandContext<Context>) {
+    const url = (Deno.env.get("DASHBOARD_URL") ?? "").trim();
+    if (!url) {
+        return ctx.reply(
+            "Dashboard no configurado. Falta la variable de entorno DASHBOARD_URL",
+        );
+    }
+
+    const kb = new InlineKeyboard().webApp(
+        "Abrir pago anual",
+        url,
+    );
+    return ctx.reply(
+        "Abrí el mini app para registrar el pago anual:",
+        { reply_markup: kb },
+    );
+}
 
 async function CmdRegistrarPersona(ctx: CommandContext<Context>) {
     console.log(`Ejecutando comando ${CMD_RP}`);

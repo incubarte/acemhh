@@ -1,0 +1,211 @@
+:root {
+  --acemhh-bg: #000000;
+  --acemhh-surface: rgba(255, 255, 255, 0.06);
+  --acemhh-surface-2: rgba(255, 255, 255, 0.1);
+  --acemhh-border: rgba(255, 255, 255, 0.12);
+
+  --acemhh-text: #f3f7f4;
+  --acemhh-muted: rgba(243, 247, 244, 0.7);
+
+  --acemhh-green: #24b35b;
+  --acemhh-green-2: #0f7a44;
+  --acemhh-green-3: #a3df80;
+  --acemhh-orange: #f36c21;
+
+  --acemhh-radius: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  color: var(--acemhh-text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background:
+    radial-gradient(900px 520px at 50% -100px, rgba(36, 179, 91, 0.35), transparent 55%),
+    radial-gradient(700px 420px at 110% 40%, rgba(243, 108, 33, 0.22), transparent 55%),
+    radial-gradient(700px 520px at -20% 60%, rgba(163, 223, 128, 0.18), transparent 55%),
+    linear-gradient(180deg, #000000, #000000);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, var(--acemhh-orange), #ff8c42);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+h2 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+p {
+  margin: 10px 0 0;
+  color: var(--acemhh-muted);
+  line-height: 1.4;
+}
+
+strong {
+  color: var(--acemhh-text);
+}
+
+.container {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 18px 16px 28px;
+}
+
+.appShell {
+  border: 1px solid var(--acemhh-border);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(16px);
+  border-radius: calc(var(--acemhh-radius) + 6px);
+  padding: 20px;
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.4),
+    0 8px 16px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.card {
+  border: 1px solid var(--acemhh-border);
+  background: var(--acemhh-surface);
+  border-radius: var(--acemhh-radius);
+  padding: 16px;
+  line-height: 1.8;
+}
+
+.card > div {
+  margin: 4px 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  appearance: none;
+  border: 1px solid var(--acemhh-border);
+  background: var(--acemhh-surface);
+  color: var(--acemhh-text);
+  padding: 12px 16px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+button:hover {
+  background: var(--acemhh-surface-2);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+button:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btnPrimary {
+  border-color: rgba(36, 179, 91, 0.6);
+  background: linear-gradient(180deg, rgba(36, 179, 91, 0.4), rgba(15, 122, 68, 0.3));
+  box-shadow: 0 2px 8px rgba(36, 179, 91, 0.2);
+}
+
+.btnPrimary:hover {
+  border-color: rgba(36, 179, 91, 0.8);
+  background: linear-gradient(180deg, rgba(36, 179, 91, 0.5), rgba(15, 122, 68, 0.35));
+  box-shadow: 0 4px 12px rgba(36, 179, 91, 0.3);
+  transform: translateY(-1px);
+}
+
+.btnDanger {
+  border-color: rgba(243, 108, 33, 0.55);
+  background: linear-gradient(180deg, rgba(243, 108, 33, 0.24), rgba(243, 108, 33, 0.12));
+}
+
+input,
+select {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--acemhh-border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--acemhh-text);
+  outline: none;
+  transition: all 200ms ease;
+  font-size: 15px;
+}
+
+input::placeholder {
+  color: rgba(243, 247, 244, 0.45);
+}
+
+input:focus,
+select:focus {
+  border-color: rgba(36, 179, 91, 0.8);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 3px rgba(36, 179, 91, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.grid {
+  display: grid;
+  gap: 10px;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--acemhh-border);
+  background: rgba(7, 19, 13, 0.35);
+  color: var(--acemhh-muted);
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--acemhh-border);
+  margin: 14px 0;
+}
