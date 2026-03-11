@@ -1,11 +1,29 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useState, Suspense } from "react";
+import ProtectedPage from "../../components/ProtectedPage";
 
-export default function NewPlayerPage() {
+function NewPlayerPageContent() {
   const sp = useSearchParams();
   const returnTo = sp.get("returnTo") || "/payments";
+
+  return (
+    <ProtectedPage requiredPage="/players/new">
+      <NewPlayerForm returnTo={returnTo} />
+    </ProtectedPage>
+  );
+}
+
+export default function NewPlayerPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: "20px", textAlign: "center" }}>Cargando...</div>}>
+      <NewPlayerPageContent />
+    </Suspense>
+  );
+}
+
+function NewPlayerForm({ returnTo }: { returnTo: string }) {
 
   const [name, setName] = useState("");
   const [lastName, setLastName] = useState("");
