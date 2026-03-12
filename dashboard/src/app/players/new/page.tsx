@@ -7,10 +7,34 @@ import ProtectedPage from "../../components/ProtectedPage";
 function NewPlayerPageContent() {
   const sp = useSearchParams();
   const returnTo = sp.get("returnTo") || "/payments";
+  const inviteeParam = sp.get("invitee");
+  const categoryParam = sp.get("category");
+
+  const [playerType, setPlayerType] = useState<'member' | 'invitee' | null>(
+    inviteeParam === 'true' ? 'invitee' : inviteeParam === 'false' ? 'member' : null
+  );
+
+  if (playerType === null) {
+    return (
+      <ProtectedPage requiredPage="/players/new">
+        <div>
+          <h1>Nuevo jugador</h1>
+          <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 12 }}>
+            <button className="btnPrimary" onClick={() => setPlayerType('member')} style={{ width: "100%" }}>
+              Socio
+            </button>
+            <button className="btnPrimary" onClick={() => setPlayerType('invitee')} style={{ width: "100%" }}>
+              Invitado
+            </button>
+          </div>
+        </div>
+      </ProtectedPage>
+    );
+  }
 
   return (
     <ProtectedPage requiredPage="/players/new">
-      <NewPlayerForm returnTo={returnTo} />
+      <NewPlayerForm returnTo={returnTo} invitee={playerType === 'invitee'} defaultCategory={categoryParam} />
     </ProtectedPage>
   );
 }
@@ -23,17 +47,22 @@ export default function NewPlayerPage() {
   );
 }
 
-function NewPlayerForm({ returnTo }: { returnTo: string }) {
+function NewPlayerForm({ returnTo, invitee, defaultCategory }: { returnTo: string; invitee: boolean; defaultCategory: string | null }) {
 
   const [name, setName] = useState("");
   const [lastName, setLastName] = useState("");
   const [dni, setDni] = useState("");
   const [fechaNac, setFechaNac] = useState("");
-  const [category, setCategory] = useState("cat-b");
+  const [category, setCategory] = useState(defaultCategory || "cat-b");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const categories = useMemo(() => ["esc-2", "u-14", "cat-c", "cat-b", "cat-a"], []);
+  const categories = useMemo(() => [
+    { value: "u-14", label: "Menores" },
+    { value: "cat-c", label: "Categoría C" },
+    { value: "cat-b", label: "Categoría B" },
+    { value: "cat-a", label: "Categoría A" },
+  ], []);
 
   const submit = async () => {
     setLoading(true);
@@ -44,9 +73,10 @@ function NewPlayerForm({ returnTo }: { returnTo: string }) {
       body: JSON.stringify({
         name,
         last_name: lastName,
-        dni,
-        fecha_nac: fechaNac || null,
+        ...(invitee ? {} : { dni }),
+        fecha_nac: invitee ? null : (fechaNac || null),
         category,
+        invitee,
       }),
     });
     setLoading(false);
@@ -60,7 +90,7 @@ function NewPlayerForm({ returnTo }: { returnTo: string }) {
 
   return (
     <div>
-      <h1>Nuevo jugador</h1>
+      <h1>{invitee ? "Agregar Invitado" : "Nuevo jugador"}</h1>
 
       <div className="grid" style={{ marginTop: 12 }}>
         <label>
@@ -73,21 +103,25 @@ function NewPlayerForm({ returnTo }: { returnTo: string }) {
           <input value={lastName} onChange={(e) => setLastName(e.target.value)} />
         </label>
 
-        <label>
-          DNI
-          <input value={dni} onChange={(e) => setDni(e.target.value)} />
-        </label>
+        {!invitee && (
+          <>
+            <label>
+              DNI
+              <input value={dni} onChange={(e) => setDni(e.target.value)} />
+            </label>
 
-        <label>
-          Fecha nac. (YYYY-MM-DD)
-          <input value={fechaNac} onChange={(e) => setFechaNac(e.target.value)} placeholder="2000-01-31" />
-        </label>
+            <label>
+              Fecha nac. (YYYY-MM-DD)
+              <input value={fechaNac} onChange={(e) => setFechaNac(e.target.value)} placeholder="2000-01-31" />
+            </label>
+          </>
+        )}
 
         <label>
           Categoría
           <select value={category} onChange={(e) => setCategory(e.target.value)}>
             {categories.map((c) => (
-              <option key={c} value={c}>{c}</option>
+              <option key={c.value} value={c.value}>{c.label}</option>
             ))}
           </select>
         </label>

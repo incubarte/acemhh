@@ -10,59 +10,74 @@ type TrainingSlot = {
   category: string; // cat-a, cat-b, cat-c
 };
 
+function findThursday(direction: 'prev' | 'next', from: Date): string {
+  const d = new Date(from);
+  d.setHours(12, 0, 0, 0);
+  const offset = direction === 'prev' ? -1 : 1;
+  for (let i = 1; i <= 14; i++) {
+    const check = new Date(d);
+    check.setDate(d.getDate() + i * offset);
+    if (check.getDay() === 4) {
+      const y = check.getFullYear();
+      const m = String(check.getMonth() + 1).padStart(2, '0');
+      const dd = String(check.getDate()).padStart(2, '0');
+      return `${y}-${m}-${dd}`;
+    }
+  }
+  return '';
+}
+
+function findClosestThursday(): string {
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+  for (let i = 0; i <= 14; i++) {
+    const check = new Date(today);
+    check.setDate(today.getDate() - i);
+    if (check.getDay() === 4) {
+      const y = check.getFullYear();
+      const m = String(check.getMonth() + 1).padStart(2, '0');
+      const dd = String(check.getDate()).padStart(2, '0');
+      return `${y}-${m}-${dd}`;
+    }
+  }
+  return '';
+}
+
+function slotsForDate(dateStr: string): TrainingSlot[] {
+  return [
+    { date: dateStr, hour: 21, category: "cat-a" },
+    { date: dateStr, hour: 22, category: "cat-b" },
+    { date: dateStr, hour: 23, category: "cat-c" },
+  ];
+}
+
 function TrainingSessionsContent() {
   const router = useRouter();
-  const [slots, setSlots] = useState<TrainingSlot[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [currentDate, setCurrentDate] = useState(() => findClosestThursday());
 
-  useEffect(() => {
-    // Find the most recent Thursday with training slots
-    const findRecentThursday = () => {
-      const today = new Date();
-      const result: TrainingSlot[] = [];
-      
-      // Search backwards up to 14 days
-      for (let i = 0; i <= 14; i++) {
-        // Create date at noon to avoid timezone issues
-        const checkDate = new Date(today);
-        checkDate.setDate(today.getDate() - i);
-        checkDate.setHours(12, 0, 0, 0);
-        
-        // Check if it's Thursday (day 4)
-        if (checkDate.getDay() === 4) {
-          const year = checkDate.getFullYear();
-          const month = String(checkDate.getMonth() + 1).padStart(2, '0');
-          const day = String(checkDate.getDate()).padStart(2, '0');
-          const dateStr = `${year}-${month}-${day}`;
-          
-          result.push(
-            { date: dateStr, hour: 21, category: "cat-a" },
-            { date: dateStr, hour: 22, category: "cat-b" },
-            { date: dateStr, hour: 23, category: "cat-c" }
-          );
-          break;
-        }
-      }
-      
-      return result;
-    };
+  const slots = currentDate ? slotsForDate(currentDate) : [];
 
-    const recentSlots = findRecentThursday();
-    setSlots(recentSlots);
-    setLoading(false);
-  }, []);
+  const goToPrev = () => {
+    const prev = findThursday('prev', new Date(currentDate + 'T12:00:00'));
+    if (prev) setCurrentDate(prev);
+  };
+
+  const goToNext = () => {
+    const next = findThursday('next', new Date(currentDate + 'T12:00:00'));
+    if (next) setCurrentDate(next);
+  };
 
   const handleSlotClick = (slot: TrainingSlot) => {
     const sessionId = `${slot.date}-${slot.hour}`;
     router.push(`/training-sessions/${sessionId}`);
   };
 
-  const formatDate = (dateStr: string) => {
+  const formatDateShort = (dateStr: string) => {
     const date = new Date(dateStr + "T12:00:00");
     return date.toLocaleDateString("es-AR", { 
-      weekday: "long", 
+      weekday: "short", 
       year: "numeric", 
-      month: "long", 
+      month: "short", 
       day: "numeric" 
     });
   };
@@ -76,18 +91,7 @@ function TrainingSessionsContent() {
     }
   };
 
-  if (loading) {
-    return (
-      <ProtectedPage requiredPage="/training-sessions">
-        <div>
-          <h1>Sesiones de Entrenamiento</h1>
-          <p style={{ marginTop: 12 }}>Cargando...</p>
-        </div>
-      </ProtectedPage>
-    );
-  }
-
-  if (slots.length === 0) {
+  if (!currentDate) {
     return (
       <ProtectedPage requiredPage="/training-sessions">
         <div>
@@ -98,15 +102,32 @@ function TrainingSessionsContent() {
     );
   }
 
-  const firstSlotDate = slots[0].date;
-
   return (
     <ProtectedPage requiredPage="/training-sessions">
       <div>
         <h1>Sesiones de Entrenamiento</h1>
         
-        <div style={{ marginTop: 16, marginBottom: 12, opacity: 0.8 }}>
-          {formatDate(firstSlotDate)}
+        <div style={{ 
+          marginTop: 16, 
+          marginBottom: 12, 
+          display: "flex", 
+          alignItems: "center", 
+          justifyContent: "center",
+          gap: 16
+        }}>
+          <span
+            onClick={goToPrev}
+            style={{ cursor: "pointer", fontSize: "1.2rem", userSelect: "none", WebkitTapHighlightColor: "transparent" }}
+          >
+            «
+          </span>
+          <span style={{ opacity: 0.8 }}>{formatDateShort(currentDate)}</span>
+          <span
+            onClick={goToNext}
+            style={{ cursor: "pointer", fontSize: "1.2rem", userSelect: "none", WebkitTapHighlightColor: "transparent" }}
+          >
+            »
+          </span>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

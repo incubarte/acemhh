@@ -76,17 +76,29 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
       return new NextResponse("Error fetching attendances", { status: 500 });
     }
 
-    // Get payments for this month and slot
-    const { data: payments, error: paymentsError } = await supabaseAdmin()
+    // Get monthly payments for this month and slot
+    const { data: monthlyPayments, error: monthlyError } = await supabaseAdmin()
       .from("payments")
       .select("player_id, amount")
       .eq("concept", "monthly")
       .eq("month", selectedMonth)
       .eq("slot", genericSlot);
 
-    if (paymentsError) {
-      console.error(paymentsError);
+    if (monthlyError) {
+      console.error(monthlyError);
       return new NextResponse("Error fetching payments", { status: 500 });
+    }
+
+    // Get session payments for this specific session
+    const { data: sessionPayments, error: sessionError } = await supabaseAdmin()
+      .from("payments")
+      .select("player_id, amount")
+      .eq("concept", "session")
+      .eq("session", specificSlot);
+
+    if (sessionError) {
+      console.error(sessionError);
+      return new NextResponse("Error fetching session payments", { status: 500 });
     }
 
     // Build response with attendance and payment info
@@ -96,20 +108,56 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
 
     const paymentMap = new Map<string, number>();
     const hasPaymentMap = new Map<string, boolean>();
-    (payments || []).forEach(p => {
+    (monthlyPayments || []).forEach(p => {
       const current = paymentMap.get(p.player_id) || 0;
       paymentMap.set(p.player_id, current + p.amount);
       hasPaymentMap.set(p.player_id, true);
     });
+    (sessionPayments || []).forEach(p => {
+      const current = paymentMap.get(p.player_id) || 0;
+      paymentMap.set(p.player_id, current + p.amount);
+      hasPaymentMap.set(p.player_id, true);
+    });
+
+    // Find cross-category players (attendance or session payment for this session)
+    const categoryPlayerIds = new Set((players || []).map(p => p.id));
+    const crossCategoryIds = new Set<string>();
+    (attendances || [])
+      .filter(a => a.attended && !categoryPlayerIds.has(a.player_id))
+      .forEach(a => crossCategoryIds.add(a.player_id));
+    (sessionPayments || [])
+      .filter(p => !categoryPlayerIds.has(p.player_id))
+      .forEach(p => crossCategoryIds.add(p.player_id));
+
+    let crossCategoryPlayers: typeof players = [];
+    if (crossCategoryIds.size > 0) {
+      const { data: ccPlayers } = await supabaseAdmin()
+        .from("players")
+        .select("*")
+        .in("id", Array.from(crossCategoryIds))
+        .order("last_name")
+        .order("name");
+
+      if (ccPlayers) crossCategoryPlayers = ccPlayers;
+    }
 
     const playersWithData = (players || []).map(player => ({
       ...player,
       attended: attendanceMap.get(player.id) || false,
       payments: paymentMap.get(player.id) || 0,
       hasSessionPayment: hasPaymentMap.get(player.id) || false,
+      crossCategoryGuest: false,
     }));
 
-    return NextResponse.json({ players: playersWithData });
+    const crossCategoryWithData = (crossCategoryPlayers || []).map(player => ({
+      ...player,
+      attended: true,
+      payments: paymentMap.get(player.id) || 0,
+      hasSessionPayment: hasPaymentMap.get(player.id) || false,
+      crossCategoryGuest: true,
+    }));
+
+    return NextResponse.json({ players: [...playersWithData, ...crossCategoryWithData] });
   } catch (error) {
     console.error(error);
     return new NextResponse("Internal server error", { status: 500 });
