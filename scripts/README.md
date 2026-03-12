@@ -1,41 +1,38 @@
 # scripts
 
-## start-telegram-webhook.sh
+## startup-local-env.sh
 
-Starts the local `telegram-webhook` Supabase Edge Function using environment variables loaded from an env file.
+Sets up a cloudflared tunnel, starts the telegram webhook and the Next.js dashboard in a single terminal with colored output. Press `Ctrl+C` to stop all processes.
 
 ### Prereqs
 
-- Supabase CLI installed
-- Local Supabase stack running:
+- `cloudflared` installed (`brew install cloudflared`)
+- `deno` installed
+- `npm` installed
 
-```bash
-supabase start
-```
+### What it does
 
-### Env file
-
-By default it loads:
-
-- `supabase/functions/.env`
-
-Override with:
-
-- `SUPABASE_FUNCTIONS_ENV_FILE=/absolute/path/to/.env`
+1. Starts a cloudflared quick tunnel pointing to `http://localhost:3000`
+2. Extracts the tunnel URL and updates `DASHBOARD_URL` in `supabase/functions/.env`
+3. Starts the telegram webhook (`deno run`) with cyan `[WEBHOOK]` output
+4. Starts the dashboard (`npm run dev`) with yellow `[DASHBOARD]` output
+5. Prints the full process tree
+6. Shows BotFather domain setup instructions
 
 ### Usage
 
 ```bash
-./scripts/start-telegram-webhook.sh
+./scripts/startup-local-env.sh
 ```
 
-It runs:
+### Env files
 
-```bash
-deno run -A --env-file=supabase/functions/.env supabase/functions/telegram-webhook/index.ts
-```
+- **Webhook**: `supabase/functions/.env`
+- **Dashboard**: `dashboard/.env.local`
 
-You can control webhook vs long-polling with:
+### Telegram operation mode
 
-- `TELEGRAM_OPERATION_MODE=getUpdates` (default)
-- `TELEGRAM_OPERATION_MODE=setWebhook`
+You can control webhook vs long-polling via `TELEGRAM_OPERATION_MODE` in `supabase/functions/.env`:
+
+- `getUpdates` (default) — long-polling
+- `setWebhook` — webhook mode

@@ -13,12 +13,49 @@ export default function ProtectedPage({ children, requiredPage }: ProtectedPageP
   const [authorized, setAuthorized] = useState<boolean | null>(null);
 
   useEffect(() => {
+    const getInitData = (): string | undefined => {
+      const tg = (window as unknown as { Telegram?: { WebApp?: { initData?: string } } }).Telegram;
+      return tg?.WebApp?.initData || undefined;
+    };
+
+    const tryWebAppAutoAuth = async (): Promise<boolean> => {
+      let initData = getInitData();
+      if (!initData) {
+        await new Promise((r) => setTimeout(r, 200));
+        initData = getInitData();
+      }
+      if (!initData) return false;
+
+      const res = await fetch("/api/auth/telegram/webapp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ initData }),
+      });
+      return res.ok;
+    };
+
     const checkPermission = async () => {
       try {
-        const res = await fetch(`/api/check-permission?type=page&resource=${encodeURIComponent(requiredPage)}`);
+        const permUrl = `/api/check-permission?type=page&resource=${encodeURIComponent(requiredPage)}`;
+        const res = await fetch(permUrl);
         
         if (res.status === 401) {
-          router.push("/login");
+          // Try Telegram WebApp auto-auth before redirecting
+          const authed = await tryWebAppAutoAuth();
+          if (authed) {
+            // Retry permission check after auto-auth
+            const retry = await fetch(permUrl);
+            if (retry.ok) {
+              setAuthorized(true);
+              return;
+            }
+            if (retry.status === 403) {
+              setAuthorized(false);
+              return;
+            }
+          }
+          // No initData or auto-auth failed, redirect to login
+          router.push(`/login?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`);
           return;
         }
         
