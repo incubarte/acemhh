@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 type TelegramUserAuth = {
   id: number;
@@ -18,7 +19,9 @@ declare global {
   }
 }
 
-export default function LoginPage() {
+function LoginPageContent() {
+  const searchParams = useSearchParams();
+  const returnTo = searchParams.get('returnTo') || '/';
   const [error, setError] = useState<string | null>(null);
   const botUsername = (process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "").trim().replace(/^@/, "") || null;
   const [autoAuthState, setAutoAuthState] = useState<
@@ -67,7 +70,7 @@ export default function LoginPage() {
       const me = await fetch("/api/me");
       if (me.ok) {
         setAutoAuthState({ kind: "authed" });
-        window.location.href = "/payments";
+        window.location.href = returnTo;
         return;
       }
       if (me.status !== 401) {
@@ -84,14 +87,14 @@ export default function LoginPage() {
       }
       if (cancelled) return;
       setAutoAuthState({ kind: "authed" });
-      window.location.href = "/payments";
+      window.location.href = returnTo;
     };
 
     run();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [returnTo]);
 
   useEffect(() => {
     if (!botUsername) return;
@@ -108,7 +111,7 @@ export default function LoginPage() {
         setError(txt || "Auth failed");
         return;
       }
-      window.location.href = "/payments";
+      window.location.href = returnTo;
     };
 
     return () => {
@@ -163,5 +166,13 @@ export default function LoginPage() {
         <p style={{ color: "crimson", marginTop: 12 }}>{error}</p>
       ) : null}
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: "20px", textAlign: "center" }}>Cargando...</div>}>
+      <LoginPageContent />
+    </Suspense>
   );
 }
