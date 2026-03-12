@@ -6,7 +6,7 @@ import ProtectedPage from "../../components/ProtectedPage";
 
 function NewPlayerPageContent() {
   const sp = useSearchParams();
-  const returnTo = sp.get("returnTo") || "/payments";
+  const returnTo = sp.get("returnTo") || "/";
   const inviteeParam = sp.get("invitee");
   const categoryParam = sp.get("category");
 
@@ -26,6 +26,9 @@ function NewPlayerPageContent() {
             <button className="btnPrimary" onClick={() => setPlayerType('invitee')} style={{ width: "100%" }}>
               Invitado
             </button>
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <button onClick={() => window.location.href = returnTo}>← Volver</button>
           </div>
         </div>
       </ProtectedPage>

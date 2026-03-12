@@ -148,6 +148,10 @@ function TrainingSessionsContent() {
             </button>
           ))}
         </div>
+
+        <div style={{ marginTop: 16 }}>
+          <button onClick={() => router.push("/")}>← Volver</button>
+        </div>
       </div>
     </ProtectedPage>
   );

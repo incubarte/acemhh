@@ -1,34 +1,53 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 import ProtectedPage from "./components/ProtectedPage";
 
+const BUTTONS = [
+  { href: "/training-sessions", label: "📋 Asistencia y Pagos" },
+  { href: "/players/new", label: "🧑🏻‍🦽‍➡️ Nuevo Jugador" },
+  { href: "/payments", label: "🪪 Cuota Social" },
+];
+
 function HomeContent() {
+  const [allowed, setAllowed] = useState<Record<string, boolean>>({});
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    Promise.all(
+      BUTTONS.map(async (b) => {
+        try {
+          const res = await fetch(`/api/check-permission?type=page&resource=${encodeURIComponent(b.href)}`);
+          return { href: b.href, ok: res.ok };
+        } catch {
+          return { href: b.href, ok: false };
+        }
+      })
+    ).then((results) => {
+      const map: Record<string, boolean> = {};
+      results.forEach((r) => { map[r.href] = r.ok; });
+      setAllowed(map);
+      setLoaded(true);
+    });
+  }, []);
+
   return (
     <ProtectedPage requiredPage="/">
       <div>
         <h1>ACEMHH Dashboard</h1>
         
-        <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 12 }}>
-          <Link href="/payments" style={{ textDecoration: "none" }}>
-            <button className="btnPrimary" style={{ width: "100%", textAlign: "left" }}>
-              💰 Registrar Pago
-            </button>
-          </Link>
-          
-          <Link href="/training-sessions" style={{ textDecoration: "none" }}>
-            <button className="btnPrimary" style={{ width: "100%", textAlign: "left" }}>
-              📋 Asistencia y Pagos
-            </button>
-          </Link>
-          
-          <Link href="/players/new" style={{ textDecoration: "none" }}>
-            <button style={{ width: "100%", textAlign: "left" }}>
-              ➕ Nuevo Jugador
-            </button>
-          </Link>
-        </div>
+        {loaded && (
+          <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 12 }}>
+            {BUTTONS.filter((b) => allowed[b.href]).map((b) => (
+              <Link key={b.href} href={b.href} style={{ textDecoration: "none" }}>
+                <button className="btnPrimary" style={{ width: "100%", textAlign: "left" }}>
+                  {b.label}
+                </button>
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
     </ProtectedPage>
   );

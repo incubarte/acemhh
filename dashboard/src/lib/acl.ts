@@ -14,43 +14,49 @@ export type UserGroup = {
   groups: string[];
 };
 
+const wheelPermissions = [
+  { type: 'api', resource: '/api/players', method: 'GET' },
+  { type: 'api', resource: '/api/players', method: 'POST' },
+  { type: 'api', resource: '/api/training-sessions', method: 'GET' },
+  { type: 'api', resource: '/api/training-sessions/attendance', method: 'POST' },
+  { type: 'api', resource: '/api/training-sessions/payment', method: 'POST' },
+  { type: 'page', resource: '/' },
+  { type: 'page', resource: '/players/new' },
+  { type: 'page', resource: '/training-sessions' },
+  { type: 'page', resource: '/training-sessions/*' },
+];
+
+const rootPermissions = [
+  ...wheelPermissions,
+  { type: 'api', resource: '/api/payments/dues', method: 'POST' },
+  { type: 'page', resource: '/payments' },
+];
+
 export const GROUPS: Record<string, Group> = {
   WHEEL: {
     name: 'WHEEL',
-    permissions: [
-      { type: 'api', resource: '/api/players', method: 'GET' },
-      { type: 'api', resource: '/api/players', method: 'POST' },
-      { type: 'api', resource: '/api/training-sessions', method: 'GET' },
-      { type: 'api', resource: '/api/training-sessions/attendance', method: 'POST' },
-      { type: 'api', resource: '/api/training-sessions/payment', method: 'POST' },
-      { type: 'page', resource: '/' },
-      { type: 'page', resource: '/payments' },
-      { type: 'page', resource: '/players/new' },
-      { type: 'page', resource: '/training-sessions' },
-      { type: 'page', resource: '/training-sessions/*' },
-    ],
+    permissions: wheelPermissions,
   },
   ROOT: {
     name: 'ROOT',
-    permissions: [
-      { type: 'api', resource: '/api/payments/dues', method: 'POST' },
-      { type: 'api', resource: '/api/players', method: 'GET' },
-      { type: 'api', resource: '/api/players', method: 'POST' },
-      { type: 'api', resource: '/api/training-sessions', method: 'GET' },
-      { type: 'api', resource: '/api/training-sessions/attendance', method: 'POST' },
-      { type: 'api', resource: '/api/training-sessions/payment', method: 'POST' },
-      { type: 'page', resource: '/' },
-      { type: 'page', resource: '/payments' },
-      { type: 'page', resource: '/players/new' },
-      { type: 'page', resource: '/training-sessions' },
-      { type: 'page', resource: '/training-sessions/*' },
-    ],
+    permissions: rootPermissions,
   },
 };
 
+const Ale = 45669763;
+const Romi = 179767949;
+const Hect = 1239620360;
+const Ruso = 1388664237;
+const Fran = 6885365547;
+const Laio = 8025956878;
+
 export const USER_GROUPS: UserGroup[] = [
-  { userId: 45669763, groups: ['ROOT'] },
-  { userId: 179767949, groups: ['WHEEL'] },
+  { userId: Ale, groups: ['ROOT'] },
+  { userId: Romi, groups: ['WHEEL'] },
+  { userId: Hect, groups: ['WHEEL'] },
+  { userId: Ruso, groups: ['WHEEL'] },
+  { userId: Fran, groups: ['WHEEL'] },
+  { userId: Laio, groups: ['WHEEL'] },
 ];
 
 export function getUserGroups(userId: number): string[] {

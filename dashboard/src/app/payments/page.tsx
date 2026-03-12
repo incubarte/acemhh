@@ -213,6 +213,10 @@ function PaymentsPageContent() {
             Nuevo jugador
           </Link>
         </div>
+
+        <div style={{ marginTop: 16 }}>
+          <button onClick={() => window.location.href = "/"}>← Volver</button>
+        </div>
       </div>
       </ProtectedPage>
     );
