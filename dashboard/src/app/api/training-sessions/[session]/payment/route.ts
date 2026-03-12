@@ -57,8 +57,9 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
         player_id: body.player_id,
         registered_by: registeredBy,
         slot: genericSlot,
-        concept: "monthly",
+        concept: amount <= 30000 ? "session" : "monthly",
         month: selectedMonth,
+        session: amount <= 30000 ? `${isoDate} ${hour}hs` : null,
         amount,
         is_cash: true,
       }]);

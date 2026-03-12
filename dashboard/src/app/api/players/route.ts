@@ -18,6 +18,19 @@ export const GET = withPermission('api', '/api/players', 'GET', async (sess, req
       return NextResponse.json({ player: data ?? null });
     }
 
+    const category = (searchParams.get("category") || "").trim();
+    if (category) {
+      const { data, error } = await supabaseAdmin()
+        .from("players")
+        .select("id,name,last_name")
+        .eq("category", category)
+        .order("last_name")
+        .order("name");
+
+      if (error) return new NextResponse(error.message, { status: 500 });
+      return NextResponse.json({ players: data ?? [] });
+    }
+
     const query = (searchParams.get("query") || "").trim();
     if (query.length < 2) return NextResponse.json({ players: [] });
 
@@ -49,13 +62,18 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
     const body = (await req.json()) as {
       name: string;
       last_name: string;
-      dni: string;
+      dni?: string;
       fecha_nac?: string | null;
       category: string;
+      invitee?: boolean;
     };
 
-    if (!body?.name || !body?.last_name || !body?.dni || !body?.category) {
+    if (!body?.name || !body?.last_name || !body?.category) {
       return new NextResponse("Missing fields", { status: 400 });
+    }
+
+    if (!body.invitee && !body.dni) {
+      return new NextResponse("DNI is required for members", { status: 400 });
     }
 
     const s = supabaseAdmin();
@@ -65,9 +83,10 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
         {
           name: body.name,
           last_name: body.last_name,
-          dni: body.dni,
+          dni: body.dni || null,
           fecha_nac: body.fecha_nac ?? null,
           category: body.category,
+          invitee: body.invitee || false,
         },
       ])
       .select("id")

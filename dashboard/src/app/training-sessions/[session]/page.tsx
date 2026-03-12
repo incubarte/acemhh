@@ -15,7 +15,34 @@ type PlayerWithAttendance = Player & {
   attended: boolean;
   payments: number; // Total amount paid for this month
   hasSessionPayment: boolean; // Whether player has a payment for this specific session
+  invitee: boolean;
+  crossCategoryGuest: boolean;
 };
+
+const ALL_CATEGORIES = ["u-14", "cat-c", "cat-b", "cat-a"];
+
+const CATEGORY_LABELS: Record<string, string> = {
+  "u-14": "Menores",
+  "cat-c": "Categoría C",
+  "cat-b": "Categoría B",
+  "cat-a": "Categoría A",
+};
+
+const CATEGORY_SHORT_LABELS: Record<string, string> = {
+  "u-14": "Menores",
+  "cat-c": "Cat C",
+  "cat-b": "Cat B",
+  "cat-a": "Cat A",
+};
+
+function hourToCategory(hour: number): string {
+  switch (hour) {
+    case 21: return "cat-a";
+    case 22: return "cat-b";
+    case 23: return "cat-c";
+    default: return "cat-b";
+  }
+}
 
 function TrainingSessionDetailContent() {
   const params = useParams();
@@ -32,6 +59,8 @@ function TrainingSessionDetailContent() {
   const [customAmount, setCustomAmount] = useState("");
   const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [addInviteeStep, setAddInviteeStep] = useState<'choose' | 'selectCategory' | 'selectPlayer' | null>(null);
+  const [categoryPlayersForInvite, setCategoryPlayersForInvite] = useState<Player[]>([]);
 
   // Parse session string
   const [dateStr, hourStr] = session.split('-').length === 4 
@@ -133,6 +162,16 @@ function TrainingSessionDetailContent() {
         return;
       }
 
+      // Auto-mark attendance if not already marked
+      const player = players.find(p => p.id === playerId);
+      if (player && !player.attended) {
+        await fetch(`/api/training-sessions/${session}/attendance`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ player_id: playerId, attended: true }),
+        });
+      }
+
       // Reload players to get updated payment totals
       const playersRes = await fetch(`/api/training-sessions/${session}`);
       if (playersRes.ok) {
@@ -179,6 +218,46 @@ function TrainingSessionDetailContent() {
     setCustomAmount("");
   };
 
+  const sessionCategory = hourToCategory(hour);
+
+  const selectCategoryForInvite = async (cat: string) => {
+    try {
+      const res = await fetch(`/api/players?category=${encodeURIComponent(cat)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setCategoryPlayersForInvite(data.players || []);
+        setAddInviteeStep('selectPlayer');
+      }
+    } catch {
+      alert("Error al cargar jugadores");
+    }
+  };
+
+  const selectCrossCategoryPlayer = async (playerId: string) => {
+    try {
+      await fetch(`/api/training-sessions/${session}/attendance`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ player_id: playerId, attended: true }),
+      });
+
+      const res = await fetch(`/api/training-sessions/${session}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPlayers(data.players || []);
+      }
+    } catch {
+      alert("Error al agregar invitado");
+    }
+    setAddInviteeStep(null);
+    setCategoryPlayersForInvite([]);
+  };
+
+  const cancelAddInvitee = () => {
+    setAddInviteeStep(null);
+    setCategoryPlayersForInvite([]);
+  };
+
   const formatDate = (d: Date) => {
     return d.toLocaleDateString("es-AR", { 
       weekday: "long", 
@@ -196,15 +275,19 @@ function TrainingSessionDetailContent() {
   };
 
   const PAYMENT_THRESHOLD = 100000; // 100k threshold
-  const owingPlayers = players.filter(p => p.payments < PAYMENT_THRESHOLD);
-  const paidPlayers = players.filter(p => p.payments >= PAYMENT_THRESHOLD);
+  const members = players.filter(p => !p.invitee && !p.crossCategoryGuest);
+  const invitees = players.filter(p => p.invitee || p.crossCategoryGuest);
+  const owingMembers = members.filter(p => p.payments < PAYMENT_THRESHOLD);
+  const paidMembers = members.filter(p => p.payments >= PAYMENT_THRESHOLD);
 
-  const renderPlayerRow = (player: PlayerWithAttendance, sectionColor: 'orange' | 'green') => {
+  const renderPlayerRow = (player: PlayerWithAttendance, sectionColor: 'orange' | 'green' | 'yellow') => {
     const owes = player.payments < PAYMENT_THRESHOLD;
     const statusIcon = owes ? "💸" : "💰";
     const bgColor = sectionColor === 'orange' 
       ? "rgba(255, 140, 0, 0.08)" 
-      : "rgba(36, 179, 91, 0.08)";
+      : sectionColor === 'green'
+      ? "rgba(36, 179, 91, 0.08)"
+      : "rgba(230, 184, 0, 0.08)";
     
     return (
       <React.Fragment key={player.id}>
@@ -241,7 +324,7 @@ function TrainingSessionDetailContent() {
               WebkitTapHighlightColor: "transparent"
             }}
           >
-            {player.attended ? "🙂" : "🫥"}
+            {player.attended ? "�" : "🫥"}
           </span>
         </div>
         
@@ -259,9 +342,16 @@ function TrainingSessionDetailContent() {
           <span style={{ fontSize: "1.3rem", lineHeight: 1 }}>{statusIcon}</span>
           <span style={{ fontSize: "0.9rem", fontWeight: 500 }}>{formatArs(player.payments)}</span>
           
-          {owes && !player.hasSessionPayment && (
+          {((player.invitee || player.crossCategoryGuest) ? !player.hasSessionPayment : (owes && !player.hasSessionPayment)) && (
             <button
-              onClick={() => setExpandedPlayerId(expandedPlayerId === player.id ? null : player.id)}
+              onClick={() => {
+                if (player.invitee || player.crossCategoryGuest) {
+                  setExpandedPlayerId(player.id);
+                  setPendingPayment({ playerId: player.id, amount: 30000 });
+                } else {
+                  setExpandedPlayerId(expandedPlayerId === player.id ? null : player.id);
+                }
+              }}
               style={{
                 padding: "2px 6px",
                 borderRadius: 4,
@@ -278,7 +368,7 @@ function TrainingSessionDetailContent() {
         </div>
         
         {/* Expandable payment amounts row */}
-        {expandedPlayerId === player.id && owes && (
+        {expandedPlayerId === player.id && (player.invitee || player.crossCategoryGuest || owes) && (
           <>
             {pendingPayment?.playerId === player.id ? (
               // Confirmation message
@@ -499,60 +589,222 @@ function TrainingSessionDetailContent() {
           <div className="card" style={{ marginTop: 12, marginLeft: -15, marginRight: -15, borderRadius: "8px" }}>
             <div><strong>Fecha:</strong> {formatDate(date)}</div>
             <div><strong>Horario:</strong> {hour}:00hs</div>
+            <div style={{ marginTop: 8, fontSize: "1rem", opacity: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px" }}>
+              <span>😐 asistió</span><span>💸 adeuda</span>
+              <span>🫥 no asistió</span><span>💰 al día</span>
+            </div>
           </div>
         </div>
 
-        {players.length === 0 ? (
-          <p style={{ marginTop: 16, opacity: 0.7, padding: "0 20px" }}>No hay jugadores para esta sesión</p>
-        ) : (
-          <div style={{ marginTop: 16, marginLeft: -15, marginRight: -15 }}>
-            {owingPlayers.length > 0 && (
-              <div style={{ marginBottom: 24 }}>
-                <div style={{ 
-                  fontSize: "0.95rem", 
-                  fontWeight: 600, 
-                  padding: "8px 12px",
-                  background: "var(--acemhh-orange)",
-                  color: "#000",
-                  textAlign: "center",
-                  borderRadius: "8px 8px 0 0"
-                }}>
-                  Adeudan
-                </div>
-                <div style={{ 
-                  display: "grid",
-                  gridTemplateColumns: "1fr 38px max-content",
-                  alignItems: "stretch"
-                }}>
-                  {owingPlayers.map(p => renderPlayerRow(p, 'orange'))}
+        <div style={{ marginTop: 16, marginLeft: -15, marginRight: -15 }}>
+          {owingMembers.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ 
+                fontSize: "0.95rem", 
+                fontWeight: 600, 
+                padding: "8px 12px",
+                background: "var(--acemhh-orange)",
+                color: "#000",
+                textAlign: "center",
+                borderRadius: "8px 8px 0 0"
+              }}>
+                Adeudan
+              </div>
+              <div style={{ 
+                display: "grid",
+                gridTemplateColumns: "1fr 38px max-content",
+                alignItems: "stretch"
+              }}>
+                {owingMembers.map(p => renderPlayerRow(p, 'orange'))}
+              </div>
+            </div>
+          )}
+          
+          {paidMembers.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ 
+                fontSize: "0.95rem", 
+                fontWeight: 600, 
+                padding: "8px 12px",
+                background: "var(--acemhh-green-3)",
+                color: "#000",
+                textAlign: "center",
+                borderRadius: "8px 8px 0 0"
+              }}>
+                Pagaron
+              </div>
+              <div style={{ 
+                display: "grid",
+                gridTemplateColumns: "1fr 38px max-content",
+                alignItems: "stretch"
+              }}>
+                {paidMembers.map(p => renderPlayerRow(p, 'green'))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ 
+              fontSize: "0.95rem", 
+              fontWeight: 600, 
+              padding: "8px 12px",
+              background: "#E6B800",
+              color: "#000",
+              textAlign: "center",
+              borderRadius: "8px 8px 0 0",
+              position: "relative"
+            }}>
+              Invitados
+              <button
+                onClick={() => setAddInviteeStep('choose')}
+                style={{
+                  position: "absolute",
+                  right: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  padding: "2px 8px",
+                  borderRadius: 4,
+                  border: "1px solid rgba(0,0,0,0.2)",
+                  background: "rgba(0,0,0,0.1)",
+                  cursor: "pointer",
+                  fontSize: "1rem",
+                  lineHeight: 1,
+                  color: "#000"
+                }}
+              >
+                +
+              </button>
+            </div>
+
+            {addInviteeStep === 'choose' && (
+              <div style={{
+                display: "flex",
+                gap: 8,
+                padding: "10px 12px",
+                background: "rgba(230, 184, 0, 0.08)",
+                borderBottom: "1px solid rgba(255,255,255,0.05)"
+              }}>
+                <button
+                  onClick={() => {
+                    setAddInviteeStep(null);
+                    router.push(`/players/new?invitee=true&category=${sessionCategory}&returnTo=${encodeURIComponent(currentPath)}`);
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: "8px 12px",
+                    borderRadius: 6,
+                    border: "1px solid rgba(255,255,255,0.2)",
+                    background: "rgba(255,255,255,0.05)",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                  }}
+                >
+                  Nuevo jugador
+                </button>
+                <button
+                  onClick={() => setAddInviteeStep('selectCategory')}
+                  style={{
+                    flex: 1,
+                    padding: "8px 12px",
+                    borderRadius: 6,
+                    border: "1px solid rgba(255,255,255,0.2)",
+                    background: "rgba(255,255,255,0.05)",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                  }}
+                >
+                  De otra categoría
+                </button>
+              </div>
+            )}
+
+            {addInviteeStep === 'selectCategory' && (
+              <div style={{
+                display: "flex",
+                gap: 8,
+                padding: "10px 12px",
+                background: "rgba(230, 184, 0, 0.08)",
+                borderBottom: "1px solid rgba(255,255,255,0.05)",
+                flexWrap: "wrap",
+                alignItems: "center"
+              }}>
+                {ALL_CATEGORIES.filter(c => c !== sessionCategory).map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => selectCategoryForInvite(cat)}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 6,
+                      border: "1px solid rgba(255,255,255,0.2)",
+                      background: "rgba(255,255,255,0.05)",
+                      cursor: "pointer",
+                      fontSize: "0.85rem",
+                    }}
+                  >
+                    {CATEGORY_SHORT_LABELS[cat] || cat}
+                  </button>
+                ))}
+                <button
+                  onClick={cancelAddInvitee}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    border: "1px solid rgba(255,255,255,0.2)",
+                    background: "rgba(255,255,255,0.05)",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                    marginLeft: "auto",
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {addInviteeStep === 'selectPlayer' && (
+              <div style={{ background: "rgba(230, 184, 0, 0.08)" }}>
+                {categoryPlayersForInvite
+                  .filter(p => !players.some(existing => existing.id === p.id))
+                  .map(p => (
+                  <div
+                    key={p.id}
+                    onClick={() => selectCrossCategoryPlayer(p.id)}
+                    style={{
+                      padding: "8px 12px 8px 24px",
+                      cursor: "pointer",
+                      borderBottom: "1px solid rgba(255,255,255,0.05)",
+                      fontSize: "0.875rem",
+                    }}
+                  >
+                    {p.last_name}, {p.name}
+                  </div>
+                ))}
+                <div
+                  onClick={cancelAddInvitee}
+                  style={{
+                    padding: "8px 12px 8px 24px",
+                    cursor: "pointer",
+                    borderBottom: "1px solid rgba(255,255,255,0.05)",
+                    fontSize: "0.875rem",
+                    opacity: 0.6,
+                  }}
+                >
+                  ✕
                 </div>
               </div>
             )}
-            
-            {paidPlayers.length > 0 && (
-              <div>
-                <div style={{ 
-                  fontSize: "0.95rem", 
-                  fontWeight: 600, 
-                  padding: "8px 12px",
-                  background: "var(--acemhh-green-3)",
-                  color: "#000",
-                  textAlign: "center",
-                  borderRadius: "8px 8px 0 0"
-                }}>
-                  Pagaron
-                </div>
-                <div style={{ 
-                  display: "grid",
-                  gridTemplateColumns: "1fr 38px max-content",
-                  alignItems: "stretch"
-                }}>
-                  {paidPlayers.map(p => renderPlayerRow(p, 'green'))}
-                </div>
+
+            {invitees.length > 0 && (
+              <div style={{ 
+                display: "grid",
+                gridTemplateColumns: "1fr 38px max-content",
+                alignItems: "stretch"
+              }}>
+                {invitees.map(p => renderPlayerRow(p, 'yellow'))}
               </div>
             )}
           </div>
-        )}
+        </div>
 
         <div style={{ marginTop: 24, padding: "0 20px" }}>
           <button onClick={() => router.push("/training-sessions")}>
