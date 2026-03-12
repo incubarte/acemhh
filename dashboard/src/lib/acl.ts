@@ -20,8 +20,14 @@ export const GROUPS: Record<string, Group> = {
     permissions: [
       { type: 'api', resource: '/api/players', method: 'GET' },
       { type: 'api', resource: '/api/players', method: 'POST' },
+      { type: 'api', resource: '/api/training-sessions', method: 'GET' },
+      { type: 'api', resource: '/api/training-sessions/attendance', method: 'POST' },
+      { type: 'api', resource: '/api/training-sessions/payment', method: 'POST' },
+      { type: 'page', resource: '/' },
       { type: 'page', resource: '/payments' },
       { type: 'page', resource: '/players/new' },
+      { type: 'page', resource: '/training-sessions' },
+      { type: 'page', resource: '/training-sessions/*' },
     ],
   },
   ROOT: {
@@ -30,8 +36,14 @@ export const GROUPS: Record<string, Group> = {
       { type: 'api', resource: '/api/payments/dues', method: 'POST' },
       { type: 'api', resource: '/api/players', method: 'GET' },
       { type: 'api', resource: '/api/players', method: 'POST' },
+      { type: 'api', resource: '/api/training-sessions', method: 'GET' },
+      { type: 'api', resource: '/api/training-sessions/attendance', method: 'POST' },
+      { type: 'api', resource: '/api/training-sessions/payment', method: 'POST' },
+      { type: 'page', resource: '/' },
       { type: 'page', resource: '/payments' },
       { type: 'page', resource: '/players/new' },
+      { type: 'page', resource: '/training-sessions' },
+      { type: 'page', resource: '/training-sessions/*' },
     ],
   },
 };
@@ -44,6 +56,19 @@ export const USER_GROUPS: UserGroup[] = [
 export function getUserGroups(userId: number): string[] {
   const userGroup = USER_GROUPS.find((ug) => ug.userId === userId);
   return userGroup?.groups ?? [];
+}
+
+function matchesResource(permResource: string, requestedResource: string): boolean {
+  // Exact match
+  if (permResource === requestedResource) return true;
+  
+  // Wildcard match: /training-sessions/* matches /training-sessions/2026-03-11-21
+  if (permResource.endsWith('/*')) {
+    const prefix = permResource.slice(0, -2); // Remove /*
+    return requestedResource.startsWith(prefix + '/');
+  }
+  
+  return false;
 }
 
 export function hasPermission(
@@ -60,7 +85,7 @@ export function hasPermission(
 
     const hasMatch = group.permissions.some((perm) => {
       if (perm.type !== type) return false;
-      if (perm.resource !== resource) return false;
+      if (!matchesResource(perm.resource, resource)) return false;
       if (type === 'api' && method && perm.method !== method) return false;
       return true;
     });

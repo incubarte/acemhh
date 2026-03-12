@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { makeSessionCookieValueFromUser, verifyTelegramWebAppInitData } from "@/lib/telegramAuth";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 type Body = {
   initData?: string;
@@ -25,15 +26,26 @@ export async function POST(req: Request) {
     maxAge: 60 * 60 * 24 * 30,
   });
 
-  // Log login event
-  console.log('[LOGIN]', {
-    event: 'user_login',
-    user_id: user.id,
-    first_name: user.first_name,
-    last_name: user.last_name || '',
-    username: user.username || '',
-    timestamp: new Date().toISOString(),
-  });
+  // Track user login in database
+  try {
+    const { error } = await supabaseAdmin()
+      .from("users")
+      .upsert({
+        id: user.id,
+        username: user.username || null,
+        first_name: user.first_name,
+        last_name: user.last_name || null,
+        last_login_at: new Date().toISOString()
+      }, {
+        onConflict: 'id'
+      });
+
+    if (error) {
+      console.error('[LOGIN] Error tracking user login:', error);
+    }
+  } catch (error) {
+    console.error('[LOGIN] Exception tracking user login:', error);
+  }
 
   return NextResponse.json({ ok: true });
 }
