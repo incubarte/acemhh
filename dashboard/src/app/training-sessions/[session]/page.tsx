@@ -324,7 +324,7 @@ function TrainingSessionDetailContent() {
               WebkitTapHighlightColor: "transparent"
             }}
           >
-            {player.attended ? "�" : "🫥"}
+            {player.attended ? "😐" : "🫥"}
           </span>
         </div>
         
