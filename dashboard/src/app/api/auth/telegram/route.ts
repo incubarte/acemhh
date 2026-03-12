@@ -1,7 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { makeSessionCookieValue, verifyTelegramAuth, type TelegramAuthPayload } from "@/lib/telegramAuth";
-import { track } from '@vercel/analytics/server';
 
 export async function POST(req: Request) {
   const payload = (await req.json()) as TelegramAuthPayload;
@@ -26,12 +25,14 @@ export async function POST(req: Request) {
     maxAge: 60 * 60 * 24 * 30,
   });
 
-  // Track login event
-  await track('user_login', {
-    user_id: payload.id.toString(),
+  // Log login event
+  console.log('[LOGIN]', {
+    event: 'user_login',
+    user_id: payload.id,
     first_name: payload.first_name,
     last_name: payload.last_name || '',
     username: payload.username || '',
+    timestamp: new Date().toISOString(),
   });
 
   return NextResponse.json({ ok: true });

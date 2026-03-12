@@ -1,7 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { makeSessionCookieValueFromUser, verifyTelegramWebAppInitData } from "@/lib/telegramAuth";
-import { track } from '@vercel/analytics/server';
 
 type Body = {
   initData?: string;
@@ -26,12 +25,14 @@ export async function POST(req: Request) {
     maxAge: 60 * 60 * 24 * 30,
   });
 
-  // Track login event
-  await track('user_login', {
-    user_id: user.id.toString(),
+  // Log login event
+  console.log('[LOGIN]', {
+    event: 'user_login',
+    user_id: user.id,
     first_name: user.first_name,
     last_name: user.last_name || '',
     username: user.username || '',
+    timestamp: new Date().toISOString(),
   });
 
   return NextResponse.json({ ok: true });
