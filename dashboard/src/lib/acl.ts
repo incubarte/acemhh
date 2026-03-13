@@ -24,13 +24,13 @@ const wheelPermissions = [
   { type: 'page', resource: '/players/new' },
   { type: 'page', resource: '/training-sessions' },
   { type: 'page', resource: '/training-sessions/*' },
-];
+] as const;
 
 const rootPermissions = [
   ...wheelPermissions,
   { type: 'api', resource: '/api/payments/dues', method: 'POST' },
   { type: 'page', resource: '/payments' },
-];
+] as const;
 
 export const GROUPS: Record<string, Group> = {
   WHEEL: {
