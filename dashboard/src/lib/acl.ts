@@ -6,7 +6,7 @@ export type Permission = {
 
 export type Group = {
   name: string;
-  permissions: Permission[];
+  permissions: readonly Permission[];
 };
 
 export type UserGroup = {
