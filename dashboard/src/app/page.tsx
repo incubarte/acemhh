@@ -7,7 +7,8 @@ import ProtectedPage from "./components/ProtectedPage";
 const BUTTONS = [
   { href: "/training-sessions", label: "📋 Asistencia y Pagos" },
   { href: "/players/new", label: "🧑🏻‍🦽‍➡️ Nuevo Jugador" },
-  { href: "/payments", label: "🪪 Cuota Social" },
+  { href: "/payments", label: "🏛️ Cuota Social" },
+  { href: "/credencial", label: "🪪 Credencial de Socio" },
 ];
 
 function HomeContent() {

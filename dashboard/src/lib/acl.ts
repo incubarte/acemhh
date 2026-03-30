@@ -14,7 +14,7 @@ export type UserGroup = {
   groups: string[];
 };
 
-const wheelPermissions = [
+const wheelPermissions: Permission[] = [
   { type: 'api', resource: '/api/players', method: 'GET' },
   { type: 'api', resource: '/api/players', method: 'POST' },
   { type: 'api', resource: '/api/training-sessions', method: 'GET' },
@@ -24,9 +24,10 @@ const wheelPermissions = [
   { type: 'page', resource: '/players/new' },
   { type: 'page', resource: '/training-sessions' },
   { type: 'page', resource: '/training-sessions/*' },
-] as const;
+  { type: 'page', resource: '/credencial' },
+];
 
-const rootPermissions = [
+const rootPermissions: Permission[] = [
   ...wheelPermissions,
   { type: 'api', resource: '/api/payments/dues', method: 'POST' },
   { type: 'page', resource: '/payments' },
@@ -110,6 +111,9 @@ export const PUBLIC_ROUTES = [
   '/api/auth/telegram/webapp',
   '/api/me',
   '/api/check-permission',
+  '/credencial',
+  '/api/credencial/search',
+  '/api/credencial/check',
 ];
 
 export function isPublicRoute(path: string): boolean {
