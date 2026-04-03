@@ -28,6 +28,8 @@ function toGenericSlot(isoDate: string, hour: string): string {
   }).replace(",", "") + "hs";
 }
 
+type Section = "jugadores" | "invitados" | "arqueros";
+
 export const GET = withPermission('api', '/api/training-sessions', 'GET', async (sess, req) => {
   try {
     const url = new URL(req.url);
@@ -42,7 +44,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
 
     const isoDate = `${parts[0]}-${parts[1]}-${parts[2]}`;
     const hour = parts[3];
-    
+
     const specificSlot = toSpecificSlot(isoDate, hour);
     const genericSlot = toGenericSlot(isoDate, hour);
     const cats = slotToCat(genericSlot);
@@ -52,11 +54,14 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
       return new NextResponse("Invalid slot", { status: 400 });
     }
 
-    // Get players for the categories
-    const { data: players, error: playersError } = await supabaseAdmin()
+    const s = supabaseAdmin();
+
+    // Fetch A: all players that belong to category and train
+    const { data: categoryPlayers, error: playersError } = await s
       .from("players")
       .select("*")
       .in("category", cats)
+      .eq("trains", true)
       .order("last_name")
       .order("name");
 
@@ -65,8 +70,8 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
       return new NextResponse("Error fetching players", { status: 500 });
     }
 
-    // Get attendances for this session
-    const { data: attendances, error: attendanceError } = await supabaseAdmin()
+    // Fetch B: all attendances for current session
+    const { data: attendances, error: attendanceError } = await s
       .from("attendances")
       .select("*")
       .eq("session", specificSlot);
@@ -76,88 +81,104 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
       return new NextResponse("Error fetching attendances", { status: 500 });
     }
 
-    // Get monthly payments for this month and slot
-    const { data: monthlyPayments, error: monthlyError } = await supabaseAdmin()
-      .from("payments")
-      .select("player_id, amount")
-      .eq("concept", "monthly")
-      .eq("month", selectedMonth)
-      .eq("slot", genericSlot);
+    // Fetch C: all payments for current session or monthly slot
+    const [
+      { data: monthlyPayments, error: monthlyError },
+      { data: sessionPayments, error: sessionError },
+    ] = await Promise.all([
+      s.from("payments")
+        .select("player_id, amount")
+        .eq("concept", "monthly")
+        .eq("month", selectedMonth)
+        .eq("slot", genericSlot),
+      s.from("payments")
+        .select("player_id, amount")
+        .eq("concept", "session")
+        .eq("session", specificSlot),
+    ]);
 
     if (monthlyError) {
       console.error(monthlyError);
-      return new NextResponse("Error fetching payments", { status: 500 });
+      return new NextResponse("Error fetching monthly payments", { status: 500 });
     }
-
-    // Get session payments for this specific session
-    const { data: sessionPayments, error: sessionError } = await supabaseAdmin()
-      .from("payments")
-      .select("player_id, amount")
-      .eq("concept", "session")
-      .eq("session", specificSlot);
-
     if (sessionError) {
       console.error(sessionError);
       return new NextResponse("Error fetching session payments", { status: 500 });
     }
 
-    // Build response with attendance and payment info
+    // Build attendance and payment maps
     const attendanceMap = new Map(
       (attendances || []).map(a => [a.player_id, a.attended])
     );
 
     const paymentMap = new Map<string, number>();
     const hasPaymentMap = new Map<string, boolean>();
-    (monthlyPayments || []).forEach(p => {
-      const current = paymentMap.get(p.player_id) || 0;
-      paymentMap.set(p.player_id, current + p.amount);
+    for (const p of (monthlyPayments || [])) {
+      paymentMap.set(p.player_id, (paymentMap.get(p.player_id) || 0) + p.amount);
       hasPaymentMap.set(p.player_id, true);
-    });
-    (sessionPayments || []).forEach(p => {
-      const current = paymentMap.get(p.player_id) || 0;
-      paymentMap.set(p.player_id, current + p.amount);
+    }
+    for (const p of (sessionPayments || [])) {
+      paymentMap.set(p.player_id, (paymentMap.get(p.player_id) || 0) + p.amount);
       hasPaymentMap.set(p.player_id, true);
-    });
+    }
 
-    // Find cross-category players (attendance or session payment for this session)
-    const categoryPlayerIds = new Set((players || []).map(p => p.id));
-    const crossCategoryIds = new Set<string>();
-    (attendances || [])
-      .filter(a => a.attended && !categoryPlayerIds.has(a.player_id))
-      .forEach(a => crossCategoryIds.add(a.player_id));
-    (sessionPayments || [])
-      .filter(p => !categoryPlayerIds.has(p.player_id))
-      .forEach(p => crossCategoryIds.add(p.player_id));
+    // Assign category players to sections
+    const knownIds = new Set<string>();
+    const result: Array<Record<string, unknown> & { section: Section }> = [];
 
-    let crossCategoryPlayers: typeof players = [];
-    if (crossCategoryIds.size > 0) {
-      const { data: ccPlayers } = await supabaseAdmin()
+    for (const player of (categoryPlayers || [])) {
+      knownIds.add(player.id);
+      const section: Section =
+        player.player_type === "goalkeeper" ? "arqueros" :
+        player.invitee ? "invitados" :
+        "jugadores";
+
+      result.push({
+        ...player,
+        attended: attendanceMap.get(player.id) || false,
+        payments: paymentMap.get(player.id) || 0,
+        hasSessionPayment: hasPaymentMap.get(player.id) || false,
+        section,
+      });
+    }
+
+    // Collect extra player IDs from attendances and payments (not already in category+trains)
+    const extraIds = new Set<string>();
+    for (const a of (attendances || [])) {
+      if (a.attended && !knownIds.has(a.player_id)) extraIds.add(a.player_id);
+    }
+    for (const p of (sessionPayments || [])) {
+      if (!knownIds.has(p.player_id)) extraIds.add(p.player_id);
+    }
+    for (const p of (monthlyPayments || [])) {
+      if (!knownIds.has(p.player_id)) extraIds.add(p.player_id);
+    }
+
+    // Fetch extra players
+    if (extraIds.size > 0) {
+      const { data: extraPlayers } = await s
         .from("players")
         .select("*")
-        .in("id", Array.from(crossCategoryIds))
+        .in("id", Array.from(extraIds))
         .order("last_name")
         .order("name");
 
-      if (ccPlayers) crossCategoryPlayers = ccPlayers;
+      for (const player of (extraPlayers || [])) {
+        knownIds.add(player.id);
+        const section: Section =
+          player.player_type === "goalkeeper" ? "arqueros" : "invitados";
+
+        result.push({
+          ...player,
+          attended: attendanceMap.get(player.id) || false,
+          payments: paymentMap.get(player.id) || 0,
+          hasSessionPayment: hasPaymentMap.get(player.id) || false,
+          section,
+        });
+      }
     }
 
-    const playersWithData = (players || []).map(player => ({
-      ...player,
-      attended: attendanceMap.get(player.id) || false,
-      payments: paymentMap.get(player.id) || 0,
-      hasSessionPayment: hasPaymentMap.get(player.id) || false,
-      crossCategoryGuest: false,
-    }));
-
-    const crossCategoryWithData = (crossCategoryPlayers || []).map(player => ({
-      ...player,
-      attended: true,
-      payments: paymentMap.get(player.id) || 0,
-      hasSessionPayment: hasPaymentMap.get(player.id) || false,
-      crossCategoryGuest: true,
-    }));
-
-    return NextResponse.json({ players: [...playersWithData, ...crossCategoryWithData] });
+    return NextResponse.json({ players: result });
   } catch (error) {
     console.error(error);
     return new NextResponse("Internal server error", { status: 500 });

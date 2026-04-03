@@ -3,22 +3,25 @@
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState, Suspense } from "react";
 import ProtectedPage from "../../components/ProtectedPage";
+import { usePageTitle } from "../../components/PageTitleContext";
 
 function NewPlayerPageContent() {
   const sp = useSearchParams();
   const returnTo = sp.get("returnTo") || "/";
   const inviteeParam = sp.get("invitee");
   const categoryParam = sp.get("category");
+  const playerTypeParam = sp.get("player_type") as "player" | "goalkeeper" | null;
 
   const [playerType, setPlayerType] = useState<'member' | 'invitee' | null>(
     inviteeParam === 'true' ? 'invitee' : inviteeParam === 'false' ? 'member' : null
   );
 
+  usePageTitle("Nuevo jugador");
+
   if (playerType === null) {
     return (
       <ProtectedPage requiredPage="/players/new">
         <div>
-          <h1>Nuevo jugador</h1>
           <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 12 }}>
             <button className="btnPrimary" onClick={() => setPlayerType('member')} style={{ width: "100%" }}>
               Socio
@@ -27,9 +30,6 @@ function NewPlayerPageContent() {
               Invitado
             </button>
           </div>
-          <div style={{ marginTop: 16 }}>
-            <button onClick={() => window.location.href = returnTo}>← Volver</button>
-          </div>
         </div>
       </ProtectedPage>
     );
@@ -37,7 +37,7 @@ function NewPlayerPageContent() {
 
   return (
     <ProtectedPage requiredPage="/players/new">
-      <NewPlayerForm returnTo={returnTo} invitee={playerType === 'invitee'} defaultCategory={categoryParam} />
+      <NewPlayerForm returnTo={returnTo} invitee={playerType === 'invitee'} defaultCategory={categoryParam} defaultPlayerType={playerTypeParam} />
     </ProtectedPage>
   );
 }
@@ -50,13 +50,14 @@ export default function NewPlayerPage() {
   );
 }
 
-function NewPlayerForm({ returnTo, invitee, defaultCategory }: { returnTo: string; invitee: boolean; defaultCategory: string | null }) {
+function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }: { returnTo: string; invitee: boolean; defaultCategory: string | null; defaultPlayerType: "player" | "goalkeeper" | null }) {
 
   const [name, setName] = useState("");
   const [lastName, setLastName] = useState("");
   const [dni, setDni] = useState("");
   const [fechaNac, setFechaNac] = useState("");
   const [category, setCategory] = useState(defaultCategory || "cat-b");
+  const [playerType, setPlayerType] = useState<"player" | "goalkeeper">(defaultPlayerType || "player");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -80,6 +81,7 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory }: { returnTo: strin
         fecha_nac: invitee ? null : (fechaNac || null),
         category,
         invitee,
+        player_type: playerType,
       }),
     });
     setLoading(false);
@@ -88,13 +90,13 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory }: { returnTo: strin
       return;
     }
     const data = (await res.json()) as { player: { id: string } };
-    window.location.href = `${returnTo}?player=${encodeURIComponent(data.player.id)}`;
+    window.location.replace(`${returnTo}?player=${encodeURIComponent(data.player.id)}`);
   };
+
+  usePageTitle(invitee ? "Agregar Invitado" : "Nuevo jugador");
 
   return (
     <div>
-      <h1>{invitee ? "Agregar Invitado" : "Nuevo jugador"}</h1>
-
       <div className="grid" style={{ marginTop: 12 }}>
         <label>
           Nombre
@@ -128,6 +130,38 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory }: { returnTo: strin
             ))}
           </select>
         </label>
+
+        <div>
+          <span style={{ fontSize: "0.85rem", opacity: 0.7 }}>Posición</span>
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            {([
+              { value: "player", label: "Jugador" },
+              { value: "goalkeeper", label: "Arquero" },
+            ] as const).map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setPlayerType(opt.value)}
+                style={{
+                  flex: 1,
+                  padding: "10px 0",
+                  borderRadius: 8,
+                  border: playerType === opt.value
+                    ? "2px solid var(--acemhh-green-3)"
+                    : "1px solid rgba(255,255,255,0.15)",
+                  background: playerType === opt.value
+                    ? "rgba(36, 179, 91, 0.15)"
+                    : "rgba(255,255,255,0.05)",
+                  cursor: "pointer",
+                  fontSize: "0.9rem",
+                  fontWeight: playerType === opt.value ? 600 : 400,
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {err ? <p style={{ color: "crimson", marginTop: 12 }}>{err}</p> : null}

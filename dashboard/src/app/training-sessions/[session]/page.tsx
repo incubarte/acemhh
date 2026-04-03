@@ -1,8 +1,9 @@
 "use client";
 
-import React, { Suspense, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import React, { Suspense, useEffect, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import ProtectedPage from "../../components/ProtectedPage";
+import { usePageTitle } from "../../components/PageTitleContext";
 
 type Player = {
   id: string;
@@ -13,20 +14,15 @@ type Player = {
 
 type PlayerWithAttendance = Player & {
   attended: boolean;
-  payments: number; // Total amount paid for this month
-  hasSessionPayment: boolean; // Whether player has a payment for this specific session
+  payments: number;
+  hasSessionPayment: boolean;
   invitee: boolean;
-  crossCategoryGuest: boolean;
+  player_type: "player" | "goalkeeper";
+  scholarship: number;
+  section: "jugadores" | "invitados" | "arqueros";
 };
 
 const ALL_CATEGORIES = ["u-14", "cat-c", "cat-b", "cat-a"];
-
-const CATEGORY_LABELS: Record<string, string> = {
-  "u-14": "Menores",
-  "cat-c": "Categoría C",
-  "cat-b": "Categoría B",
-  "cat-a": "Categoría A",
-};
 
 const CATEGORY_SHORT_LABELS: Record<string, string> = {
   "u-14": "Menores",
@@ -47,9 +43,12 @@ function hourToCategory(hour: number): string {
 function TrainingSessionDetailContent() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const session = params.session as string; // Format: YYYY-MM-DD-HH
   const currentPath = `/training-sessions/${session}`;
-  
+  const newPlayerId = searchParams.get("player");
+  const processedPlayerRef = useRef<string | null>(null);
+
   const [players, setPlayers] = useState<PlayerWithAttendance[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -60,13 +59,15 @@ function TrainingSessionDetailContent() {
   const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [addInviteeStep, setAddInviteeStep] = useState<'choose' | 'selectCategory' | 'selectPlayer' | null>(null);
+  const [addArqueroStep, setAddArqueroStep] = useState<'choose' | 'selectCategory' | 'selectPlayer' | null>(null);
   const [categoryPlayersForInvite, setCategoryPlayersForInvite] = useState<Player[]>([]);
+  const [categoryPlayersForArquero, setCategoryPlayersForArquero] = useState<Player[]>([]);
 
   // Parse session string
-  const [dateStr, hourStr] = session.split('-').length === 4 
+  const [dateStr, hourStr] = session.split('-').length === 4
     ? [session.substring(0, 10), session.substring(11)]
     : ['', ''];
-  
+
   const date = dateStr ? new Date(dateStr + 'T12:00:00') : null;
   const hour = parseInt(hourStr, 10);
 
@@ -82,6 +83,18 @@ function TrainingSessionDetailContent() {
       setErr(null);
 
       try {
+        // If returning from adding a new player, mark attendance first
+        if (newPlayerId && processedPlayerRef.current !== newPlayerId) {
+          processedPlayerRef.current = newPlayerId;
+          await fetch(`/api/training-sessions/${session}/attendance`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ player_id: newPlayerId, attended: true }),
+          });
+          // Remove the query param from the URL
+          window.history.replaceState(null, "", currentPath);
+        }
+
         const res = await fetch(`/api/training-sessions/${session}`);
         if (!res.ok) {
           setErr(await res.text());
@@ -92,18 +105,18 @@ function TrainingSessionDetailContent() {
         const data = await res.json();
         setPlayers(data.players || []);
         setLoading(false);
-      } catch (error) {
+      } catch {
         setErr("Error al cargar jugadores");
         setLoading(false);
       }
     };
 
     loadPlayers();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, dateStr, hourStr, hour]);
 
   const toggleAttendance = async (playerId: string, currentStatus: boolean) => {
-    // Optimistic update - update UI immediately
-    setPlayers(prev => prev.map(p => 
+    setPlayers(prev => prev.map(p =>
       p.id === playerId ? { ...p, attended: !currentStatus } : p
     ));
 
@@ -118,16 +131,13 @@ function TrainingSessionDetailContent() {
       });
 
       if (!res.ok) {
-        // Revert on error
-        setPlayers(prev => prev.map(p => 
+        setPlayers(prev => prev.map(p =>
           p.id === playerId ? { ...p, attended: currentStatus } : p
         ));
         alert("Error al actualizar asistencia");
-        return;
       }
-    } catch (error) {
-      // Revert on error
-      setPlayers(prev => prev.map(p => 
+    } catch {
+      setPlayers(prev => prev.map(p =>
         p.id === playerId ? { ...p, attended: currentStatus } : p
       ));
       alert("Error al actualizar asistencia");
@@ -136,10 +146,10 @@ function TrainingSessionDetailContent() {
 
   const confirmPayment = async () => {
     if (!pendingPayment) return;
-    
+
     const { playerId, amount } = pendingPayment;
     setPaymentProcessing(true);
-    
+
     try {
       const res = await fetch(`/api/training-sessions/${session}/payment`, {
         method: "POST",
@@ -181,14 +191,13 @@ function TrainingSessionDetailContent() {
 
       setPaymentProcessing(false);
       setPaymentSuccess(true);
-      
-      // Show success message for 2 seconds, then close
+
       setTimeout(() => {
         setPaymentSuccess(false);
         setPendingPayment(null);
         setExpandedPlayerId(null);
       }, 2000);
-    } catch (error) {
+    } catch {
       alert("Error al registrar pago");
       setPaymentProcessing(false);
       setPendingPayment(null);
@@ -196,6 +205,7 @@ function TrainingSessionDetailContent() {
   };
 
   const cancelPayment = () => {
+    setExpandedPlayerId(null);
     setPendingPayment(null);
     setCustomAmountMode(null);
     setCustomAmount("");
@@ -209,7 +219,6 @@ function TrainingSessionDetailContent() {
       alert("Ingrese un monto válido");
       return;
     }
-    // If amount is less than 1000, treat it as thousands (e.g., 15 -> 15000)
     if (amount < 1000) {
       amount = amount * 1000;
     }
@@ -222,7 +231,7 @@ function TrainingSessionDetailContent() {
 
   const selectCategoryForInvite = async (cat: string) => {
     try {
-      const res = await fetch(`/api/players?category=${encodeURIComponent(cat)}`);
+      const res = await fetch(`/api/players?category=${encodeURIComponent(cat)}&player_type=player`);
       if (res.ok) {
         const data = await res.json();
         setCategoryPlayersForInvite(data.players || []);
@@ -258,12 +267,50 @@ function TrainingSessionDetailContent() {
     setCategoryPlayersForInvite([]);
   };
 
+  const selectCategoryForArquero = async (cat: string) => {
+    try {
+      const res = await fetch(`/api/players?category=${encodeURIComponent(cat)}&player_type=goalkeeper`);
+      if (res.ok) {
+        const data = await res.json();
+        setCategoryPlayersForArquero(data.players || []);
+        setAddArqueroStep('selectPlayer');
+      }
+    } catch {
+      alert("Error al cargar jugadores");
+    }
+  };
+
+  const selectCrossCategoryArquero = async (playerId: string) => {
+    try {
+      await fetch(`/api/training-sessions/${session}/attendance`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ player_id: playerId, attended: true }),
+      });
+
+      const res = await fetch(`/api/training-sessions/${session}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPlayers(data.players || []);
+      }
+    } catch {
+      alert("Error al agregar arquero");
+    }
+    setAddArqueroStep(null);
+    setCategoryPlayersForArquero([]);
+  };
+
+  const cancelAddArquero = () => {
+    setAddArqueroStep(null);
+    setCategoryPlayersForArquero([]);
+  };
+
   const formatDate = (d: Date) => {
-    return d.toLocaleDateString("es-AR", { 
-      weekday: "long", 
-      year: "numeric", 
-      month: "long", 
-      day: "numeric" 
+    return d.toLocaleDateString("es-AR", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric"
     });
   };
 
@@ -274,29 +321,32 @@ function TrainingSessionDetailContent() {
     }).format(amount);
   };
 
-  const PAYMENT_THRESHOLD = 100000; // 100k threshold
-  const members = players.filter(p => !p.invitee && !p.crossCategoryGuest);
-  const invitees = players.filter(p => p.invitee || p.crossCategoryGuest);
-  const owingMembers = members.filter(p => p.payments < PAYMENT_THRESHOLD);
-  const paidMembers = members.filter(p => p.payments >= PAYMENT_THRESHOLD);
+  const PAYMENT_THRESHOLD = 100000;
 
-  const renderPlayerRow = (player: PlayerWithAttendance, sectionColor: 'orange' | 'green' | 'yellow') => {
-    const owes = player.payments < PAYMENT_THRESHOLD;
-    const statusIcon = owes ? "💸" : "💰";
-    const bgColor = sectionColor === 'orange' 
-      ? "rgba(255, 140, 0, 0.08)" 
-      : sectionColor === 'green'
-      ? "rgba(36, 179, 91, 0.08)"
-      : "rgba(230, 184, 0, 0.08)";
-    
+  const playerOwes = (p: PlayerWithAttendance) =>
+    p.payments < PAYMENT_THRESHOLD * (100 - p.scholarship) / 100;
+
+  const jugadores = players
+    .filter(p => p.section === "jugadores")
+    .sort((a, b) => {
+      const aOwes = playerOwes(a) ? 0 : 1;
+      const bOwes = playerOwes(b) ? 0 : 1;
+      return aOwes - bOwes;
+    });
+  const invitados = players.filter(p => p.section === "invitados");
+  const arqueros = players.filter(p => p.section === "arqueros");
+
+  const renderPlayerRow = (player: PlayerWithAttendance, bgColor: string) => {
+    const owes = playerOwes(player);
+    const statusIcon = owes ? "💸" : player.scholarship > 0 ? "🏦" : "💰";
     return (
       <React.Fragment key={player.id}>
         {/* Name */}
-        <div style={{ 
-          fontSize: "0.875rem", 
-          fontWeight: 400, 
-          overflow: "hidden", 
-          textOverflow: "ellipsis", 
+        <div style={{
+          fontSize: "0.875rem",
+          fontWeight: 400,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
           whiteSpace: "nowrap",
           padding: "8px",
           background: bgColor,
@@ -304,10 +354,10 @@ function TrainingSessionDetailContent() {
         }}>
           {player.last_name}, {player.name}
         </div>
-        
+
         {/* Attendance emoji */}
-        <div style={{ 
-          display: "flex", 
+        <div style={{
+          display: "flex",
           justifyContent: "flex-end",
           alignItems: "center",
           padding: "8px",
@@ -327,55 +377,55 @@ function TrainingSessionDetailContent() {
             {player.attended ? "😐" : "🫥"}
           </span>
         </div>
-        
-        {/* Payment emoji, amount and payment button */}
-        <div style={{ 
-          display: "flex", 
+
+        {/* Payment status icon */}
+        <div style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          padding: "8px 0",
+          background: bgColor,
+          borderBottom: "1px solid rgba(255,255,255,0.05)"
+        }}>
+          <span style={{ fontSize: "1.3rem", lineHeight: 1 }}>{statusIcon}</span>
+        </div>
+
+        {/* Payment amount and button */}
+        <div style={{
+          display: "flex",
           alignItems: "center",
           justifyContent: "flex-end",
           gap: 6,
           padding: "8px",
           background: bgColor,
           borderBottom: "1px solid rgba(255,255,255,0.05)",
-          position: "relative"
         }}>
-          <span style={{ fontSize: "1.3rem", lineHeight: 1 }}>{statusIcon}</span>
           <span style={{ fontSize: "0.9rem", fontWeight: 500 }}>{formatArs(player.payments)}</span>
-          
-          {((player.invitee || player.crossCategoryGuest) ? !player.hasSessionPayment : (owes && !player.hasSessionPayment)) && (
-            <button
-              onClick={() => {
-                if (player.invitee || player.crossCategoryGuest) {
-                  setExpandedPlayerId(player.id);
-                  setPendingPayment({ playerId: player.id, amount: 30000 });
-                } else {
-                  setExpandedPlayerId(expandedPlayerId === player.id ? null : player.id);
-                }
-              }}
-              style={{
-                padding: "2px 6px",
-                borderRadius: 4,
-                border: "1px solid rgba(255,255,255,0.2)",
-                background: "rgba(255,255,255,0.05)",
-                cursor: "pointer",
-                fontSize: "1rem",
-                lineHeight: 1,
-              }}
-            >
-              +
-            </button>
-          )}
+          <button
+            onClick={() => {
+              setExpandedPlayerId(expandedPlayerId === player.id ? null : player.id);
+            }}
+            style={{
+              padding: "2px 6px",
+              borderRadius: 4,
+              border: "1px solid rgba(255,255,255,0.2)",
+              background: "rgba(255,255,255,0.05)",
+              cursor: "pointer",
+              fontSize: "1rem",
+              lineHeight: 1,
+            }}
+          >
+            +
+          </button>
         </div>
-        
+
         {/* Expandable payment amounts row */}
-        {expandedPlayerId === player.id && (player.invitee || player.crossCategoryGuest || owes) && (
+        {expandedPlayerId === player.id && (
           <>
             {pendingPayment?.playerId === player.id ? (
-              // Confirmation message
               <>
                 {paymentProcessing || paymentSuccess ? (
-                  // Centered processing/success message without arrow
-                  <div style={{ 
+                  <div style={{
                     gridColumn: "1 / -1",
                     display: "flex",
                     justifyContent: "center",
@@ -389,8 +439,7 @@ function TrainingSessionDetailContent() {
                     </span>
                   </div>
                 ) : (
-                  // Confirmation with arrow and buttons
-                  <div style={{ 
+                  <div style={{
                     gridColumn: "1 / -1",
                     display: "grid",
                     gridTemplateColumns: "auto 1fr auto",
@@ -436,8 +485,7 @@ function TrainingSessionDetailContent() {
                 )}
               </>
             ) : customAmountMode === player.id ? (
-              // Custom amount input
-              <div style={{ 
+              <div style={{
                 gridColumn: "1 / -1",
                 display: "flex",
                 alignItems: "center",
@@ -492,8 +540,7 @@ function TrainingSessionDetailContent() {
                 </div>
               </div>
             ) : (
-              // Amount selection buttons
-              <div style={{ 
+              <div style={{
                 gridColumn: "1 / -1",
                 display: "flex",
                 gap: 6,
@@ -556,12 +603,134 @@ function TrainingSessionDetailContent() {
     );
   };
 
+  const renderAddGuestControls = (sectionColor: string) => (
+    <>
+      {addInviteeStep === 'choose' && (
+        <div style={{
+          display: "flex",
+          gap: 8,
+          padding: "10px 12px",
+          background: sectionColor,
+          borderBottom: "1px solid rgba(255,255,255,0.05)"
+        }}>
+          <button
+            onClick={() => {
+              setAddInviteeStep(null);
+              router.replace(`/players/new?category=${sessionCategory}&returnTo=${encodeURIComponent(currentPath)}`);
+            }}
+            style={{
+              flex: 1,
+              padding: "8px 12px",
+              borderRadius: 6,
+              border: "1px solid rgba(255,255,255,0.2)",
+              background: "rgba(255,255,255,0.05)",
+              cursor: "pointer",
+              fontSize: "0.85rem",
+            }}
+          >
+            Nuevo jugador
+          </button>
+          <button
+            onClick={() => setAddInviteeStep('selectCategory')}
+            style={{
+              flex: 1,
+              padding: "8px 12px",
+              borderRadius: 6,
+              border: "1px solid rgba(255,255,255,0.2)",
+              background: "rgba(255,255,255,0.05)",
+              cursor: "pointer",
+              fontSize: "0.85rem",
+            }}
+          >
+            De otra categoría
+          </button>
+        </div>
+      )}
+
+      {addInviteeStep === 'selectCategory' && (
+        <div style={{
+          display: "flex",
+          gap: 8,
+          padding: "10px 12px",
+          background: sectionColor,
+          borderBottom: "1px solid rgba(255,255,255,0.05)",
+          flexWrap: "wrap",
+          alignItems: "center"
+        }}>
+          {ALL_CATEGORIES.filter(c => c !== sessionCategory).map(cat => (
+            <button
+              key={cat}
+              onClick={() => selectCategoryForInvite(cat)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 6,
+                border: "1px solid rgba(255,255,255,0.2)",
+                background: "rgba(255,255,255,0.05)",
+                cursor: "pointer",
+                fontSize: "0.85rem",
+              }}
+            >
+              {CATEGORY_SHORT_LABELS[cat] || cat}
+            </button>
+          ))}
+          <button
+            onClick={cancelAddInvitee}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 6,
+              border: "1px solid rgba(255,255,255,0.2)",
+              background: "rgba(255,255,255,0.05)",
+              cursor: "pointer",
+              fontSize: "0.85rem",
+              marginLeft: "auto",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {addInviteeStep === 'selectPlayer' && (
+        <div style={{ background: sectionColor }}>
+          {categoryPlayersForInvite
+            .filter(p => !players.some(existing => existing.id === p.id))
+            .map(p => (
+            <div
+              key={p.id}
+              onClick={() => selectCrossCategoryPlayer(p.id)}
+              style={{
+                padding: "8px 12px 8px 24px",
+                cursor: "pointer",
+                borderBottom: "1px solid rgba(255,255,255,0.05)",
+                fontSize: "0.875rem",
+              }}
+            >
+              {p.last_name}, {p.name}
+            </div>
+          ))}
+          <div
+            onClick={cancelAddInvitee}
+            style={{
+              padding: "8px 12px 8px 24px",
+              cursor: "pointer",
+              borderBottom: "1px solid rgba(255,255,255,0.05)",
+              fontSize: "0.875rem",
+              opacity: 0.6,
+            }}
+          >
+            ✕
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  usePageTitle(loading ? "Cargando..." : err || !date ? "Error" : "Asistencia y Pagos");
+
   if (loading) {
     return (
       <ProtectedPage requiredPage={currentPath}>
-        <div>
-          <h1>Cargando...</h1>
-        </div>
+        <div />
       </ProtectedPage>
     );
   }
@@ -570,85 +739,77 @@ function TrainingSessionDetailContent() {
     return (
       <ProtectedPage requiredPage={currentPath}>
         <div>
-          <h1>Error</h1>
           <p style={{ marginTop: 12, color: "crimson" }}>{err || "Sesión inválida"}</p>
-          <button onClick={() => router.push("/training-sessions")} style={{ marginTop: 16 }}>
-            Volver
-          </button>
         </div>
       </ProtectedPage>
     );
   }
 
+  const sectionBgJugadores = "rgba(255, 140, 0, 0.08)";
+  const sectionBgInvitados = "rgba(36, 179, 91, 0.08)";
+  const sectionBgArqueros = "rgba(255, 140, 0, 0.08)";
+
   return (
     <ProtectedPage requiredPage={currentPath}>
       <div>
         <div style={{ padding: "0 20px" }}>
-          <h1>Asistencia y Pagos</h1>
-          
           <div className="card" style={{ marginTop: 12, marginLeft: -15, marginRight: -15, borderRadius: "8px" }}>
             <div><strong>Fecha:</strong> {formatDate(date)}</div>
             <div><strong>Horario:</strong> {hour}:00hs</div>
             <div style={{ marginTop: 8, fontSize: "1rem", opacity: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px" }}>
               <span>😐 asistió</span><span>💸 adeuda</span>
               <span>🫥 no asistió</span><span>💰 al día</span>
+              <span></span><span>🏦 beca (parcial o completa)</span>
             </div>
           </div>
         </div>
 
         <div style={{ marginTop: 16, marginLeft: -15, marginRight: -15 }}>
-          {owingMembers.length > 0 && (
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ 
-                fontSize: "0.95rem", 
-                fontWeight: 600, 
-                padding: "8px 12px",
-                background: "var(--acemhh-orange)",
-                color: "#000",
-                textAlign: "center",
-                borderRadius: "8px 8px 0 0"
-              }}>
-                Adeudan
-              </div>
-              <div style={{ 
-                display: "grid",
-                gridTemplateColumns: "1fr 38px max-content",
-                alignItems: "stretch"
-              }}>
-                {owingMembers.map(p => renderPlayerRow(p, 'orange'))}
-              </div>
-            </div>
-          )}
-          
-          {paidMembers.length > 0 && (
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ 
-                fontSize: "0.95rem", 
-                fontWeight: 600, 
-                padding: "8px 12px",
-                background: "var(--acemhh-green-3)",
-                color: "#000",
-                textAlign: "center",
-                borderRadius: "8px 8px 0 0"
-              }}>
-                Pagaron
-              </div>
-              <div style={{ 
-                display: "grid",
-                gridTemplateColumns: "1fr 38px max-content",
-                alignItems: "stretch"
-              }}>
-                {paidMembers.map(p => renderPlayerRow(p, 'green'))}
-              </div>
-            </div>
-          )}
-
+          {/* S1: Jugadores */}
           <div style={{ marginBottom: 24 }}>
-            <div style={{ 
-              fontSize: "0.95rem", 
-              fontWeight: 600, 
+            <div style={{
+              fontSize: "0.95rem",
+              fontWeight: 600,
               padding: "8px 12px",
-              background: "#E6B800",
+              background: "var(--acemhh-orange)",
+              color: "#000",
+              textAlign: "center",
+              borderRadius: "8px 8px 0 0"
+            }}>
+              Jugadores
+            </div>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 38px 38px max-content",
+              alignItems: "stretch"
+            }}>
+              {(() => {
+                const owingCount = jugadores.filter(p => playerOwes(p)).length;
+                const showSeparator = owingCount > 0 && owingCount < jugadores.length;
+                return jugadores.map((p, i) => (
+                  <React.Fragment key={p.id}>
+                    {showSeparator && i === owingCount && (
+                      <div style={{
+                        gridColumn: "1 / -1",
+                        height: 3,
+                        background: "var(--acemhh-orange)",
+                        opacity: 0.5,
+                      }} />
+                    )}
+                    {renderPlayerRow(p, sectionBgJugadores)}
+                  </React.Fragment>
+                ));
+              })()}
+            </div>
+          </div>
+
+          {/* S2: Invitados */}
+          <div style={{ marginBottom: 24 }}>
+            <div style={{
+              fontSize: "0.95rem",
+              fontWeight: 600,
+              padding: "8px 12px",
+              background: "var(--acemhh-green)",
               color: "#000",
               textAlign: "center",
               borderRadius: "8px 8px 0 0",
@@ -676,18 +837,75 @@ function TrainingSessionDetailContent() {
               </button>
             </div>
 
-            {addInviteeStep === 'choose' && (
+            {renderAddGuestControls(sectionBgInvitados)}
+
+            {invitados.length > 0 ? (
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 38px 38px max-content",
+                alignItems: "stretch"
+              }}>
+                {invitados.map(p => renderPlayerRow(p, sectionBgInvitados))}
+              </div>
+            ) : (
+              <div style={{
+                padding: "12px",
+                background: sectionBgInvitados,
+                fontSize: "0.85rem",
+                opacity: 0.5,
+                textAlign: "center",
+              }}>
+                Sin invitados
+              </div>
+            )}
+          </div>
+
+          {/* S3: Arqueros */}
+          <div style={{ marginBottom: 24 }}>
+            <div style={{
+              fontSize: "0.95rem",
+              fontWeight: 600,
+              padding: "8px 12px",
+              background: "var(--acemhh-orange)",
+              color: "#000",
+              textAlign: "center",
+              borderRadius: "8px 8px 0 0",
+              position: "relative"
+            }}>
+              Arqueros
+              <button
+                onClick={() => setAddArqueroStep('choose')}
+                style={{
+                  position: "absolute",
+                  right: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  padding: "2px 8px",
+                  borderRadius: 4,
+                  border: "1px solid rgba(0,0,0,0.2)",
+                  background: "rgba(0,0,0,0.1)",
+                  cursor: "pointer",
+                  fontSize: "1rem",
+                  lineHeight: 1,
+                  color: "#000"
+                }}
+              >
+                +
+              </button>
+            </div>
+
+            {addArqueroStep === 'choose' && (
               <div style={{
                 display: "flex",
                 gap: 8,
                 padding: "10px 12px",
-                background: "rgba(230, 184, 0, 0.08)",
+                background: sectionBgArqueros,
                 borderBottom: "1px solid rgba(255,255,255,0.05)"
               }}>
                 <button
                   onClick={() => {
-                    setAddInviteeStep(null);
-                    router.push(`/players/new?invitee=true&category=${sessionCategory}&returnTo=${encodeURIComponent(currentPath)}`);
+                    setAddArqueroStep(null);
+                    router.replace(`/players/new?category=${sessionCategory}&player_type=goalkeeper&returnTo=${encodeURIComponent(currentPath)}`);
                   }}
                   style={{
                     flex: 1,
@@ -699,10 +917,10 @@ function TrainingSessionDetailContent() {
                     fontSize: "0.85rem",
                   }}
                 >
-                  Nuevo jugador
+                  Nuevo arquero
                 </button>
                 <button
-                  onClick={() => setAddInviteeStep('selectCategory')}
+                  onClick={() => setAddArqueroStep('selectCategory')}
                   style={{
                     flex: 1,
                     padding: "8px 12px",
@@ -718,12 +936,12 @@ function TrainingSessionDetailContent() {
               </div>
             )}
 
-            {addInviteeStep === 'selectCategory' && (
+            {addArqueroStep === 'selectCategory' && (
               <div style={{
                 display: "flex",
                 gap: 8,
                 padding: "10px 12px",
-                background: "rgba(230, 184, 0, 0.08)",
+                background: sectionBgArqueros,
                 borderBottom: "1px solid rgba(255,255,255,0.05)",
                 flexWrap: "wrap",
                 alignItems: "center"
@@ -731,7 +949,7 @@ function TrainingSessionDetailContent() {
                 {ALL_CATEGORIES.filter(c => c !== sessionCategory).map(cat => (
                   <button
                     key={cat}
-                    onClick={() => selectCategoryForInvite(cat)}
+                    onClick={() => selectCategoryForArquero(cat)}
                     style={{
                       padding: "8px 12px",
                       borderRadius: 6,
@@ -745,7 +963,7 @@ function TrainingSessionDetailContent() {
                   </button>
                 ))}
                 <button
-                  onClick={cancelAddInvitee}
+                  onClick={cancelAddArquero}
                   style={{
                     padding: "8px 10px",
                     borderRadius: 6,
@@ -761,14 +979,14 @@ function TrainingSessionDetailContent() {
               </div>
             )}
 
-            {addInviteeStep === 'selectPlayer' && (
-              <div style={{ background: "rgba(230, 184, 0, 0.08)" }}>
-                {categoryPlayersForInvite
+            {addArqueroStep === 'selectPlayer' && (
+              <div style={{ background: sectionBgArqueros }}>
+                {categoryPlayersForArquero
                   .filter(p => !players.some(existing => existing.id === p.id))
                   .map(p => (
                   <div
                     key={p.id}
-                    onClick={() => selectCrossCategoryPlayer(p.id)}
+                    onClick={() => selectCrossCategoryArquero(p.id)}
                     style={{
                       padding: "8px 12px 8px 24px",
                       cursor: "pointer",
@@ -780,7 +998,7 @@ function TrainingSessionDetailContent() {
                   </div>
                 ))}
                 <div
-                  onClick={cancelAddInvitee}
+                  onClick={cancelAddArquero}
                   style={{
                     padding: "8px 12px 8px 24px",
                     cursor: "pointer",
@@ -794,23 +1012,28 @@ function TrainingSessionDetailContent() {
               </div>
             )}
 
-            {invitees.length > 0 && (
-              <div style={{ 
+            {arqueros.length > 0 ? (
+              <div style={{
                 display: "grid",
-                gridTemplateColumns: "1fr 38px max-content",
+                gridTemplateColumns: "1fr 38px 38px max-content",
                 alignItems: "stretch"
               }}>
-                {invitees.map(p => renderPlayerRow(p, 'yellow'))}
+                {arqueros.map(p => renderPlayerRow(p, sectionBgArqueros))}
+              </div>
+            ) : (
+              <div style={{
+                padding: "12px",
+                background: sectionBgArqueros,
+                fontSize: "0.85rem",
+                opacity: 0.5,
+                textAlign: "center",
+              }}>
+                Sin arqueros
               </div>
             )}
           </div>
         </div>
 
-        <div style={{ marginTop: 24, padding: "0 20px" }}>
-          <button onClick={() => router.push("/training-sessions")}>
-            ← Volver a sesiones
-          </button>
-        </div>
       </div>
     </ProtectedPage>
   );

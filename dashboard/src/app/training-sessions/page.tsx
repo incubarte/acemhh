@@ -1,8 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import ProtectedPage from "../components/ProtectedPage";
+import { usePageTitle } from "../components/PageTitleContext";
 
 type TrainingSlot = {
   date: string; // YYYY-MM-DD
@@ -53,18 +54,24 @@ function slotsForDate(dateStr: string): TrainingSlot[] {
 
 function TrainingSessionsContent() {
   const router = useRouter();
-  const [currentDate, setCurrentDate] = useState(() => findClosestThursday());
+  const searchParams = useSearchParams();
+  const [currentDate, setCurrentDate] = useState(() => searchParams.get("date") || findClosestThursday());
 
   const slots = currentDate ? slotsForDate(currentDate) : [];
 
+  const navigateToDate = (date: string) => {
+    setCurrentDate(date);
+    router.replace(`/training-sessions?date=${date}`, { scroll: false });
+  };
+
   const goToPrev = () => {
     const prev = findThursday('prev', new Date(currentDate + 'T12:00:00'));
-    if (prev) setCurrentDate(prev);
+    if (prev) navigateToDate(prev);
   };
 
   const goToNext = () => {
     const next = findThursday('next', new Date(currentDate + 'T12:00:00'));
-    if (next) setCurrentDate(next);
+    if (next) navigateToDate(next);
   };
 
   const handleSlotClick = (slot: TrainingSlot) => {
@@ -91,11 +98,12 @@ function TrainingSessionsContent() {
     }
   };
 
+  usePageTitle("Sesiones de Entrenamiento");
+
   if (!currentDate) {
     return (
       <ProtectedPage requiredPage="/training-sessions">
         <div>
-          <h1>Sesiones de Entrenamiento</h1>
           <p style={{ marginTop: 12 }}>No se encontraron sesiones de entrenamiento recientes.</p>
         </div>
       </ProtectedPage>
@@ -105,7 +113,6 @@ function TrainingSessionsContent() {
   return (
     <ProtectedPage requiredPage="/training-sessions">
       <div>
-        <h1>Sesiones de Entrenamiento</h1>
         
         <div style={{ 
           marginTop: 16, 
@@ -149,9 +156,6 @@ function TrainingSessionsContent() {
           ))}
         </div>
 
-        <div style={{ marginTop: 16 }}>
-          <button onClick={() => router.push("/")}>← Volver</button>
-        </div>
       </div>
     </ProtectedPage>
   );

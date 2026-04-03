@@ -19,11 +19,14 @@ export const GET = withPermission('api', '/api/players', 'GET', async (sess, req
     }
 
     const category = (searchParams.get("category") || "").trim();
+    const playerType = (searchParams.get("player_type") || "").trim();
     if (category) {
-      const { data, error } = await supabaseAdmin()
+      let q = supabaseAdmin()
         .from("players")
         .select("id,name,last_name")
-        .eq("category", category)
+        .eq("category", category);
+      if (playerType) q = q.eq("player_type", playerType);
+      const { data, error } = await q
         .order("last_name")
         .order("name");
 
@@ -66,6 +69,7 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
       fecha_nac?: string | null;
       category: string;
       invitee?: boolean;
+      player_type: 'player' | 'goalkeeper';
     };
 
     if (!body?.name || !body?.last_name || !body?.category) {
@@ -87,6 +91,8 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
           fecha_nac: body.fecha_nac ?? null,
           category: body.category,
           invitee: body.invitee || false,
+          player_type: body.player_type,
+          trains: !body.invitee,
         },
       ])
       .select("id")

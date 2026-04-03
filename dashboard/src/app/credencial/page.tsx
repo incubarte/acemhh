@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, Suspense } from "react";
+import { usePageTitle } from "../components/PageTitleContext";
 
 type Player = {
   id: string;
@@ -40,6 +41,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 function CredencialContent() {
+  usePageTitle("Credencial de Socio");
   const [step, setStep] = useState<"search" | "credential">("search");
   const [q, setQ] = useState("");
   const [players, setPlayers] = useState<Player[]>([]);
@@ -103,7 +105,7 @@ function CredencialContent() {
   if (step === "search") {
     return (
       <div>
-        <h1>Credencial de Socio</h1>
+
         <h2 style={{ fontSize: "1.1rem", fontWeight: 500, marginTop: 16, marginBottom: 8 }}>
           Buscar jugador
         </h2>
@@ -157,7 +159,7 @@ function CredencialContent() {
 
     return (
       <div>
-        <h1>Credencial de Socio</h1>
+
 
         {/* Physical card */}
         <div style={{

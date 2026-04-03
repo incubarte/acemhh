@@ -39,14 +39,7 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
       return new NextResponse("Invalid amount", { status: 400 });
     }
 
-    // Create deterministic payment ID based on session and player
-    const paymentIdSource = `training-session:${isoDate}:${hour}:${body.player_id}:${selectedMonth}:${genericSlot}`;
-    const encoder = new TextEncoder();
-    const data = encoder.encode(paymentIdSource);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    const paymentId = `${hashHex.substring(0, 8)}-${hashHex.substring(8, 12)}-${hashHex.substring(12, 16)}-${hashHex.substring(16, 20)}-${hashHex.substring(20, 32)}`;
+    const paymentId = crypto.randomUUID();
 
     const registeredBy = `${sess.first_name}${sess.last_name ? ` ${sess.last_name}` : ''} ${sess.username ? `(@${sess.username})` : ''} [id=${sess.id}]`.trim();
 

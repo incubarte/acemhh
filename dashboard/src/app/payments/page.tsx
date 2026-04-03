@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, Suspense } from "react";
 import ProtectedPage from "../components/ProtectedPage";
+import { usePageTitle } from "../components/PageTitleContext";
 
 type Player = {
   id: string;
@@ -40,6 +41,7 @@ function yearMonthFor(month: number) {
 }
 
 function PaymentsPageContent() {
+  usePageTitle("Registrar Pago");
   const sp = useSearchParams();
   const [step, setStep] = useState<Step>({ kind: "search" });
   const [q, setQ] = useState("");
@@ -164,7 +166,7 @@ function PaymentsPageContent() {
     return (
       <ProtectedPage requiredPage="/payments">
         <div>
-          <h1>Registrar Pago</h1>
+
         <h2 style={{ fontSize: "1.1rem", fontWeight: 500, marginTop: 16, marginBottom: 8 }}>Buscar jugador</h2>
 
         <div style={{ marginTop: 12 }}>
@@ -214,9 +216,6 @@ function PaymentsPageContent() {
           </Link>
         </div>
 
-        <div style={{ marginTop: 16 }}>
-          <button onClick={() => window.location.href = "/"}>← Volver</button>
-        </div>
       </div>
       </ProtectedPage>
     );
@@ -226,7 +225,7 @@ function PaymentsPageContent() {
     return (
       <ProtectedPage requiredPage="/payments">
         <div>
-          <h1>Registrar Pago</h1>
+
         <div className="card" style={{ marginTop: 12 }}>
           <div><strong>Jugador:</strong> {step.player.last_name}, {step.player.name}</div>
         </div>
@@ -255,7 +254,7 @@ function PaymentsPageContent() {
     return (
       <ProtectedPage requiredPage="/payments">
         <div>
-          <h1>Registrar Pago</h1>
+
         <div className="card" style={{ marginTop: 12 }}>
           <div><strong>Jugador:</strong> {step.player.last_name}, {step.player.name}</div>
           <div><strong>Concepto:</strong> Cuota social</div>
@@ -370,7 +369,7 @@ function PaymentsPageContent() {
     return (
       <ProtectedPage requiredPage="/payments">
         <div>
-          <h1>Registrar Pago</h1>
+
 
         <div className="card" style={{ marginTop: 12 }}>
           <div><strong>Jugador:</strong> {step.player.last_name}, {step.player.name}</div>

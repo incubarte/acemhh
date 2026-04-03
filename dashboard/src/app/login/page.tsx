@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { usePageTitle } from "../components/PageTitleContext";
 
 type TelegramUserAuth = {
   id: number;
@@ -78,6 +79,15 @@ function LoginPageContent() {
         return;
       }
 
+      // Try dev auto-login
+      const devRes = await fetch("/api/auth/dev", { method: "POST" });
+      if (devRes.ok) {
+        if (cancelled) return;
+        setAutoAuthState({ kind: "authed" });
+        window.location.href = returnTo;
+        return;
+      }
+
       const ok = await tryWebAppAutoAuth();
       if (!ok) return;
       const me2 = await fetch("/api/me");
@@ -136,10 +146,11 @@ function LoginPageContent() {
     el.appendChild(script);
   }, [botUsername, scriptSrc]);
 
+  usePageTitle("Login");
+
   if (!botUsername) {
     return (
       <div>
-        <h1>Login</h1>
         <p>Missing NEXT_PUBLIC_TELEGRAM_BOT_USERNAME</p>
       </div>
     );
@@ -147,7 +158,6 @@ function LoginPageContent() {
 
   return (
     <div>
-      <h1>Login</h1>
       <p>Sign in with Telegram to use the dashboard.</p>
 
       {autoAuthState.kind === "checking" ? <p>Checking session…</p> : null}

@@ -1,11 +1,13 @@
 .idea/
+.windsurf
+.claude/settings.local.json
+db_pass
+acemhh.bak/
+
 supabase/.temp/
 supabase/.branches/
 supabase/functions/.env
 supabase/functions/.env.*
-acemhh.bak/
-db_pass
-.windsurf
 
 dashboard/node_modules/
 dashboard/.next/

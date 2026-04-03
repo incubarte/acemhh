@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import ProtectedPage from "./components/ProtectedPage";
+import { usePageTitle } from "./components/PageTitleContext";
 
 const BUTTONS = [
   { href: "/training-sessions", label: "📋 Asistencia y Pagos" },
@@ -33,10 +34,11 @@ function HomeContent() {
     });
   }, []);
 
+  usePageTitle(" ");
+
   return (
     <ProtectedPage requiredPage="/">
       <div>
-        <h1>ACEMHH Dashboard</h1>
         
         {loaded && (
           <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 12 }}>
