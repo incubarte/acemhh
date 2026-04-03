@@ -44,7 +44,8 @@ export const GROUPS: Record<string, Group> = {
   },
 };
 
-const Ale = 45669763;
+const Alex = 45669763;
+const Berk = 40541227;
 const Romi = 179767949;
 const Hect = 1239620360;
 const Ruso = 1388664237;
@@ -53,7 +54,8 @@ const Laio = 8025956878;
 const Renz = 6776491427;
 
 export const USER_GROUPS: UserGroup[] = [
-  { userId: Ale, groups: ['ROOT'] },
+  { userId: Alex, groups: ['ROOT'] },
+  { userId: Berk, groups: ['ROOT'] },
   { userId: Romi, groups: ['WHEEL'] },
   { userId: Hect, groups: ['WHEEL'] },
   { userId: Ruso, groups: ['WHEEL'] },
