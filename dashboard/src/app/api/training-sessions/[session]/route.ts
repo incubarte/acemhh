@@ -69,10 +69,12 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
       return new NextResponse("Error fetching attendances", { status: 500 });
     }
 
-    // Fetch C: all payments for current session or monthly slot
+    // Fetch C: all payments for current session or monthly slot, plus annual dues for the session year
+    const sessionYear = parts[0];
     const [
       { data: monthlyPayments, error: monthlyError },
       { data: sessionPayments, error: sessionError },
+      { data: duesPayments, error: duesError },
     ] = await Promise.all([
       s.from("payments")
         .select("player_id, amount")
@@ -83,6 +85,11 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
         .select("player_id, amount")
         .eq("concept", "session")
         .eq("session", specificSlot),
+      s.from("payments")
+        .select("player_id")
+        .eq("concept", "membership dues")
+        .gte("month", `${sessionYear}-01`)
+        .lte("month", `${sessionYear}-12`),
     ]);
 
     if (monthlyError) {
@@ -93,6 +100,12 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
       console.error(sessionError);
       return new NextResponse("Error fetching session payments", { status: 500 });
     }
+    if (duesError) {
+      console.error(duesError);
+      return new NextResponse("Error fetching dues payments", { status: 500 });
+    }
+
+    const paidDuesIds = new Set((duesPayments || []).map(d => d.player_id));
 
     // Build attendance and payment maps
     const attendanceMap = new Map(
@@ -126,6 +139,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
         attended: attendanceMap.get(player.id) || false,
         payments: paymentMap.get(player.id) || 0,
         hasSessionPayment: hasPaymentMap.get(player.id) || false,
+        paidMembershipDues: paidDuesIds.has(player.id),
         section,
       });
     }
@@ -161,6 +175,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
           attended: attendanceMap.get(player.id) || false,
           payments: paymentMap.get(player.id) || 0,
           hasSessionPayment: hasPaymentMap.get(player.id) || false,
+          paidMembershipDues: paidDuesIds.has(player.id),
           section,
         });
       }

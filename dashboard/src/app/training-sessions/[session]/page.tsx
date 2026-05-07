@@ -17,6 +17,7 @@ type PlayerWithAttendance = Player & {
   attended: boolean;
   payments: number;
   hasSessionPayment: boolean;
+  paidMembershipDues: boolean;
   invitee: boolean;
   player_type: "player" | "goalkeeper";
   scholarship: number;
@@ -309,6 +310,9 @@ function TrainingSessionDetailContent() {
   };
 
   const formatArs = (amount: number) => {
+    if (amount >= 1000 && amount % 1000 === 0) {
+      return `${amount / 1000}k`;
+    }
     return new Intl.NumberFormat("es-AR", {
       style: "decimal",
       minimumFractionDigits: 0,
@@ -333,6 +337,7 @@ function TrainingSessionDetailContent() {
   const renderPlayerRow = (player: PlayerWithAttendance, bgColor: string) => {
     const owes = playerOwes(player);
     const statusIcon = owes ? "💸" : player.scholarship > 0 ? "🏦" : "💰";
+    const nameBgColor = !player.invitee && !player.paidMembershipDues ? "rgba(220, 38, 38, 0.45)" : bgColor;
     return (
       <React.Fragment key={player.id}>
         {/* Name */}
@@ -343,7 +348,7 @@ function TrainingSessionDetailContent() {
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
           padding: "8px",
-          background: bgColor,
+          background: nameBgColor,
           borderBottom: "1px solid rgba(255,255,255,0.05)"
         }}>
           {player.last_name}, {player.name}
@@ -753,6 +758,7 @@ function TrainingSessionDetailContent() {
             <div style={{ marginTop: 8, fontSize: "1rem", opacity: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px" }}>
               <span>😐 asistió</span><span>💸 adeuda</span>
               <span>🫥 no asistió</span><span>💰 al día</span>
+              <span><span style={{ background: "rgba(220, 38, 38, 0.45)", padding: "0 6px", borderRadius: 3 }}>nombre</span></span><span>cuota anual impaga</span>
               <span></span><span>🏦 beca (parcial o completa)</span>
             </div>
           </div>
