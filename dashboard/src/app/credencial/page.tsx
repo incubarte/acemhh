@@ -35,6 +35,7 @@ function formatArs(amount: number) {
 
 const CATEGORY_LABELS: Record<string, string> = {
   "u-14": "Sub-14",
+  "youth": "Juv.",
   "cat-c": "Cat. C",
   "cat-b": "Cat. B",
   "cat-a": "Cat. A",

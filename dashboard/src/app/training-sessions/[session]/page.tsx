@@ -4,6 +4,7 @@ import React, { Suspense, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import ProtectedPage from "../../components/ProtectedPage";
 import { usePageTitle } from "../../components/PageTitleContext";
+import { categoriesForHour } from "@/lib/schedule";
 
 type Player = {
   id: string;
@@ -22,23 +23,15 @@ type PlayerWithAttendance = Player & {
   section: "jugadores" | "invitados" | "arqueros";
 };
 
-const ALL_CATEGORIES = ["u-14", "cat-c", "cat-b", "cat-a"];
+const ALL_CATEGORIES = ["u-14", "youth", "cat-c", "cat-b", "cat-a"];
 
 const CATEGORY_SHORT_LABELS: Record<string, string> = {
   "u-14": "Menores",
+  "youth": "Juv",
   "cat-c": "Cat C",
   "cat-b": "Cat B",
   "cat-a": "Cat A",
 };
-
-function hourToCategory(hour: number): string {
-  switch (hour) {
-    case 21: return "cat-a";
-    case 22: return "cat-b";
-    case 23: return "cat-c";
-    default: return "cat-b";
-  }
-}
 
 function TrainingSessionDetailContent() {
   const params = useParams();
@@ -227,7 +220,8 @@ function TrainingSessionDetailContent() {
     setCustomAmount("");
   };
 
-  const sessionCategory = hourToCategory(hour);
+  const sessionCategories = dateStr && !isNaN(hour) ? categoriesForHour(dateStr, hour) : [];
+  const newPlayerCategoryParam = sessionCategories.length === 1 ? `category=${sessionCategories[0]}&` : "";
 
   const selectCategoryForInvite = async (cat: string) => {
     try {
@@ -616,7 +610,7 @@ function TrainingSessionDetailContent() {
           <button
             onClick={() => {
               setAddInviteeStep(null);
-              router.replace(`/players/new?category=${sessionCategory}&returnTo=${encodeURIComponent(currentPath)}`);
+              router.replace(`/players/new?${newPlayerCategoryParam}returnTo=${encodeURIComponent(currentPath)}`);
             }}
             style={{
               flex: 1,
@@ -657,7 +651,7 @@ function TrainingSessionDetailContent() {
           flexWrap: "wrap",
           alignItems: "center"
         }}>
-          {ALL_CATEGORIES.filter(c => c !== sessionCategory).map(cat => (
+          {ALL_CATEGORIES.filter(c => !sessionCategories.includes(c)).map(cat => (
             <button
               key={cat}
               onClick={() => selectCategoryForInvite(cat)}
@@ -905,7 +899,7 @@ function TrainingSessionDetailContent() {
                 <button
                   onClick={() => {
                     setAddArqueroStep(null);
-                    router.replace(`/players/new?category=${sessionCategory}&player_type=goalkeeper&returnTo=${encodeURIComponent(currentPath)}`);
+                    router.replace(`/players/new?${newPlayerCategoryParam}player_type=goalkeeper&returnTo=${encodeURIComponent(currentPath)}`);
                   }}
                   style={{
                     flex: 1,
@@ -946,7 +940,7 @@ function TrainingSessionDetailContent() {
                 flexWrap: "wrap",
                 alignItems: "center"
               }}>
-                {ALL_CATEGORIES.filter(c => c !== sessionCategory).map(cat => (
+                {ALL_CATEGORIES.filter(c => !sessionCategories.includes(c)).map(cat => (
                   <button
                     key={cat}
                     onClick={() => selectCategoryForArquero(cat)}

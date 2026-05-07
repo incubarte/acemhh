@@ -1,19 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
-
-function slotToCat(slot: string): string[] {
-  switch (slot) {
-    case "jue 21hs":
-      return ["cat-a"];
-    case "jue 22hs":
-      return ["cat-b"];
-    case "jue 23hs":
-      return ["cat-c"];
-    default:
-      return [];
-  }
-}
+import { categoriesForSlot } from "@/lib/schedule";
 
 function toSpecificSlot(isoDate: string, hour: string): string {
   return `${isoDate} ${hour}hs`;
@@ -47,7 +35,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
 
     const specificSlot = toSpecificSlot(isoDate, hour);
     const genericSlot = toGenericSlot(isoDate, hour);
-    const cats = slotToCat(genericSlot);
+    const cats = categoriesForSlot(isoDate, genericSlot);
     const selectedMonth = isoDate.substring(0, 7);
 
     if (cats.length === 0) {

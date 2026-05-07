@@ -56,19 +56,24 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
   const [lastName, setLastName] = useState("");
   const [dni, setDni] = useState("");
   const [fechaNac, setFechaNac] = useState("");
-  const [category, setCategory] = useState(defaultCategory || "cat-b");
+  const [category, setCategory] = useState(defaultCategory || "");
   const [playerType, setPlayerType] = useState<"player" | "goalkeeper">(defaultPlayerType || "player");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const categories = useMemo(() => [
     { value: "u-14", label: "Menores" },
+    { value: "youth", label: "Juveniles" },
     { value: "cat-c", label: "Categoría C" },
     { value: "cat-b", label: "Categoría B" },
     { value: "cat-a", label: "Categoría A" },
   ], []);
 
   const submit = async () => {
+    if (!category) {
+      setErr("Seleccioná una categoría");
+      return;
+    }
     setLoading(true);
     setErr(null);
     const res = await fetch("/api/players", {
@@ -125,6 +130,7 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
         <label>
           Categoría
           <select value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="" disabled>Seleccionar categoría</option>
             {categories.map((c) => (
               <option key={c.value} value={c.value}>{c.label}</option>
             ))}

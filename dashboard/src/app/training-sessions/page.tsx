@@ -4,11 +4,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import ProtectedPage from "../components/ProtectedPage";
 import { usePageTitle } from "../components/PageTitleContext";
+import { slotsForDate as scheduleSlotsForDate } from "@/lib/schedule";
 
 type TrainingSlot = {
-  date: string; // YYYY-MM-DD
-  hour: number; // 21, 22, or 23
-  category: string; // cat-a, cat-b, cat-c
+  date: string;
+  hour: number;
+  categories: string[];
 };
 
 function findThursday(direction: 'prev' | 'next', from: Date): string {
@@ -45,11 +46,11 @@ function findClosestThursday(): string {
 }
 
 function slotsForDate(dateStr: string): TrainingSlot[] {
-  return [
-    { date: dateStr, hour: 21, category: "cat-a" },
-    { date: dateStr, hour: 22, category: "cat-b" },
-    { date: dateStr, hour: 23, category: "cat-c" },
-  ];
+  return scheduleSlotsForDate(dateStr).map(({ hour, categories }) => ({
+    date: dateStr,
+    hour,
+    categories,
+  }));
 }
 
 function TrainingSessionsContent() {
@@ -94,6 +95,8 @@ function TrainingSessionsContent() {
       case "cat-a": return "Categoría A";
       case "cat-b": return "Categoría B";
       case "cat-c": return "Categoría C";
+      case "youth": return "Juveniles";
+      case "u-14": return "Menores";
       default: return cat;
     }
   };
@@ -150,7 +153,7 @@ function TrainingSessionsContent() {
                 alignItems: "center"
               }}
             >
-              <span>{getCategoryLabel(slot.category)}</span>
+              <span>{slot.categories.length > 0 ? slot.categories.map(getCategoryLabel).join(" + ") : "—"}</span>
               <span style={{ opacity: 0.7 }}>{slot.hour}:00hs</span>
             </button>
           ))}
