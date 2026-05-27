@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import ProtectedPage from "../../components/ProtectedPage";
 import { usePageTitle } from "../../components/PageTitleContext";
 import { categoriesForHour } from "@/lib/schedule";
+import { paymentThresholdForSession } from "@/lib/thresholds";
 
 type Player = {
   id: string;
@@ -319,7 +320,7 @@ function TrainingSessionDetailContent() {
     }).format(amount);
   };
 
-  const PAYMENT_THRESHOLD = 100000;
+  const PAYMENT_THRESHOLD = paymentThresholdForSession(dateStr, hour);
 
   const playerOwes = (p: PlayerWithAttendance) =>
     p.payments < PAYMENT_THRESHOLD * (100 - p.scholarship) / 100;
