@@ -5,6 +5,8 @@ const DEFAULT_PAYMENT_THRESHOLD = 100000;
 const PAYMENT_THRESHOLDS: Record<string, number> = {
   "2026-05|jue 22hs": 50000,
   "2026-05|jue 23hs": 50000,
+  "2026-06|jue 22hs": 75000,
+  "2026-06|jue 23hs": 75000,
 };
 
 export function paymentThresholdForSession(isoDate: string, hour: number): number {
