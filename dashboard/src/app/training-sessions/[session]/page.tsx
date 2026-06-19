@@ -698,7 +698,7 @@ function TrainingSessionDetailContent() {
       {addInviteeStep === 'selectPlayer' && (
         <div style={{ background: sectionColor }}>
           {categoryPlayersForInvite
-            .filter(p => !invitados.some(existing => existing.id === p.id))
+            .filter(p => !invitados.some(existing => existing.id === p.id) && !jugadores.some(existing => existing.id === p.id))
             .map(p => (
             <div
               key={p.id}
