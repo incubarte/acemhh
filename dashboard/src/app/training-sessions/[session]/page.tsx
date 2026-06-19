@@ -4,7 +4,7 @@ import React, { Suspense, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import ProtectedPage from "../../components/ProtectedPage";
 import { usePageTitle } from "../../components/PageTitleContext";
-import { categoriesForHour } from "@/lib/schedule";
+import { categoriesForHour, isGoalkeeperFriendlyHour } from "@/lib/schedule";
 import { paymentThresholdForSession } from "@/lib/thresholds";
 
 type Player = {
@@ -223,6 +223,7 @@ function TrainingSessionDetailContent() {
   };
 
   const sessionCategories = dateStr && !isNaN(hour) ? categoriesForHour(dateStr, hour) : [];
+  const isGkFriendly = !isNaN(hour) && isGoalkeeperFriendlyHour(hour);
   const newPlayerCategoryParam = sessionCategories.length === 1 ? `category=${sessionCategories[0]}&` : "";
 
   const selectCategoryForInvite = async (cat: string) => {
@@ -335,7 +336,7 @@ function TrainingSessionDetailContent() {
   const invitados = players.filter(p => p.section === "invitados");
   const arqueros = players.filter(p => p.section === "arqueros");
 
-  const renderPlayerRow = (player: PlayerWithAttendance, bgColor: string) => {
+  const renderPlayerRow = (player: PlayerWithAttendance, bgColor: string, hidePayment = false) => {
     const owes = playerOwes(player);
     const statusIcon = owes ? "💸" : player.scholarship > 0 ? "🏦" : "💰";
     const nameBgColor = !player.invitee && !player.paidMembershipDues ? "rgba(220, 38, 38, 0.45)" : bgColor;
@@ -378,6 +379,8 @@ function TrainingSessionDetailContent() {
           </span>
         </div>
 
+        {!hidePayment && (
+        <>
         {/* Payment status icon */}
         <div style={{
           display: "flex",
@@ -598,6 +601,8 @@ function TrainingSessionDetailContent() {
               </div>
             )}
           </>
+        )}
+        </>
         )}
       </React.Fragment>
     );
@@ -932,7 +937,7 @@ function TrainingSessionDetailContent() {
                     fontSize: "0.85rem",
                   }}
                 >
-                  De otra categoría
+                  {isGkFriendly ? "De otra categoría" : "Existente"}
                 </button>
               </div>
             )}
@@ -947,7 +952,7 @@ function TrainingSessionDetailContent() {
                 flexWrap: "wrap",
                 alignItems: "center"
               }}>
-                {ALL_CATEGORIES.filter(c => !sessionCategories.includes(c)).map(cat => (
+                {(isGkFriendly ? ALL_CATEGORIES.filter(c => !sessionCategories.includes(c)) : ALL_CATEGORIES).map(cat => (
                   <button
                     key={cat}
                     onClick={() => selectCategoryForArquero(cat)}
@@ -983,7 +988,7 @@ function TrainingSessionDetailContent() {
             {addArqueroStep === 'selectPlayer' && (
               <div style={{ background: sectionBgArqueros }}>
                 {categoryPlayersForArquero
-                  .filter(p => !players.some(existing => existing.id === p.id))
+                  .filter(p => !arqueros.some(existing => existing.id === p.id))
                   .map(p => (
                   <div
                     key={p.id}
@@ -1016,10 +1021,10 @@ function TrainingSessionDetailContent() {
             {arqueros.length > 0 ? (
               <div style={{
                 display: "grid",
-                gridTemplateColumns: "1fr 38px 38px max-content",
+                gridTemplateColumns: isGkFriendly ? "1fr 38px 38px max-content" : "1fr 38px",
                 alignItems: "stretch"
               }}>
-                {arqueros.map(p => renderPlayerRow(p, sectionBgArqueros))}
+                {arqueros.map(p => renderPlayerRow(p, sectionBgArqueros, !isGkFriendly))}
               </div>
             ) : (
               <div style={{

@@ -15,3 +15,5 @@ dashboard/.vercel/
 dashboard/.env
 dashboard/.env.*
 dashboard/*.tsbuildinfo
+
+**/.DS_Store

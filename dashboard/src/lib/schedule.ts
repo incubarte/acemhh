@@ -16,6 +16,19 @@ const NEW_SCHEDULE_FROM = "2026-05-01";
 
 const THURSDAY_HOURS = [21, 22, 23] as const;
 
+// Slots where every goalkeeper (regardless of category) shows up in the
+// arqueros section and can register payments. In any other slot goalkeepers
+// only appear as visiting arqueros: no payment info, no payment registration.
+const GOALKEEPER_FRIENDLY_SLOTS = new Set<string>(["jue 21hs"]);
+
+export function isGoalkeeperFriendlySlot(genericSlot: string): boolean {
+  return GOALKEEPER_FRIENDLY_SLOTS.has(genericSlot);
+}
+
+export function isGoalkeeperFriendlyHour(hour: number): boolean {
+  return GOALKEEPER_FRIENDLY_SLOTS.has(`jue ${hour}hs`);
+}
+
 function pickSchedule(isoDate: string): ScheduleMap {
   return isoDate >= NEW_SCHEDULE_FROM ? NEW_SCHEDULE : OLD_SCHEDULE;
 }

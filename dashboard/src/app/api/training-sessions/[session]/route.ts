@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
-import { categoriesForSlot } from "@/lib/schedule";
+import { categoriesForSlot, isGoalkeeperFriendlySlot } from "@/lib/schedule";
 
 function toSpecificSlot(isoDate: string, hour: string): string {
   return `${isoDate} ${hour}hs`;
@@ -142,6 +142,35 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
         paidMembershipDues: paidDuesIds.has(player.id),
         section,
       });
+    }
+
+    // On goalkeeper-friendly slots, every goalkeeper shows up in the arqueros
+    // section regardless of their category.
+    if (isGoalkeeperFriendlySlot(genericSlot)) {
+      const { data: allGoalkeepers, error: gkError } = await s
+        .from("players")
+        .select("*")
+        .eq("player_type", "goalkeeper")
+        .order("last_name")
+        .order("name");
+
+      if (gkError) {
+        console.error(gkError);
+        return new NextResponse("Error fetching goalkeepers", { status: 500 });
+      }
+
+      for (const player of (allGoalkeepers || [])) {
+        if (knownIds.has(player.id)) continue;
+        knownIds.add(player.id);
+        result.push({
+          ...player,
+          attended: attendanceMap.get(player.id) || false,
+          payments: paymentMap.get(player.id) || 0,
+          hasSessionPayment: hasPaymentMap.get(player.id) || false,
+          paidMembershipDues: paidDuesIds.has(player.id),
+          section: "arqueros",
+        });
+      }
     }
 
     // Collect extra player IDs from attendances and payments (not already in category+trains)
