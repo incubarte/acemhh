@@ -647,7 +647,7 @@ function TrainingSessionDetailContent() {
               fontSize: "0.85rem",
             }}
           >
-            De otra categoría
+            Existente
           </button>
         </div>
       )}
@@ -662,7 +662,7 @@ function TrainingSessionDetailContent() {
           flexWrap: "wrap",
           alignItems: "center"
         }}>
-          {ALL_CATEGORIES.filter(c => !sessionCategories.includes(c)).map(cat => (
+          {ALL_CATEGORIES.map(cat => (
             <button
               key={cat}
               onClick={() => selectCategoryForInvite(cat)}
@@ -698,7 +698,7 @@ function TrainingSessionDetailContent() {
       {addInviteeStep === 'selectPlayer' && (
         <div style={{ background: sectionColor }}>
           {categoryPlayersForInvite
-            .filter(p => !players.some(existing => existing.id === p.id))
+            .filter(p => !invitados.some(existing => existing.id === p.id))
             .map(p => (
             <div
               key={p.id}
