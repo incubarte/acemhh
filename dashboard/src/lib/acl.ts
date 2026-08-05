@@ -52,6 +52,7 @@ const Ruso = 1388664237;
 const Fran = 6885365547;
 const Laio = 8025956878;
 const Renz = 6776491427;
+const Abrl = 8958438803;
 
 export const USER_GROUPS: UserGroup[] = [
   { userId: Alex, groups: ['ROOT'] },
@@ -62,6 +63,7 @@ export const USER_GROUPS: UserGroup[] = [
   { userId: Fran, groups: ['WHEEL'] },
   { userId: Laio, groups: ['WHEEL'] },
   { userId: Renz, groups: ['WHEEL'] },
+  { userId: Abrl, groups: ['WHEEL'] },
 ];
 
 export function getUserGroups(userId: number): string[] {

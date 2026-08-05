@@ -12,7 +12,10 @@ const BUTTONS = [
   { href: "/credencial", label: "🪪 Credencial de Socio" },
 ];
 
-function HomeContent() {
+// Rendered as a child of ProtectedPage so these checks only fire once the session
+// is established. Fetching them in the parent races the Telegram auto-auth in
+// ProtectedPage: on an expired session every check 401s and the menu renders empty.
+function HomeMenu() {
   const [allowed, setAllowed] = useState<Record<string, boolean>>({});
   const [loaded, setLoaded] = useState(false);
 
@@ -34,23 +37,28 @@ function HomeContent() {
     });
   }, []);
 
+  if (!loaded) return null;
+
+  return (
+    <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 12 }}>
+      {BUTTONS.filter((b) => allowed[b.href]).map((b) => (
+        <Link key={b.href} href={b.href} style={{ textDecoration: "none" }}>
+          <button className="btnPrimary" style={{ width: "100%", textAlign: "left" }}>
+            {b.label}
+          </button>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function HomeContent() {
   usePageTitle(" ");
 
   return (
     <ProtectedPage requiredPage="/">
       <div>
-        
-        {loaded && (
-          <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 12 }}>
-            {BUTTONS.filter((b) => allowed[b.href]).map((b) => (
-              <Link key={b.href} href={b.href} style={{ textDecoration: "none" }}>
-                <button className="btnPrimary" style={{ width: "100%", textAlign: "left" }}>
-                  {b.label}
-                </button>
-              </Link>
-            ))}
-          </div>
-        )}
+        <HomeMenu />
       </div>
     </ProtectedPage>
   );
