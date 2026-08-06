@@ -3,6 +3,7 @@
 .claude/settings.local.json
 db_pass
 acemhh.bak/
+backfill/
 
 supabase/.temp/
 supabase/.branches/
