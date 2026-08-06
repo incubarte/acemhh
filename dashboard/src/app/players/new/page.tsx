@@ -2,8 +2,12 @@
 
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState, Suspense } from "react";
+import PhoneInput from "react-phone-number-input";
+import flags from "react-phone-number-input/flags";
+import "react-phone-number-input/style.css";
 import ProtectedPage from "../../components/ProtectedPage";
 import { usePageTitle } from "../../components/PageTitleContext";
+import { DefaultCountry, isValidWhatsappPhone, normalizeWhatsappPhone } from "@/lib/phone";
 
 function NewPlayerPageContent() {
   const sp = useSearchParams();
@@ -50,12 +54,51 @@ export default function NewPlayerPage() {
   );
 }
 
+/**
+ * Phone input with a country selector, defaulting to Argentina.
+ *
+ * The preview matters as much as the flag: an Argentine mobile written "11 3456-7890"
+ * is indistinguishable from a landline, so normalizeWhatsappPhone forces the mobile
+ * marker on. Showing the stored value makes that transformation visible.
+ */
+function PhoneField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const normalized = normalizeWhatsappPhone(value);
+  const invalid = value.trim().length > 0 && (normalized === null || !isValidWhatsappPhone(normalized));
+
+  return (
+    <label>
+      {label}
+      <PhoneInput
+        international
+        flags={flags}
+        defaultCountry={DefaultCountry}
+        value={value || undefined}
+        onChange={(v) => onChange(v ?? "")}
+        placeholder="11 3456-7890"
+      />
+      {value.trim() ? (
+        <span style={{
+          display: "block",
+          marginTop: 4,
+          fontSize: "0.75rem",
+          opacity: invalid ? 1 : 0.7,
+          color: invalid ? "crimson" : undefined,
+        }}>
+          {invalid ? "Número inválido" : `Se guarda como +${normalized}`}
+        </span>
+      ) : null}
+    </label>
+  );
+}
+
 function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }: { returnTo: string; invitee: boolean; defaultCategory: string | null; defaultPlayerType: "player" | "goalkeeper" | null }) {
 
   const [name, setName] = useState("");
   const [lastName, setLastName] = useState("");
   const [dni, setDni] = useState("");
   const [fechaNac, setFechaNac] = useState("");
+  const [phone, setPhone] = useState("");
+  const [guardianPhone, setGuardianPhone] = useState("");
   const [category, setCategory] = useState(defaultCategory || "");
   const [playerType, setPlayerType] = useState<"player" | "goalkeeper">(defaultPlayerType || "player");
   const [loading, setLoading] = useState(false);
@@ -74,6 +117,19 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
       setErr("Seleccioná una categoría");
       return;
     }
+
+    // Checked here only to fail fast with a readable message; the API normalizes and
+    // validates again on its own.
+    if (phone.trim() && !normalizeWhatsappPhone(phone)) {
+      setErr("Revisá el celular");
+      return;
+    }
+
+    if (guardianPhone.trim() && !normalizeWhatsappPhone(guardianPhone)) {
+      setErr("Revisá el celular de madre/padre/tutor");
+      return;
+    }
+
     setLoading(true);
     setErr(null);
     const res = await fetch("/api/players", {
@@ -87,6 +143,10 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
         category,
         invitee,
         player_type: playerType,
+        // Sent in E.164 with the leading +, so the API can tell a foreign number
+        // from a local one instead of re-parsing it as Argentine.
+        phone: phone || null,
+        guardian_phone: guardianPhone || null,
       }),
     });
     setLoading(false);
@@ -126,6 +186,14 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
             </label>
           </>
         )}
+
+        <PhoneField label="Celular" value={phone} onChange={setPhone} />
+
+        <PhoneField
+          label="Celular Madre/Padre/Tutor"
+          value={guardianPhone}
+          onChange={setGuardianPhone}
+        />
 
         <label>
           Categoría

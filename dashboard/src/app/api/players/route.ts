@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
+import { isValidWhatsappPhone, normalizeWhatsappPhone } from "@/lib/phone";
 
 export const GET = withPermission('api', '/api/players', 'GET', async (sess, req) => {
   try {
@@ -70,6 +71,8 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
       category: string;
       invitee?: boolean;
       player_type: 'player' | 'goalkeeper';
+      phone?: string | null;
+      guardian_phone?: string | null;
     };
 
     if (!body?.name || !body?.last_name || !body?.category) {
@@ -78,6 +81,18 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
 
     if (!body.invitee && !body.dni) {
       return new NextResponse("DNI is required for members", { status: 400 });
+    }
+
+    // Both phones are optional, but a number that was supplied and does not
+    // normalize must be rejected rather than silently stored as null.
+    const phone = normalizeWhatsappPhone(body.phone);
+    if ((body.phone ?? "").trim() && (!phone || !isValidWhatsappPhone(phone))) {
+      return new NextResponse("Celular inválido", { status: 400 });
+    }
+
+    const guardianPhone = normalizeWhatsappPhone(body.guardian_phone);
+    if ((body.guardian_phone ?? "").trim() && (!guardianPhone || !isValidWhatsappPhone(guardianPhone))) {
+      return new NextResponse("Celular de madre/padre/tutor inválido", { status: 400 });
     }
 
     const s = supabaseAdmin();
@@ -93,6 +108,8 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
           invitee: body.invitee || false,
           player_type: body.player_type,
           trains: !body.invitee,
+          phone,
+          guardian_phone: guardianPhone,
         },
       ])
       .select("id")

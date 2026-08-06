@@ -209,3 +209,66 @@ hr {
   border-top: 1px solid var(--acemhh-border);
   margin: 14px 0;
 }
+
+/* react-phone-number-input: make the flag selector and the field read as one
+   control, matching the plain inputs above. */
+.PhoneInput {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--acemhh-border);
+  background: rgba(255, 255, 255, 0.05);
+  transition: all 200ms ease;
+}
+
+.PhoneInput--focus {
+  border-color: rgba(36, 179, 91, 0.8);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 3px rgba(36, 179, 91, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* The inner input keeps the global font/colour but drops its own box — the
+   wrapper draws it instead. */
+.PhoneInput .PhoneInputInput {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  min-width: 0;
+}
+
+.PhoneInput .PhoneInputInput:focus {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.PhoneInputCountry {
+  gap: 6px;
+  margin: 0;
+}
+
+.PhoneInputCountryIcon {
+  width: 24px;
+  height: 18px;
+}
+
+.PhoneInputCountryIcon--border {
+  background-color: transparent;
+  box-shadow: 0 0 0 1px var(--acemhh-border);
+}
+
+.PhoneInputCountrySelectArrow {
+  color: var(--acemhh-muted);
+  opacity: 1;
+}
+
+/* The country dropdown is a native select rendered by the OS, so its options
+   ignore the dark theme unless coloured explicitly. */
+.PhoneInputCountrySelect option {
+  background: var(--acemhh-surface);
+  color: var(--acemhh-text);
+}
