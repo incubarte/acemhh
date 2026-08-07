@@ -96,15 +96,20 @@ function parseCsv(text: string): string[][] {
 }
 
 // Columns are located by header text rather than position, so the exports can gain
-// or reorder questions without breaking this. The misspelled "FAMILAIR" is in the
-// source data, not a typo here.
+// or reorder questions without breaking this.
+//
+// guardianPhone deliberately requires an explicit madre/padre/tutor header. The
+// relevamiento export's "CELULAR DEL FAMILAIR" is an emergency contact, which is not
+// the same thing as the guardian of an underage player — it is left alone for a human
+// to sort out. Requiring "celular" as well keeps it from matching the nivelatorio
+// export's "Nombre y apellido de madre o padre", which holds a name, not a number.
 const HeaderPatterns = {
     name: /^nombre$/i,
     lastName: /^apellido$/i,
     combinedName: /apellido,\s*nombre/i,
     dni: /^dni$/i,
     phone: /tel[eé]fono de contacto|celular del deportista|n[uú]mero de whatsapp/i,
-    guardianPhone: /celular del famil/i,
+    guardianPhone: /celular.*(madre|padre|tutor)/i,
 } as const;
 
 function findColumn(header: string[], pattern: RegExp): number {

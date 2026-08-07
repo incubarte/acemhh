@@ -84,6 +84,10 @@ SUPABASE_SERVICE_ROLE_KEY=<service-role-key> \
   order carries no information. Extra tokens are tolerated in the CSV direction only —
   "Joaquín Hernan Carrascosa" matches "Joaquin Carrascosa", never the reverse — and only
   when exactly one player qualifies.
+- **Guardian numbers come only from an explicit `madre/padre/tutor` column.** The
+  relevamiento export's "CELULAR DEL FAMILAIR" is an *emergency contact*, which is not
+  the same as the guardian of an underage player, so it is ignored rather than
+  backfilled. Populate `guardian_phone` by hand, or via the manual CSV above.
 - **Spelling variants are not bridged.** "Laboratto"/"Laborato" and "Maxi"/"Maximiliano"
   are reported as unmatched with a "did you mean" hint, rather than guessed at. Fix those
   by hand; writing a phone onto the wrong person is worse than leaving a blank.
@@ -96,7 +100,7 @@ For players no export covers, make a CSV with this header — these column names
 what the script looks for:
 
 ```
-Nombre,Apellido,DNI,CELULAR DEL DEPORTISTA,CELULAR DEL FAMILIAR
+Nombre,Apellido,DNI,CELULAR DEL DEPORTISTA,CELULAR MADRE/PADRE/TUTOR
 ```
 
 Only the DNI and one phone column are really needed; DNI is worth including because it
