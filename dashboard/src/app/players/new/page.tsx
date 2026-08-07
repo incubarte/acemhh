@@ -99,6 +99,8 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
   const [fechaNac, setFechaNac] = useState("");
   const [phone, setPhone] = useState("");
   const [guardianPhone, setGuardianPhone] = useState("");
+  const [emergencyName, setEmergencyName] = useState("");
+  const [emergencyPhone, setEmergencyPhone] = useState("");
   const [category, setCategory] = useState(defaultCategory || "");
   const [playerType, setPlayerType] = useState<"player" | "goalkeeper">(defaultPlayerType || "player");
   const [loading, setLoading] = useState(false);
@@ -130,6 +132,11 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
       return;
     }
 
+    if (emergencyPhone.trim() && !normalizeWhatsappPhone(emergencyPhone)) {
+      setErr("Revisá el celular del contacto de emergencia");
+      return;
+    }
+
     setLoading(true);
     setErr(null);
     const res = await fetch("/api/players", {
@@ -147,6 +154,8 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
         // from a local one instead of re-parsing it as Argentine.
         phone: phone || null,
         guardian_phone: guardianPhone || null,
+        emergency_contact_name: emergencyName.trim() || null,
+        emergency_contact_phone: emergencyPhone || null,
       }),
     });
     setLoading(false);
@@ -193,6 +202,21 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
           label="Celular Madre/Padre/Tutor"
           value={guardianPhone}
           onChange={setGuardianPhone}
+        />
+
+        <label>
+          Contacto de emergencia
+          <input
+            value={emergencyName}
+            onChange={(e) => setEmergencyName(e.target.value)}
+            placeholder="Nombre y apellido"
+          />
+        </label>
+
+        <PhoneField
+          label="Celular contacto de emergencia"
+          value={emergencyPhone}
+          onChange={setEmergencyPhone}
         />
 
         <label>

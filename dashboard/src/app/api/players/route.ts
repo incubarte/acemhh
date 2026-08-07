@@ -73,6 +73,8 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
       player_type: 'player' | 'goalkeeper';
       phone?: string | null;
       guardian_phone?: string | null;
+      emergency_contact_name?: string | null;
+      emergency_contact_phone?: string | null;
     };
 
     if (!body?.name || !body?.last_name || !body?.category) {
@@ -95,6 +97,13 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
       return new NextResponse("Celular de madre/padre/tutor inválido", { status: 400 });
     }
 
+    const emergencyPhone = normalizeWhatsappPhone(body.emergency_contact_phone);
+    if ((body.emergency_contact_phone ?? "").trim() && (!emergencyPhone || !isValidWhatsappPhone(emergencyPhone))) {
+      return new NextResponse("Celular del contacto de emergencia inválido", { status: 400 });
+    }
+
+    const emergencyName = (body.emergency_contact_name ?? "").trim() || null;
+
     const s = supabaseAdmin();
     const { data, error } = await s
       .from("players")
@@ -110,6 +119,8 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
           trains: !body.invitee,
           phone,
           guardian_phone: guardianPhone,
+          emergency_contact_name: emergencyName,
+          emergency_contact_phone: emergencyPhone,
         },
       ])
       .select("id")
