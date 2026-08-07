@@ -18,6 +18,8 @@
 //   --overwrite   also replace phones already stored (default only fills nulls)
 //   --sql         emit UPDATE statements (keyed by player id) instead of a report
 //   --seed        same, but keyed by DNI, for pasting into supabase/seed.sql
+//   --roster-only read only id/name/dni, for a schema without the phone columns.
+//                 Detected automatically too; the flag just skips the probe.
 
 import { load } from "jsr:@std/dotenv";
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -291,16 +293,66 @@ type Planned = {
     guardianPhone?: { value: string; source: string; raw: string };
 };
 
+/**
+ * Loads the roster, tolerating a schema where the phone columns do not exist yet.
+ *
+ * That is the state of any database the migration has not reached, and it is still
+ * a perfectly good source of players — the matching and the generated SQL do not
+ * need the current values. Falls back automatically on the undefined-column error
+ * so a first run against prod reports instead of dying; --roster-only skips the
+ * optimistic attempt when you already know the columns are missing.
+ */
+export async function loadPlayers(
+    // deno-lint-ignore no-explicit-any
+    supabase: any,
+    rosterOnly: boolean,
+): Promise<{ players: Player[]; hasPhoneColumns: boolean }> {
+    const RosterColumns = "id,name,last_name,dni";
+
+    if (!rosterOnly) {
+        const { data, error } = await supabase
+            .from("players")
+            .select(`${RosterColumns},phone,guardian_phone`);
+
+        if (!error) return { players: data as Player[], hasPhoneColumns: true };
+
+        // 42703 is Postgres' undefined_column. Anything else is a real failure.
+        const undefinedColumn = error.code === "42703" ||
+            /column .*(phone).* does not exist/i.test(error.message ?? "");
+        if (!undefinedColumn) {
+            console.error("Failed to load players:", error.message);
+            Deno.exit(1);
+        }
+    }
+
+    const { data, error } = await supabase.from("players").select(RosterColumns);
+    if (error) {
+        console.error("Failed to load players:", error.message);
+        Deno.exit(1);
+    }
+
+    const players = (data as Omit<Player, "phone" | "guardian_phone">[]).map((p) => ({
+        ...p,
+        phone: null,
+        guardian_phone: null,
+    }));
+
+    return { players, hasPhoneColumns: false };
+}
+
 async function main() {
     const args = [...Deno.args];
     const apply = args.includes("--apply");
     const overwrite = args.includes("--overwrite");
     const emitSql = args.includes("--sql");
     const emitSeed = args.includes("--seed");
+    const rosterOnly = args.includes("--roster-only");
     const paths = args.filter((a) => !a.startsWith("--"));
 
     if (paths.length === 0) {
-        console.error("Usage: backfill-phones.ts <csv> [csv...] [--apply] [--overwrite] [--sql|--seed]");
+        console.error(
+            "Usage: backfill-phones.ts <csv> [csv...] [--apply] [--overwrite] [--roster-only] [--sql|--seed]",
+        );
         console.error("CSVs are processed in priority order: the first valid value wins.");
         Deno.exit(1);
     }
@@ -313,16 +365,28 @@ async function main() {
     }
 
     const supabase = createClient(supabaseUrl, serviceKey);
-    const { data: players, error } = await supabase
-        .from("players")
-        .select("id,name,last_name,dni,phone,guardian_phone");
+    const { players, hasPhoneColumns } = await loadPlayers(supabase, rosterOnly);
 
-    if (error) {
-        console.error("Failed to load players:", error.message);
-        Deno.exit(1);
+    if (!hasPhoneColumns) {
+        console.log(
+            "\nNote: players.phone / players.guardian_phone are not in this schema.\n" +
+            "      Using the database as a roster source only. Every matched number is\n" +
+            "      reported as new, since there is nothing to compare against.\n" +
+            "      Re-run with --sql once the migration has been applied, or use the\n" +
+            "      emitted statements directly.",
+        );
+
+        if (apply) {
+            console.error(
+                "\nRefusing --apply: the phone columns do not exist yet. Apply migration\n" +
+                "20260805130000_add_phone_to_players.sql first, or re-run with --sql to\n" +
+                "generate the statements.",
+            );
+            Deno.exit(1);
+        }
     }
 
-    const index = buildIndex(players as Player[]);
+    const index = buildIndex(players);
     const planned = new Map<string, Planned>();
     const unmatched: { record: CsvRecord; reason: string }[] = [];
     const rejected: { record: CsvRecord; field: string; raw: string }[] = [];
@@ -434,14 +498,22 @@ async function main() {
         }
     }
 
-    const withoutPhone = (players as Player[]).filter(
+    const withoutPhone = players.filter(
         (p) => !p.phone && !updates.some((u) => u.player.id === p.id && u.phone),
     );
-    console.log(`\nPlayers still without a phone after this run: ${withoutPhone.length}`);
+    console.log(
+        hasPhoneColumns
+            ? `\nPlayers still without a phone after this run: ${withoutPhone.length}`
+            : `\nPlayers no source covers: ${withoutPhone.length}`,
+    );
     for (const p of withoutPhone) console.log(`  ${p.name} ${p.last_name}`);
 
     if (!apply) {
-        console.log(`\nDry run. Re-run with --apply to write ${updates.length} update(s).`);
+        console.log(
+            hasPhoneColumns
+                ? `\nDry run. Re-run with --apply to write ${updates.length} update(s).`
+                : `\nDry run. Re-run with --sql to emit ${updates.length} UPDATE statement(s).`,
+        );
         return;
     }
 

@@ -72,6 +72,7 @@ SUPABASE_SERVICE_ROLE_KEY=<service-role-key> \
 | `--overwrite` | also replace phones already stored (default fills only nulls) |
 | `--sql` | emit `UPDATE ... WHERE id = ...` instead of writing |
 | `--seed` | emit `UPDATE ... WHERE dni = ...`, for `supabase/seed.sql` |
+| `--roster-only` | read only `id/name/last_name/dni`, ignoring the phone columns |
 
 ### How it decides
 
@@ -104,3 +105,24 @@ nothing about it — an empty value never overwrites and never blocks a later so
 
 Position the file **first** in the argument list for corrections that should beat the
 exports, or **last** to only fill gaps.
+
+### Running before the migration exists
+
+The phone columns do not have to be present. If `players.phone` is missing the script
+falls back to reading the roster alone and says so, which lets you run it against a
+database the migration has not reached yet and still get the real matching report:
+
+```bash
+SUPABASE_URL=https://<proj>.supabase.co \
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key> \
+  deno run --allow-read --allow-env --allow-net scripts/backfill-phones.ts \
+    backfill/manual-phones.csv backfill/*.csv --sql > backfill.sql
+```
+
+`--roster-only` forces that mode without probing first. In either case there is nothing
+to compare against, so every matched number is reported as new and `--apply` is refused —
+apply `20260805130000_add_phone_to_players.sql`, then either run the generated SQL or
+re-run with `--apply`.
+
+This is also the quickest way to get an accurate list of players no source covers, which
+is what belongs in `manual-phones.csv`.
