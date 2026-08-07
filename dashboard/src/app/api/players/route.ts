@@ -77,11 +77,17 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
       emergency_contact_phone?: string | null;
     };
 
-    if (!body?.name || !body?.last_name || !body?.category) {
+    // Trim before validating, so a field of only spaces counts as missing rather
+    // than reaching the table and breaking name lookups later.
+    const name = (body?.name ?? "").trim();
+    const lastName = (body?.last_name ?? "").trim();
+    const dni = (body?.dni ?? "").trim();
+
+    if (!name || !lastName || !body?.category) {
       return new NextResponse("Missing fields", { status: 400 });
     }
 
-    if (!body.invitee && !body.dni) {
+    if (!body.invitee && !dni) {
       return new NextResponse("DNI is required for members", { status: 400 });
     }
 
@@ -109,9 +115,9 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
       .from("players")
       .insert([
         {
-          name: body.name,
-          last_name: body.last_name,
-          dni: body.dni || null,
+          name,
+          last_name: lastName,
+          dni: dni || null,
           fecha_nac: body.fecha_nac ?? null,
           category: body.category,
           invitee: body.invitee || false,

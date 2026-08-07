@@ -136,3 +136,63 @@ re-run with `--apply`.
 
 This is also the quickest way to get an accurate list of players no source covers, which
 is what belongs in `manual-phones.csv`.
+
+## find-duplicate-players.ts
+
+Reports players that look like the same person entered twice. **Read-only** — it never
+writes, because deciding what to merge needs someone who knows the club.
+
+```bash
+deno run --allow-read --allow-env --allow-net scripts/find-duplicate-players.ts
+```
+
+Same credential handling as `backfill-phones.ts`: reads `supabase/functions/.env`,
+shell variables win.
+
+| flag | effect |
+|---|---|
+| `--threshold=N` | minimum similarity to report, 0-1 (default `0.62`) |
+| `--all` | also list pairs ruled out for having two different DNIs |
+
+### How it decides
+
+Both name fields are merged into a single unordered token set before comparing. That
+is what makes it immune to the swapped-columns problem — a surname typed into `name`
+produces the same set either way, so `Nahuel/Zorrilla` and `Zorrilla/Nahuel` come out
+identical. Comparing the columns separately would miss exactly that case.
+
+From there:
+
+- identical token sets → `1.00`
+- one set contained in the other ("Joaquin" vs "Joaquin Hernan") → `0.90`
+- otherwise a Dice coefficient over fuzzily matched tokens, which catches typos like
+  `Laborato`/`Laboratto` and `Guesso`/`Gesso`
+
+Tokens under 4 characters must match exactly — `ana` and `ema` are one edit apart and
+are not the same name.
+
+**Diminutives** are expanded before comparing, so `Maxi`/`Maximiliano` and
+`Naza`/`Nazareno` match. The table maps each nickname to *all* the names it could
+stand for rather than to one canonical form, because most are ambiguous: `Ale` is
+Alejandro or Alejandra. Two tokens match when their expansions overlap, so
+`Ale`/`Alejandro` matches while `Alejandro`/`Alejandra` does not. Extend `Nicknames`
+in the script freely — a wrong entry costs you a pair to eyeball, not a bad merge.
+
+**Gendered pairs are never treated as typos.** `Daniel`/`Daniela` and
+`Alejandro`/`Alejandra` are one edit apart, so plain edit distance paired up fathers
+and daughters sharing a surname. A final `-o`/`-a` swap, or a trailing `-a`, now counts
+as a real difference. The cost is missing a genuine `Mariano` mistyped as `Mariana`,
+which is the cheaper error.
+
+Each pair is annotated with whatever else is suggestive: fields inverted, one row an
+invitee and the other a member, one row without a DNI.
+
+**Two different DNIs rules a pair out**, since that is strong evidence of two different
+people, and those are listed separately behind `--all`. Rows whose name fields are
+blank or whitespace-only get their own section — the trim migration leaves those alone
+rather than violating the not-empty constraints.
+
+### What it will not catch
+
+Nicknames outside the `Nicknames` table, and shortenings that are not simple
+diminutives. Lower `--threshold` to sweep wider, and expect siblings in the results.
