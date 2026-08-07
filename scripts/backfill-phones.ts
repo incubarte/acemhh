@@ -1,6 +1,7 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env --allow-net
 //
-// Backfills players.phone and players.guardian_phone from Google Forms CSV exports.
+// Backfills the contact columns on players (phone, guardian_phone,
+// emergency_contact_name, emergency_contact_phone) from Google Forms CSV exports.
 //
 // Sources are given in priority order: the first file that yields a *valid* number
 // for a player wins that field. Validity is checked per field, so a truncated number
@@ -98,19 +99,60 @@ function parseCsv(text: string): string[][] {
 // Columns are located by header text rather than position, so the exports can gain
 // or reorder questions without breaking this.
 //
-// guardianPhone deliberately requires an explicit madre/padre/tutor header. The
-// relevamiento export's "CELULAR DEL FAMILAIR" is an emergency contact, which is not
-// the same thing as the guardian of an underage player — it is left alone for a human
-// to sort out. Requiring "celular" as well keeps it from matching the nivelatorio
-// export's "Nombre y apellido de madre o padre", which holds a name, not a number.
+// guardianPhone requires an explicit madre/padre/tutor header. "CELULAR DEL FAMILAIR"
+// is an emergency contact and lands in its own column instead — for underage players
+// it is copied across to guardian_phone as well, which is handled further down.
+// Requiring "celular" keeps the guardian pattern off nivelatorio's "Nombre y apellido
+// de madre o padre", which holds a name, not a number.
 const HeaderPatterns = {
     name: /^nombre$/i,
     lastName: /^apellido$/i,
     combinedName: /apellido,\s*nombre/i,
     dni: /^dni$/i,
+    birthDate: /fecha (de )?nacimiento/i,
     phone: /tel[eé]fono de contacto|celular del deportista|n[uú]mero de whatsapp/i,
     guardianPhone: /celular.*(madre|padre|tutor)/i,
+    emergencyName: /nombre de familiar/i,
+    emergencyPhone: /celular del famil/i,
 } as const;
+
+const AgeOfMajority = 18;
+
+/** Google Forms exports dates as D/M/YYYY. Returns null for anything implausible. */
+function parseBirthDate(raw: string | null | undefined): Date | null {
+    const value = (raw ?? "").trim();
+    if (!value) return null;
+
+    // ISO first, which is what the database column gives back.
+    const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (iso) return validDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+
+    const dmy = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value);
+    if (dmy) return validDate(Number(dmy[3]), Number(dmy[2]), Number(dmy[1]));
+
+    return null;
+}
+
+function validDate(year: number, month: number, day: number): Date | null {
+    // Typos like "25/6/0076" are common in the exports and must not be read as a
+    // 1950-year-old player who therefore counts as an adult.
+    if (year < 1900 || year > 2100) return null;
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? date : null;
+}
+
+function isUnderage(birthDate: Date | null, reference: Date): boolean {
+    if (!birthDate) return false;
+
+    let age = reference.getUTCFullYear() - birthDate.getUTCFullYear();
+    const monthDelta = reference.getUTCMonth() - birthDate.getUTCMonth();
+    if (monthDelta < 0 || (monthDelta === 0 && reference.getUTCDate() < birthDate.getUTCDate())) {
+        age--;
+    }
+    return age < AgeOfMajority;
+}
 
 function findColumn(header: string[], pattern: RegExp): number {
     return header.findIndex((h) => pattern.test(h.trim()));
@@ -121,8 +163,11 @@ type CsvRecord = {
     name: string;
     lastName: string;
     dni: string | null;
+    birthDateRaw: string;
     phoneRaw: string;
     guardianPhoneRaw: string;
+    emergencyNameRaw: string;
+    emergencyPhoneRaw: string;
 };
 
 export function readSource(path: string): CsvRecord[] {
@@ -136,11 +181,14 @@ export function readSource(path: string): CsvRecord[] {
         lastName: findColumn(header, HeaderPatterns.lastName),
         combinedName: findColumn(header, HeaderPatterns.combinedName),
         dni: findColumn(header, HeaderPatterns.dni),
+        birthDate: findColumn(header, HeaderPatterns.birthDate),
         phone: findColumn(header, HeaderPatterns.phone),
         guardianPhone: findColumn(header, HeaderPatterns.guardianPhone),
+        emergencyName: findColumn(header, HeaderPatterns.emergencyName),
+        emergencyPhone: findColumn(header, HeaderPatterns.emergencyPhone),
     };
 
-    if (cols.phone < 0 && cols.guardianPhone < 0) {
+    if (cols.phone < 0 && cols.guardianPhone < 0 && cols.emergencyPhone < 0) {
         console.error(`  ! ${source}: no phone column found, skipping`);
         return [];
     }
@@ -169,8 +217,11 @@ export function readSource(path: string): CsvRecord[] {
             name: name.trim(),
             lastName: lastName.trim(),
             dni: cols.dni >= 0 ? (r[cols.dni] ?? "").replace(/\D/g, "") || null : null,
+            birthDateRaw: cols.birthDate >= 0 ? (r[cols.birthDate] ?? "").trim() : "",
             phoneRaw: cols.phone >= 0 ? (r[cols.phone] ?? "").trim() : "",
             guardianPhoneRaw: cols.guardianPhone >= 0 ? (r[cols.guardianPhone] ?? "").trim() : "",
+            emergencyNameRaw: cols.emergencyName >= 0 ? (r[cols.emergencyName] ?? "").trim() : "",
+            emergencyPhoneRaw: cols.emergencyPhone >= 0 ? (r[cols.emergencyPhone] ?? "").trim() : "",
         };
     });
 }
@@ -195,8 +246,11 @@ export type Player = {
     name: string;
     last_name: string;
     dni: string | null;
+    fecha_nac: string | null;
     phone: string | null;
     guardian_phone: string | null;
+    emergency_contact_name: string | null;
+    emergency_contact_phone: string | null;
 };
 
 function nameTokens(value: string): Set<string> {
@@ -292,10 +346,15 @@ export function nearMissHint(label: string, index: Index): string {
 // MAIN
 // ////////////////////////////////////
 
+type Sourced = { value: string; source: string; raw: string };
+
 type Planned = {
     player: Player;
-    phone?: { value: string; source: string; raw: string };
-    guardianPhone?: { value: string; source: string; raw: string };
+    phone?: Sourced;
+    guardianPhone?: Sourced;
+    emergencyName?: Sourced;
+    emergencyPhone?: Sourced;
+    birthDate?: Date | null;
 };
 
 /**
@@ -312,18 +371,20 @@ export async function loadPlayers(
     supabase: any,
     rosterOnly: boolean,
 ): Promise<{ players: Player[]; hasPhoneColumns: boolean }> {
-    const RosterColumns = "id,name,last_name,dni";
+    const RosterColumns = "id,name,last_name,dni,fecha_nac";
+    const OptionalColumns = "phone,guardian_phone,emergency_contact_name,emergency_contact_phone";
 
     if (!rosterOnly) {
         const { data, error } = await supabase
             .from("players")
-            .select(`${RosterColumns},phone,guardian_phone`);
+            .select(`${RosterColumns},${OptionalColumns}`);
 
         if (!error) return { players: data as Player[], hasPhoneColumns: true };
 
-        // 42703 is Postgres' undefined_column. Anything else is a real failure.
+        // 42703 is Postgres' undefined_column. If the roster select below also
+        // fails we surface that error instead, so this staying broad is safe.
         const undefinedColumn = error.code === "42703" ||
-            /column .*(phone).* does not exist/i.test(error.message ?? "");
+            /does not exist/i.test(error.message ?? "");
         if (!undefinedColumn) {
             console.error("Failed to load players:", error.message);
             Deno.exit(1);
@@ -336,11 +397,13 @@ export async function loadPlayers(
         Deno.exit(1);
     }
 
-    const players = (data as Omit<Player, "phone" | "guardian_phone">[]).map((p) => ({
+    const players = (data as Record<string, unknown>[]).map((p) => ({
         ...p,
         phone: null,
         guardian_phone: null,
-    }));
+        emergency_contact_name: null,
+        emergency_contact_phone: null,
+    })) as Player[];
 
     return { players, hasPhoneColumns: false };
 }
@@ -374,7 +437,7 @@ async function main() {
 
     if (!hasPhoneColumns) {
         console.log(
-            "\nNote: players.phone / players.guardian_phone are not in this schema.\n" +
+            "\nNote: the phone / guardian / emergency contact columns are not in this schema.\n" +
             "      Using the database as a roster source only. Every matched number is\n" +
             "      reported as new, since there is nothing to compare against.\n" +
             "      Re-run with --sql once the migration has been applied, or use the\n" +
@@ -383,9 +446,10 @@ async function main() {
 
         if (apply) {
             console.error(
-                "\nRefusing --apply: the phone columns do not exist yet. Apply migration\n" +
-                "20260805130000_add_phone_to_players.sql first, or re-run with --sql to\n" +
-                "generate the statements.",
+                "\nRefusing --apply: the contact columns do not exist yet. Apply\n" +
+                "20260805130000_add_phone_to_players.sql and\n" +
+                "20260806100000_add_emergency_contact_to_players.sql first, or re-run\n" +
+                "with --sql to generate the statements.",
             );
             Deno.exit(1);
         }
@@ -413,10 +477,16 @@ async function main() {
 
             const entry = planned.get(match.player.id) ?? { player: match.player };
 
+            // The database is the better authority on age; the CSV date is a fallback
+            // for players whose fecha_nac was never recorded.
+            entry.birthDate ??= parseBirthDate(match.player.fecha_nac) ??
+                parseBirthDate(record.birthDateRaw);
+
             for (
                 const [field, raw] of [
                     ["phone", record.phoneRaw],
                     ["guardianPhone", record.guardianPhoneRaw],
+                    ["emergencyPhone", record.emergencyPhoneRaw],
                 ] as const
             ) {
                 if (!raw) continue;
@@ -431,23 +501,58 @@ async function main() {
                 entry[field] = { value, source: record.source, raw };
             }
 
+            // Some rows repeat the phone number in the name field. A name with no
+            // letters in it is not a name.
+            const emergencyName = record.emergencyNameRaw.trim();
+            if (emergencyName.length > 1 && /\p{L}/u.test(emergencyName) && !entry.emergencyName) {
+                entry.emergencyName = {
+                    value: emergencyName,
+                    source: record.source,
+                    raw: emergencyName,
+                };
+            }
+
             planned.set(match.player.id, entry);
         }
     }
 
-    // Only fill blanks unless told otherwise.
-    const updates: { player: Player; phone: string | null; guardianPhone: string | null }[] = [];
+    // An underage player's emergency contact is their guardian, so the number serves
+    // as both. Only fills a guardian that no explicit madre/padre/tutor column set,
+    // and never invents one for an adult or for a player with no usable birth date.
+    const today = new Date();
+    let derivedGuardians = 0;
     for (const entry of planned.values()) {
-        const phone = entry.phone?.value ?? null;
-        const guardianPhone = entry.guardianPhone?.value ?? null;
+        if (entry.guardianPhone || !entry.emergencyPhone) continue;
+        if (!isUnderage(entry.birthDate ?? null, today)) continue;
 
-        const setPhone = phone && (overwrite || !entry.player.phone) ? phone : null;
-        const setGuardian = guardianPhone && (overwrite || !entry.player.guardian_phone)
-            ? guardianPhone
-            : null;
+        entry.guardianPhone = { ...entry.emergencyPhone, source: `${entry.emergencyPhone.source} (menor)` };
+        derivedGuardians++;
+    }
 
-        if (setPhone || setGuardian) {
-            updates.push({ player: entry.player, phone: setPhone, guardianPhone: setGuardian });
+    // Only fill blanks unless told otherwise.
+    type Update = {
+        player: Player;
+        phone: string | null;
+        guardianPhone: string | null;
+        emergencyName: string | null;
+        emergencyPhone: string | null;
+    };
+
+    const fill = (proposed: string | undefined, existing: string | null) =>
+        proposed && (overwrite || !existing) ? proposed : null;
+
+    const updates: Update[] = [];
+    for (const entry of planned.values()) {
+        const update: Update = {
+            player: entry.player,
+            phone: fill(entry.phone?.value, entry.player.phone),
+            guardianPhone: fill(entry.guardianPhone?.value, entry.player.guardian_phone),
+            emergencyName: fill(entry.emergencyName?.value, entry.player.emergency_contact_name),
+            emergencyPhone: fill(entry.emergencyPhone?.value, entry.player.emergency_contact_phone),
+        };
+
+        if (update.phone || update.guardianPhone || update.emergencyName || update.emergencyPhone) {
+            updates.push(update);
         }
     }
 
@@ -457,6 +562,10 @@ async function main() {
             const sets = [
                 u.phone ? `phone = '${u.phone}'` : null,
                 u.guardianPhone ? `guardian_phone = '${u.guardianPhone}'` : null,
+                u.emergencyName
+                    ? `emergency_contact_name = '${u.emergencyName.replace(/'/g, "''")}'`
+                    : null,
+                u.emergencyPhone ? `emergency_contact_phone = '${u.emergencyPhone}'` : null,
             ].filter(Boolean).join(", ");
 
             // Seed rows get fresh UUIDs on every `supabase db reset`, so the seed
@@ -476,8 +585,18 @@ async function main() {
     console.log(`PLANNED UPDATES (${updates.length})`);
     console.log("=".repeat(70));
     for (const u of updates) {
-        const who = `${u.player.name} ${u.player.last_name}`.padEnd(32);
-        console.log(`  ${who} phone=${u.phone ?? "-"}  guardian=${u.guardianPhone ?? "-"}`);
+        const who = `${u.player.name} ${u.player.last_name}`.padEnd(30);
+        const contact = u.emergencyName || u.emergencyPhone
+            ? `  contacto=${u.emergencyName ?? "?"} ${u.emergencyPhone ?? "-"}`
+            : "";
+        console.log(
+            `  ${who} phone=${(u.phone ?? "-").padEnd(14)} guardian=${(u.guardianPhone ?? "-").padEnd(14)}${contact}`,
+        );
+    }
+    if (derivedGuardians) {
+        console.log(
+            `\n  ${derivedGuardians} guardian number(s) taken from the emergency contact of an underage player.`,
+        );
     }
 
     if (rejected.length) {
@@ -528,6 +647,8 @@ async function main() {
         const patch: Record<string, string> = {};
         if (u.phone) patch.phone = u.phone;
         if (u.guardianPhone) patch.guardian_phone = u.guardianPhone;
+        if (u.emergencyName) patch.emergency_contact_name = u.emergencyName;
+        if (u.emergencyPhone) patch.emergency_contact_phone = u.emergencyPhone;
 
         const { error: updateError } = await supabase
             .from("players")

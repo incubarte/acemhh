@@ -84,10 +84,15 @@ SUPABASE_SERVICE_ROLE_KEY=<service-role-key> \
   order carries no information. Extra tokens are tolerated in the CSV direction only —
   "Joaquín Hernan Carrascosa" matches "Joaquin Carrascosa", never the reverse — and only
   when exactly one player qualifies.
-- **Guardian numbers come only from an explicit `madre/padre/tutor` column.** The
-  relevamiento export's "CELULAR DEL FAMILAIR" is an *emergency contact*, which is not
-  the same as the guardian of an underage player, so it is ignored rather than
-  backfilled. Populate `guardian_phone` by hand, or via the manual CSV above.
+- **Guardian vs emergency contact.** `guardian_phone` comes from an explicit
+  `madre/padre/tutor` column. The relevamiento export's "CELULAR DEL FAMILAIR" is an
+  *emergency contact* and fills `emergency_contact_phone` instead — plus
+  `emergency_contact_name` from "NOMBRE DE FAMILIAR DE CONTACTO".
+- **Underage players get the emergency number as their guardian too.** Age is taken
+  from `players.fecha_nac`, falling back to the CSV's "FECHA NACIMIENTO", and majority
+  is 18. Adults never get a guardian derived this way, and neither does a player whose
+  birth date is missing or unparsable. An explicit `madre/padre/tutor` column always
+  wins over the derived value.
 - **Spelling variants are not bridged.** "Laboratto"/"Laborato" and "Maxi"/"Maximiliano"
   are reported as unmatched with a "did you mean" hint, rather than guessed at. Fix those
   by hand; writing a phone onto the wrong person is worse than leaving a blank.
@@ -100,7 +105,7 @@ For players no export covers, make a CSV with this header — these column names
 what the script looks for:
 
 ```
-Nombre,Apellido,DNI,CELULAR DEL DEPORTISTA,CELULAR MADRE/PADRE/TUTOR
+Nombre,Apellido,DNI,FECHA NACIMIENTO,CELULAR DEL DEPORTISTA,CELULAR MADRE/PADRE/TUTOR,NOMBRE DE FAMILIAR DE CONTACTO,CELULAR DEL FAMILIAR
 ```
 
 Only the DNI and one phone column are really needed; DNI is worth including because it
@@ -114,7 +119,7 @@ exports, or **last** to only fill gaps.
 
 The phone columns do not have to be present. If `players.phone` is missing the script
 falls back to reading the roster alone and says so, which lets you run it against a
-database the migration has not reached yet and still get the real matching report:
+database the migrations have not reached yet and still get the real matching report:
 
 ```bash
 SUPABASE_URL=https://<proj>.supabase.co \
@@ -125,7 +130,8 @@ SUPABASE_SERVICE_ROLE_KEY=<service-role-key> \
 
 `--roster-only` forces that mode without probing first. In either case there is nothing
 to compare against, so every matched number is reported as new and `--apply` is refused —
-apply `20260805130000_add_phone_to_players.sql`, then either run the generated SQL or
+apply `20260805130000_add_phone_to_players.sql` and
+`20260806100000_add_emergency_contact_to_players.sql`, then either run that SQL or
 re-run with `--apply`.
 
 This is also the quickest way to get an accurate list of players no source covers, which
