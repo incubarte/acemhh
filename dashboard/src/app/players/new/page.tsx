@@ -8,6 +8,7 @@ import "react-phone-number-input/style.css";
 import ProtectedPage from "../../components/ProtectedPage";
 import { usePageTitle } from "../../components/PageTitleContext";
 import { DefaultCountry, isValidWhatsappPhone, normalizeWhatsappPhone } from "@/lib/phone";
+import { DuplicateConfirmationPhrase, matchesConfirmationPhrase } from "@/lib/playerNames";
 
 function NewPlayerPageContent() {
   const sp = useSearchParams();
@@ -91,6 +92,74 @@ function PhoneField({ label, value, onChange }: { label: string; value: string; 
   );
 }
 
+type DuplicatePlayer = {
+  id: string;
+  name: string;
+  last_name: string;
+  dni: string | null;
+  category: string | null;
+  invitee: boolean | null;
+};
+
+/**
+ * Shown when the API finds players who look like the one being created. Saving stays
+ * blocked until the admin types the confirmation phrase, so adding a genuine
+ * namesake is a deliberate act rather than a mis-click.
+ */
+function DuplicateWarning({ duplicates, confirmation, onConfirmationChange }: {
+  duplicates: DuplicatePlayer[];
+  confirmation: string;
+  onConfirmationChange: (v: string) => void;
+}) {
+  const confirmed = matchesConfirmationPhrase(confirmation);
+
+  return (
+    <div
+      className="card"
+      style={{
+        marginTop: 16,
+        borderColor: "var(--acemhh-orange)",
+        borderWidth: 1,
+        borderStyle: "solid",
+      }}
+    >
+      <h3 style={{ color: "var(--acemhh-orange)", margin: "0 0 8px" }}>
+        {duplicates.length === 1 ? "Ya existe un jugador parecido" : "Ya existen jugadores parecidos"}
+      </h3>
+
+      <ul style={{ margin: "0 0 12px", paddingLeft: 18 }}>
+        {duplicates.map((d) => (
+          <li key={d.id} style={{ marginBottom: 4 }}>
+            <strong>{d.name} {d.last_name}</strong>
+            <span style={{ opacity: 0.75, fontSize: "0.85rem" }}>
+              {" — "}{d.dni ? `DNI ${d.dni}` : "sin DNI"}
+              {d.category ? `, ${d.category}` : ""}
+              {d.invitee ? ", invitado" : ""}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <p style={{ margin: "0 0 8px", fontSize: "0.9rem" }}>
+        Si es otra persona, escribí <strong>{DuplicateConfirmationPhrase}</strong> para confirmar.
+      </p>
+
+      <input
+        value={confirmation}
+        onChange={(e) => onConfirmationChange(e.target.value)}
+        placeholder={DuplicateConfirmationPhrase}
+        autoComplete="off"
+      />
+
+      {confirmation.trim() && !confirmed ? (
+        <span style={{ display: "block", marginTop: 4, fontSize: "0.75rem", color: "crimson" }}>
+          La frase no coincide.
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }: { returnTo: string; invitee: boolean; defaultCategory: string | null; defaultPlayerType: "player" | "goalkeeper" | null }) {
 
   const [name, setName] = useState("");
@@ -105,6 +174,8 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
   const [playerType, setPlayerType] = useState<"player" | "goalkeeper">(defaultPlayerType || "player");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [duplicates, setDuplicates] = useState<DuplicatePlayer[] | null>(null);
+  const [confirmation, setConfirmation] = useState("");
 
   const categories = useMemo(() => [
     { value: "u-14", label: "Menores" },
@@ -156,9 +227,20 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
         guardian_phone: guardianPhone || null,
         emergency_contact_name: emergencyName.trim() || null,
         emergency_contact_phone: emergencyPhone || null,
+        duplicate_confirmation: confirmation || null,
       }),
     });
     setLoading(false);
+
+    // The API found players who look like this one and wants an explicit
+    // acknowledgement before creating another.
+    if (res.status === 409) {
+      const body = (await res.json()) as { duplicates: DuplicatePlayer[] };
+      setDuplicates(body.duplicates);
+      setErr(null);
+      return;
+    }
+
     if (!res.ok) {
       setErr(await res.text());
       return;
@@ -174,12 +256,12 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
       <div className="grid" style={{ marginTop: 12 }}>
         <label>
           Nombre
-          <input value={name} onChange={(e) => setName(e.target.value)} />
+          <input value={name} onChange={(e) => { setName(e.target.value); setDuplicates(null); }} />
         </label>
 
         <label>
           Apellido
-          <input value={lastName} onChange={(e) => setLastName(e.target.value)} />
+          <input value={lastName} onChange={(e) => { setLastName(e.target.value); setDuplicates(null); }} />
         </label>
 
         {!invitee && (
@@ -262,10 +344,22 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
         </div>
       </div>
 
+      {duplicates ? (
+        <DuplicateWarning
+          duplicates={duplicates}
+          confirmation={confirmation}
+          onConfirmationChange={setConfirmation}
+        />
+      ) : null}
+
       {err ? <p style={{ color: "crimson", marginTop: 12 }}>{err}</p> : null}
 
       <div className="row" style={{ marginTop: 16 }}>
-        <button className="btnPrimary" onClick={submit} disabled={loading}>
+        <button
+          className="btnPrimary"
+          onClick={submit}
+          disabled={loading || (duplicates !== null && !matchesConfirmationPhrase(confirmation))}
+        >
           Guardar
         </button>
         <button onClick={() => window.location.href = returnTo} disabled={loading}>

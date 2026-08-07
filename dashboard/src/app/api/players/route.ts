@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
 import { isValidWhatsappPhone, normalizeWhatsappPhone } from "@/lib/phone";
+import {
+  DuplicateConfirmationPhrase,
+  looksLikeSamePerson,
+  matchesConfirmationPhrase,
+} from "@/lib/playerNames";
 
 export const GET = withPermission('api', '/api/players', 'GET', async (sess, req) => {
   try {
@@ -75,6 +80,7 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
       guardian_phone?: string | null;
       emergency_contact_name?: string | null;
       emergency_contact_phone?: string | null;
+      duplicate_confirmation?: string | null;
     };
 
     // Trim before validating, so a field of only spaces counts as missing rather
@@ -111,6 +117,30 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
     const emergencyName = (body.emergency_contact_name ?? "").trim() || null;
 
     const s = supabaseAdmin();
+
+    // Guard against the same person being registered twice under a slightly
+    // different spelling. Loading the whole roster is fine at this size and keeps the
+    // comparison identical to scripts/find-duplicate-players.ts, which a SQL query
+    // could not reproduce.
+    if (!matchesConfirmationPhrase(body.duplicate_confirmation)) {
+      const { data: roster, error: rosterError } = await s
+        .from("players")
+        .select("id,name,last_name,dni,category,invitee");
+
+      if (rosterError) return new NextResponse(rosterError.message, { status: 500 });
+
+      const duplicates = (roster ?? []).filter((p) =>
+        looksLikeSamePerson({ name, last_name: lastName }, p)
+      );
+
+      if (duplicates.length > 0) {
+        return NextResponse.json(
+          { duplicates, confirmationPhrase: DuplicateConfirmationPhrase },
+          { status: 409 },
+        );
+      }
+    }
+
     const { data, error } = await s
       .from("players")
       .insert([

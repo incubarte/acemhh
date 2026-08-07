@@ -154,6 +154,11 @@ shell variables win.
 | `--threshold=N` | minimum similarity to report, 0-1 (default `0.62`) |
 | `--all` | also list pairs ruled out for having two different DNIs |
 
+The matching rules live in `dashboard/src/lib/playerNames.ts`, which this script
+imports directly. The same module backs the duplicate guard on `POST /api/players`, so
+the report and the new-player check can never drift apart — a nickname added in one
+place applies to both.
+
 ### How it decides
 
 Both name fields are merged into a single unordered token set before comparing. That
@@ -176,7 +181,7 @@ are not the same name.
 stand for rather than to one canonical form, because most are ambiguous: `Ale` is
 Alejandro or Alejandra. Two tokens match when their expansions overlap, so
 `Ale`/`Alejandro` matches while `Alejandro`/`Alejandra` does not. Extend `Nicknames`
-in the script freely — a wrong entry costs you a pair to eyeball, not a bad merge.
+in `playerNames.ts` freely — a wrong entry costs you a pair to eyeball, not a bad merge.
 
 **Gendered pairs are never treated as typos.** `Daniel`/`Daniela` and
 `Alejandro`/`Alejandra` are one edit apart, so plain edit distance paired up fathers

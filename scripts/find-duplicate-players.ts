@@ -11,6 +11,9 @@
 
 import { load } from "jsr:@std/dotenv";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+// Shared with the dashboard so the new-player guard and this report agree on what
+// counts as the same person. Fixes to the nickname table land in both.
+import { compareNames, nameTokens } from "../dashboard/src/lib/playerNames.ts";
 
 try {
     await load({
@@ -32,180 +35,6 @@ type Player = {
 };
 
 // ////////////////////////////////////
-// TEXT
-// ////////////////////////////////////
-
-function normalize(value: string): string {
-    return (value ?? "")
-        .normalize("NFD")
-        .replace(/[̀-ͯ]/g, "")
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-}
-
-/**
- * Every token from both name fields, in one set.
- *
- * Deliberately order-blind and field-blind: admins have entered surnames in the name
- * column and vice versa, so "Nahuel"/"Zorrilla" and "Zorrilla"/"Nahuel" have to come
- * out identical. Comparing the fields separately would miss exactly the case we care
- * about most.
- */
-function tokensOf(player: Player): Set<string> {
-    return new Set(
-        normalize(`${player.name} ${player.last_name}`).split(" ").filter(Boolean),
-    );
-}
-
-// ////////////////////////////////////
-// NICKNAMES
-// ////////////////////////////////////
-
-/**
- * Diminutives to the full names they can stand for.
- *
- * Deliberately one-to-many rather than a single canonical form, because most
- * diminutives are ambiguous: "Ale" is Alejandro or Alejandra, "Fran" is Francisco or
- * Franco. Two tokens count as the same name when their possible expansions overlap,
- * so "Ale"/"Alejandro" match while "Alejandro"/"Alejandra" - different people - do not.
- *
- * Add entries freely; a wrong one costs you a pair shown for review, not a merge.
- */
-const Nicknames: Record<string, string[]> = {
-    adri: ["adrian"],
-    agus: ["agustin", "agustina"],
-    ale: ["alejandro", "alejandra"],
-    anto: ["antonella", "antonio"],
-    bauti: ["bautista"],
-    benja: ["benjamin"],
-    benny: ["benicio"],
-    beto: ["alberto", "roberto"],
-    cami: ["camila", "camilo"],
-    caro: ["carolina"],
-    charly: ["carlos"],
-    cris: ["cristian", "cristina"],
-    dani: ["daniel", "daniela"],
-    edu: ["eduardo"],
-    emi: ["emiliano", "emilia", "emilio"],
-    facu: ["facundo"],
-    fede: ["federico"],
-    flor: ["florencia"],
-    fran: ["francisco", "franco", "francisca"],
-    gabi: ["gabriel", "gabriela"],
-    guille: ["guillermo"],
-    isa: ["isabella", "isabel"],
-    joaco: ["joaquin"],
-    juli: ["julian", "julieta", "julio"],
-    leo: ["leonardo", "leonel"],
-    lu: ["lucia", "luciana"],
-    lucho: ["luciano", "luis"],
-    lupe: ["guadalupe"],
-    luli: ["lucia", "luciana"],
-    manu: ["manuel", "manuela"],
-    marti: ["martin", "martina"],
-    mati: ["matias"],
-    max: ["maximiliano"],
-    maxi: ["maximiliano"],
-    meli: ["melina", "melisa"],
-    mica: ["micaela"],
-    mili: ["milagros"],
-    nacho: ["ignacio"],
-    naza: ["nazareno"],
-    nico: ["nicolas"],
-    pancho: ["francisco"],
-    pato: ["patricio", "patricia"],
-    pepe: ["jose"],
-    quique: ["enrique"],
-    rami: ["ramiro"],
-    roco: ["rocio"],
-    rodri: ["rodrigo"],
-    santi: ["santiago"],
-    seba: ["sebastian"],
-    sofi: ["sofia"],
-    tincho: ["martin"],
-    tomi: ["tomas"],
-    vale: ["valeria", "valentina"],
-    valen: ["valentin", "valentina"],
-    vicky: ["victoria"],
-};
-
-/** The full names a token could stand for. A full name stands for itself. */
-function expansions(token: string): string[] {
-    return Nicknames[token] ?? [token];
-}
-
-function shareAnExpansion(a: string, b: string): boolean {
-    const formsB = expansions(b);
-    return expansions(a).some((form) => formsB.includes(form));
-}
-
-function levenshtein(a: string, b: string): number {
-    if (a === b) return 0;
-    if (!a.length) return b.length;
-    if (!b.length) return a.length;
-
-    let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
-    for (let i = 1; i <= a.length; i++) {
-        const current = [i];
-        for (let j = 1; j <= b.length; j++) {
-            current[j] = Math.min(
-                previous[j] + 1,
-                current[j - 1] + 1,
-                previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
-            );
-        }
-        previous = current;
-    }
-    return previous[b.length];
-}
-
-/** 1 = identical, 0 = nothing in common. */
-function ratio(a: string, b: string): number {
-    const longest = Math.max(a.length, b.length);
-    return longest === 0 ? 1 : 1 - levenshtein(a, b) / longest;
-}
-
-/**
- * Spanish gendered name pairs differ only in the final vowel: Daniel/Daniela,
- * Alejandro/Alejandra, Luciano/Luciana. Edit distance reads those as a typo, which
- * would pair up fathers and daughters who share a surname. Treat the ending as
- * meaningful instead — missing a genuine "Mariano" typed "Mariana" is the cheaper
- * mistake.
- */
-function differsOnlyByGenderedEnding(a: string, b: string): boolean {
-    const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
-
-    // Daniel / Daniela, Gabriel / Gabriela, Juan / Juana.
-    if (longer === `${shorter}a`) return true;
-
-    // Alejandro / Alejandra, Luciano / Luciana, Mariano / Mariana.
-    if (a.length === b.length && a.length >= 2 && a.slice(0, -1) === b.slice(0, -1)) {
-        const endings = [a[a.length - 1], b[b.length - 1]];
-        return endings.includes("o") && endings.includes("a");
-    }
-
-    return false;
-}
-
-// Short tokens need to match almost exactly — "ana" and "ema" are one edit apart but
-// are not the same name.
-function tokensMatch(a: string, b: string): boolean {
-    if (a === b) return true;
-    if (shareAnExpansion(a, b)) return true;
-    if (differsOnlyByGenderedEnding(a, b)) return false;
-    const shortest = Math.min(a.length, b.length);
-    if (shortest < 4) return false;
-    return ratio(a, b) >= 0.8;
-}
-
-function isSubset(subset: Set<string>, superset: Set<string>): boolean {
-    for (const t of subset) if (!superset.has(t)) return false;
-    return true;
-}
-
-// ////////////////////////////////////
 // SCORING
 // ////////////////////////////////////
 
@@ -219,43 +48,11 @@ type Candidate = {
 };
 
 function compare(a: Player, b: Player): Candidate | null {
-    const tokensA = tokensOf(a);
-    const tokensB = tokensOf(b);
-    if (tokensA.size === 0 || tokensB.size === 0) return null;
+    if (nameTokens(a.name, a.last_name).size === 0) return null;
+    if (nameTokens(b.name, b.last_name).size === 0) return null;
 
-    const reasons: string[] = [];
-    let score: number;
-
-    if (tokensA.size === tokensB.size && isSubset(tokensA, tokensB)) {
-        score = 1;
-        reasons.push("mismos tokens");
-    } else if (isSubset(tokensA, tokensB) || isSubset(tokensB, tokensA)) {
-        score = 0.9;
-        reasons.push("uno tiene nombres de más");
-    } else {
-        // Dice coefficient over fuzzily matched tokens, which is what catches
-        // "Laborato"/"Laboratto" and "Gesso"/"Guesso".
-        const used = new Set<string>();
-        let matched = 0;
-        for (const ta of tokensA) {
-            for (const tb of tokensB) {
-                if (used.has(tb)) continue;
-                if (tokensMatch(ta, tb)) {
-                    used.add(tb);
-                    matched++;
-                    break;
-                }
-            }
-        }
-        score = (2 * matched) / (tokensA.size + tokensB.size);
-        if (matched > 0) reasons.push(`${matched} token(s) parecidos`);
-    }
-
-    // Called out explicitly because it is the failure mode the admins actually hit.
-    const swapped = normalize(a.name) === normalize(b.last_name) &&
-        normalize(a.last_name) === normalize(b.name) &&
-        normalize(a.name) !== normalize(a.last_name);
-    if (swapped) reasons.push("nombre y apellido invertidos");
+    const { score: nameScore, reasons } = compareNames(a, b);
+    let score = nameScore;
 
     if (a.invitee !== b.invitee) reasons.push("uno es invitado y el otro socio");
 
@@ -374,5 +171,5 @@ if (import.meta.main) {
     await main();
 }
 
-export { compare, normalize, tokensOf };
+export { compare };
 export type { Player };
