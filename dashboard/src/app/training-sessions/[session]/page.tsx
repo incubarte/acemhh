@@ -27,6 +27,10 @@ type PlayerWithAttendance = Player & {
 
 const ALL_CATEGORIES = ["u-14", "youth", "cat-c", "cat-b", "cat-a"];
 
+// How faded the attendance face is when a player did not attend. Low enough to read
+// as "off" at a glance on a phone, high enough to stay visible on the dark theme.
+const AbsentOpacity = 0.3;
+
 const CATEGORY_SHORT_LABELS: Record<string, string> = {
   "u-14": "Menores",
   "youth": "Juv",
@@ -372,10 +376,15 @@ function TrainingSessionDetailContent() {
               fontSize: "1.2rem",
               lineHeight: 1,
               userSelect: "none",
-              WebkitTapHighlightColor: "transparent"
+              WebkitTapHighlightColor: "transparent",
+              // Same glyph either way: opacity carries the state. 🫥 renders with a
+              // solid yellow fill on Apple's emoji font, so it read as "present" on
+              // phones. Opacity applies to the glyph on every platform.
+              opacity: player.attended ? 1 : AbsentOpacity,
+              transition: "opacity 150ms ease"
             }}
           >
-            {player.attended ? "😐" : "🫥"}
+            😐
           </span>
         </div>
 
@@ -763,7 +772,7 @@ function TrainingSessionDetailContent() {
             <div><strong>Horario:</strong> {hour}:00hs</div>
             <div style={{ marginTop: 8, fontSize: "1rem", opacity: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px" }}>
               <span>😐 asistió</span><span>💸 adeuda</span>
-              <span>🫥 no asistió</span><span>💰 al día</span>
+              <span><span style={{ opacity: AbsentOpacity }}>😐</span> no asistió</span><span>💰 al día</span>
               <span><span style={{ background: "rgba(220, 38, 38, 0.45)", padding: "0 6px", borderRadius: 3 }}>nombre</span></span><span>cuota anual impaga</span>
               <span></span><span>🏦 beca (parcial o completa)</span>
             </div>
