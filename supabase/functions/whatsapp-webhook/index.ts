@@ -53,9 +53,31 @@ type Session = {
     data: Record<string, unknown>;
 };
 
+/** A dashboard admin, resolved from the sender's phone. id is the Telegram id. */
+type Admin = {
+    id: number;
+    first_name: string;
+};
+
+/** A player linked to the sender's phone, with how the phone relates to them. */
+type PlayerLink = {
+    id: string;
+    name: string;
+    last_name: string;
+    categories: string[];
+    invitee: boolean;
+    /** "self" when it is the player's own phone, "guardian" when it is their tutor's. */
+    relation: "self" | "guardian";
+};
+
 type FlowContext = {
     incoming: Incoming;
     session: Session;
+    /** Non-null when the sender's phone matches a users row: same identity as the dashboard. */
+    admin: Admin | null;
+    /** Players linked to the sender's phone. The same number can be a player's own
+     * and the guardian's of several minors, so this can hold multiple entries. */
+    players: PlayerLink[];
     /** Whatever the user just sent, normalized: reply id if interactive, else text. */
     input: string;
 };
@@ -311,6 +333,48 @@ async function clearSession(waId: string) {
 }
 
 // ////////////////////////////////////
+// SENDER IDENTITY
+// ////////////////////////////////////
+
+// wa_id arrives in a Meta-signed webhook, so matching it against the curated
+// users.phone column identifies the sender as strongly as their Telegram login.
+async function lookupAdmin(waId: string): Promise<Admin | null> {
+    const { data, error } = await supabaseAdmin
+        .from("users")
+        .select("id,first_name")
+        .eq("phone", waId)
+        .maybeSingle();
+
+    if (error) {
+        console.error("Admin lookup failed:", error);
+        return null;
+    }
+    return data;
+}
+
+async function lookupPlayers(waId: string): Promise<PlayerLink[]> {
+    // waId is all digits (Meta strips the +), so it is safe inside the filter.
+    const { data, error } = await supabaseAdmin
+        .from("players")
+        .select("id,name,last_name,categories,invitee,phone,guardian_phone")
+        .or(`phone.eq.${waId},guardian_phone.eq.${waId}`);
+
+    if (error) {
+        console.error("Player lookup failed:", error);
+        return [];
+    }
+
+    return (data ?? []).map((p) => ({
+        id: p.id,
+        name: p.name,
+        last_name: p.last_name,
+        categories: p.categories,
+        invitee: p.invitee,
+        relation: p.phone === waId ? "self" as const : "guardian" as const,
+    }));
+}
+
+// ////////////////////////////////////
 // ROUTER
 // ////////////////////////////////////
 
@@ -318,24 +382,28 @@ const MenuKeywords = ["menu", "menú", "hola", "start", "inicio", "ayuda"];
 const CancelKeywords = ["cancelar", "salir", "cancel"];
 
 async function handleIncoming(incoming: Incoming) {
-    const session = await loadSession(incoming.waId);
+    const [session, admin, players] = await Promise.all([
+        loadSession(incoming.waId),
+        lookupAdmin(incoming.waId),
+        lookupPlayers(incoming.waId),
+    ]);
     const input = incoming.replyId ?? incoming.text ?? "";
     const normalized = normalize(input);
 
     if (CancelKeywords.includes(normalized)) {
         await clearSession(incoming.waId);
         await sendText(incoming.waId, "Listo, cancelado.");
-        await sendMainMenu(incoming);
+        await sendMainMenu(incoming, admin, players);
         return;
     }
 
     if (MenuKeywords.includes(normalized)) {
         await clearSession(incoming.waId);
-        await sendMainMenu(incoming);
+        await sendMainMenu(incoming, admin, players);
         return;
     }
 
-    const ctx: FlowContext = { incoming, session, input };
+    const ctx: FlowContext = { incoming, session, admin, players, input };
 
     // A menu selection (or a keyword matching a flow id) starts that flow.
     const selected = FLOWS[input] ?? FLOWS[normalized];
@@ -356,15 +424,20 @@ async function handleIncoming(incoming: Incoming) {
         await clearSession(incoming.waId);
     }
 
-    await sendMainMenu(incoming);
+    await sendMainMenu(incoming, admin, players);
 }
 
 function normalize(value: string): string {
     return value.trim().toLowerCase();
 }
 
-async function sendMainMenu(incoming: Incoming) {
-    const greeting = incoming.profileName ? `Hola ${incoming.profileName}! ` : "Hola! ";
+async function sendMainMenu(incoming: Incoming, admin: Admin | null, players: PlayerLink[]) {
+    // Names from our own tables win over profileName, which is whatever the
+    // sender typed into WhatsApp. Guardians are not greeted with their kid's name.
+    const name = admin?.first_name ??
+        players.find((p) => p.relation === "self")?.name ??
+        incoming.profileName;
+    const greeting = name ? `Hola ${name}! ` : "Hola! ";
     await sendList(
         incoming.waId,
         `${greeting}Soy el asistente de ACEMHH. ¿Qué necesitás?`,
@@ -456,13 +529,13 @@ const FlowContacto: Flow = {
         );
     },
     steps: {
-        ask_message: async ({ incoming, input }) => {
+        ask_message: async ({ incoming, admin, players, input }) => {
             // TODO: persist to a table (or relay to the Telegram admin chat) once you
             // decide where these should land.
             console.log(`Consulta de ${incoming.waId} (${incoming.profileName}): ${input}`);
             await sendText(incoming.waId, "¡Gracias! Recibimos tu mensaje.");
             await clearSession(incoming.waId);
-            await sendMainMenu(incoming);
+            await sendMainMenu(incoming, admin, players);
         },
     },
 };
