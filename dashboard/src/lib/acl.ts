@@ -120,6 +120,7 @@ export const PUBLIC_ROUTES = [
   '/credencial',
   '/api/credencial/search',
   '/api/credencial/check',
+  '/privacy-policy',
 ];
 
 export function isPublicRoute(path: string): boolean {
