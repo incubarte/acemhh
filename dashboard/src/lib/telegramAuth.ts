@@ -10,12 +10,26 @@ export type TelegramAuthPayload = {
   hash: string;
 };
 
-export type TelegramSessionUser = {
+/** A verified Telegram identity — NOT a session. Login routes resolve it to a
+ * users row and build the SessionUser from there. */
+export type TelegramWebAppUser = {
   id: number;
   first_name: string;
   last_name?: string | null;
   username?: string | null;
   auth_date: number;
+};
+
+/** What the dash_session cookie carries. id is the users.id uuid, so the same
+ * session shape works for logins with or without Telegram; groups are resolved
+ * from the users row at login time and drive the ACL. */
+export type SessionUser = {
+  id: string;
+  first_name: string;
+  last_name?: string | null;
+  username?: string | null;
+  auth_date: number;
+  groups: string[];
 };
 
 function sha256(data: string | Buffer) {
@@ -43,7 +57,7 @@ export function verifyTelegramAuth(payload: TelegramAuthPayload): boolean {
   return hmac === hash;
 }
 
-export function verifyTelegramWebAppInitData(initData: string): TelegramSessionUser | null {
+export function verifyTelegramWebAppInitData(initData: string): TelegramWebAppUser | null {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   if (!botToken) throw new Error("Missing TELEGRAM_BOT_TOKEN");
 
@@ -93,7 +107,7 @@ export function verifyTelegramWebAppInitData(initData: string): TelegramSessionU
   }
 }
 
-export function makeSessionCookieValueFromUser(user: TelegramSessionUser): string {
+export function makeSessionCookieValueFromUser(user: SessionUser): string {
   const secret = process.env.DASHBOARD_SESSION_SECRET;
   if (!secret) throw new Error("Missing DASHBOARD_SESSION_SECRET");
 
@@ -103,6 +117,7 @@ export function makeSessionCookieValueFromUser(user: TelegramSessionUser): strin
     first_name: user.first_name,
     last_name: user.last_name ?? null,
     auth_date: user.auth_date,
+    groups: user.groups,
   });
 
   const b64 = Buffer.from(body, "utf8").toString("base64url");
@@ -110,17 +125,7 @@ export function makeSessionCookieValueFromUser(user: TelegramSessionUser): strin
   return `${b64}.${sig}`;
 }
 
-export function makeSessionCookieValue(payload: TelegramAuthPayload): string {
-  return makeSessionCookieValueFromUser({
-    id: payload.id,
-    username: payload.username ?? null,
-    first_name: payload.first_name,
-    last_name: payload.last_name ?? null,
-    auth_date: payload.auth_date,
-  });
-}
-
-export function verifySessionCookieValue(value: string): TelegramSessionUser | null {
+export function verifySessionCookieValue(value: string): SessionUser | null {
   const secret = process.env.DASHBOARD_SESSION_SECRET;
   if (!secret) throw new Error("Missing DASHBOARD_SESSION_SECRET");
 
@@ -132,14 +137,18 @@ export function verifySessionCookieValue(value: string): TelegramSessionUser | n
 
   try {
     const json = Buffer.from(b64, "base64url").toString("utf8");
-    const parsed = JSON.parse(json) as Partial<TelegramSessionUser> & { id?: number };
-    if (!parsed?.id) return null;
+    const parsed = JSON.parse(json) as Partial<SessionUser>;
+    // Pre-uuid cookies carried a numeric Telegram id and no groups; rejecting
+    // them forces one re-login, which rebuilds the session from the users row.
+    if (typeof parsed?.id !== "string" || !parsed.id) return null;
+    if (!Array.isArray(parsed.groups)) return null;
     return {
       id: parsed.id,
       first_name: parsed.first_name ?? "",
       last_name: parsed.last_name ?? null,
       username: parsed.username ?? null,
       auth_date: parsed.auth_date ?? 0,
+      groups: parsed.groups.filter((g): g is string => typeof g === "string"),
     };
   } catch {
     return null;

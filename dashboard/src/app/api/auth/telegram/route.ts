@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { makeSessionCookieValue, verifyTelegramAuth, type TelegramAuthPayload } from "@/lib/telegramAuth";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { makeSessionCookieValueFromUser, verifyTelegramAuth, type TelegramAuthPayload } from "@/lib/telegramAuth";
+import { sessionFromTelegramIdentity } from "@/lib/login";
 
 export async function POST(req: Request) {
   const payload = (await req.json()) as TelegramAuthPayload;
@@ -15,37 +15,24 @@ export async function POST(req: Request) {
     return new NextResponse("Invalid Telegram auth", { status: 401 });
   }
 
-  const value = makeSessionCookieValue(payload);
+  const session = await sessionFromTelegramIdentity({
+    id: payload.id,
+    first_name: payload.first_name,
+    last_name: payload.last_name ?? null,
+    username: payload.username ?? null,
+    auth_date: payload.auth_date,
+  });
+  if (!session) return new NextResponse("Login failed", { status: 500 });
+
   (await cookies()).set({
     name: "dash_session",
-    value,
+    value: makeSessionCookieValueFromUser(session),
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
   });
-
-  // Track user login in database
-  try {
-    const { error } = await supabaseAdmin()
-      .from("users")
-      .upsert({
-        id: payload.id,
-        username: payload.username || null,
-        first_name: payload.first_name,
-        last_name: payload.last_name || null,
-        last_login_at: new Date().toISOString()
-      }, {
-        onConflict: 'id'
-      });
-
-    if (error) {
-      console.error('[LOGIN] Error tracking user login:', error);
-    }
-  } catch (error) {
-    console.error('[LOGIN] Exception tracking user login:', error);
-  }
 
   return NextResponse.json({ ok: true });
 }

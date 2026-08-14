@@ -39,7 +39,7 @@ export async function GET(req: Request) {
 
   const { data: user, error: userError } = await s
     .from("users")
-    .select("id,first_name,last_name,username")
+    .select("id,first_name,last_name,tg_username,groups")
     .eq("id", claimed.user_id)
     .maybeSingle();
 
@@ -50,8 +50,9 @@ export async function GET(req: Request) {
     id: user.id,
     first_name: user.first_name,
     last_name: user.last_name,
-    username: user.username,
+    username: user.tg_username,
     auth_date: Math.floor(Date.now() / 1000),
+    groups: user.groups ?? [],
   });
 
   (await cookies()).set("dash_session", cookieValue, {

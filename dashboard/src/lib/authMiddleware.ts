@@ -1,15 +1,9 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { verifySessionCookieValue } from "@/lib/telegramAuth";
+import { verifySessionCookieValue, type SessionUser } from "@/lib/telegramAuth";
 import { hasPermission, isPublicRoute } from "@/lib/acl";
 
-export type AuthSession = {
-  id: number;
-  first_name: string;
-  last_name?: string | null;
-  username?: string | null;
-  auth_date: number;
-};
+export type AuthSession = SessionUser;
 
 export async function getSession(): Promise<AuthSession | null> {
   const v = (await cookies()).get("dash_session")?.value;
@@ -32,7 +26,7 @@ export async function requirePermission(
 ): Promise<AuthSession> {
   const session = await requireAuth();
   
-  if (!hasPermission(session.id, type, resource, method)) {
+  if (!hasPermission(session.groups, type, resource, method)) {
     throw new Error("Forbidden");
   }
   

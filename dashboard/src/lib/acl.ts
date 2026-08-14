@@ -9,11 +9,6 @@ export type Group = {
   permissions: readonly Permission[];
 };
 
-export type UserGroup = {
-  userId: number;
-  groups: string[];
-};
-
 const wheelPermissions: Permission[] = [
   { type: 'api', resource: '/api/players', method: 'GET' },
   { type: 'api', resource: '/api/players', method: 'POST' },
@@ -44,33 +39,6 @@ export const GROUPS: Record<string, Group> = {
   },
 };
 
-const Alex = 45669763;
-const Berk = 40541227;
-const Romi = 179767949;
-const Hect = 1239620360;
-const Ruso = 1388664237;
-const Fran = 6885365547;
-const Laio = 8025956878;
-const Renz = 6776491427;
-const Abrl = 8958438803;
-
-export const USER_GROUPS: UserGroup[] = [
-  { userId: Alex, groups: ['ROOT'] },
-  { userId: Berk, groups: ['ROOT'] },
-  { userId: Romi, groups: ['WHEEL'] },
-  { userId: Hect, groups: ['WHEEL'] },
-  { userId: Ruso, groups: ['WHEEL'] },
-  { userId: Fran, groups: ['WHEEL'] },
-  { userId: Laio, groups: ['WHEEL'] },
-  { userId: Renz, groups: ['WHEEL'] },
-  { userId: Abrl, groups: ['WHEEL'] },
-];
-
-export function getUserGroups(userId: number): string[] {
-  const userGroup = USER_GROUPS.find((ug) => ug.userId === userId);
-  return userGroup?.groups ?? [];
-}
-
 function matchesResource(permResource: string, requestedResource: string): boolean {
   // Exact match
   if (permResource === requestedResource) return true;
@@ -84,14 +52,14 @@ function matchesResource(permResource: string, requestedResource: string): boole
   return false;
 }
 
+// Group membership lives in users.groups (resolved into the session at login);
+// only the permission definitions stay in code.
 export function hasPermission(
-  userId: number,
+  userGroups: string[],
   type: 'api' | 'page',
   resource: string,
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
 ): boolean {
-  const userGroups = getUserGroups(userId);
-  
   for (const groupName of userGroups) {
     const group = GROUPS[groupName];
     if (!group) continue;

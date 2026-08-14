@@ -53,9 +53,9 @@ type Session = {
     data: Record<string, unknown>;
 };
 
-/** A dashboard admin, resolved from the sender's phone. id is the Telegram id. */
+/** A dashboard admin, resolved from the sender's phone. id is the users.id uuid. */
 type Admin = {
-    id: number;
+    id: string;
     first_name: string;
 };
 
