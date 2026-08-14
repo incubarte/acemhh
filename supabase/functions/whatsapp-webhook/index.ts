@@ -173,6 +173,13 @@ async function isValidSignature(
     return timingSafeEqualHex(received, expected);
 }
 
+async function sha256Hex(payload: string): Promise<string> {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
+    return Array.from(new Uint8Array(digest))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+}
+
 async function hmacSha256Hex(secret: string, payload: string): Promise<string> {
     const encoder = new TextEncoder();
     const key = await crypto.subtle.importKey(
@@ -374,6 +381,38 @@ async function lookupPlayers(waId: string): Promise<PlayerLink[]> {
     }));
 }
 
+const LoginTokenTtlMinutes = 15;
+
+// Dashboard access for admins without Telegram: the wa_id in a Meta-signed
+// webhook proves who is talking, so a short-lived single-use token can carry
+// that identity to the dashboard, which exchanges it for a session cookie.
+async function sendAdminLoginLink(waId: string, admin: Admin) {
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    const token = Array.from(bytes)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+
+    const { error } = await supabaseAdmin
+        .from("whatsapp_login_tokens")
+        .insert({
+            token_hash: await sha256Hex(token),
+            user_id: admin.id,
+            expires_at: new Date(Date.now() + LoginTokenTtlMinutes * 60 * 1000).toISOString(),
+        });
+
+    if (error) {
+        // The menu was already useful on its own; don't surface an error for the extra.
+        console.error("Login token insert failed:", error);
+        return;
+    }
+
+    const base = Deno.env.get("DASHBOARD_URL") ?? "https://acemhh-delta.vercel.app";
+    await sendText(
+        waId,
+        `🔑 Entrá al dashboard con este link (un solo uso, vale ${LoginTokenTtlMinutes} minutos):\n${base}/api/auth/whatsapp?token=${token}`,
+    );
+}
+
 // ////////////////////////////////////
 // ROUTER
 // ////////////////////////////////////
@@ -400,6 +439,8 @@ async function handleIncoming(incoming: Incoming) {
     if (MenuKeywords.includes(normalized)) {
         await clearSession(incoming.waId);
         await sendMainMenu(incoming, admin, players);
+        // Only on an explicit greeting, so cancel/fallback menus don't spam links.
+        if (admin) await sendAdminLoginLink(incoming.waId, admin);
         return;
     }
 

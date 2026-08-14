@@ -113,6 +113,7 @@ export const PUBLIC_ROUTES = [
   '/login',
   '/api/auth/telegram',
   '/api/auth/telegram/webapp',
+  '/api/auth/whatsapp',
   '/api/auth/dev',
   '/api/me',
   '/api/check-permission',
