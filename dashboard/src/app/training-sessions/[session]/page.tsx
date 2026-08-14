@@ -11,7 +11,7 @@ type Player = {
   id: string;
   name: string;
   last_name: string;
-  category: string;
+  categories: string[];
 };
 
 type PlayerWithAttendance = Player & {

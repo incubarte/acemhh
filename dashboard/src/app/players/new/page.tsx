@@ -97,7 +97,7 @@ type DuplicatePlayer = {
   name: string;
   last_name: string;
   dni: string | null;
-  category: string | null;
+  categories: string[] | null;
   invitee: boolean | null;
 };
 
@@ -133,7 +133,7 @@ function DuplicateWarning({ duplicates, confirmation, onConfirmationChange }: {
             <strong>{d.name} {d.last_name}</strong>
             <span style={{ opacity: 0.75, fontSize: "0.85rem" }}>
               {" — "}{d.dni ? `DNI ${d.dni}` : "sin DNI"}
-              {d.category ? `, ${d.category}` : ""}
+              {d.categories?.length ? `, ${d.categories.join(", ")}` : ""}
               {d.invitee ? ", invitado" : ""}
             </span>
           </li>
@@ -170,24 +170,30 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
   const [guardianPhone, setGuardianPhone] = useState("");
   const [emergencyName, setEmergencyName] = useState("");
   const [emergencyPhone, setEmergencyPhone] = useState("");
-  const [category, setCategory] = useState(defaultCategory || "");
+  // Ordered by priority: the first selected category is the player's main one.
+  const [categories, setCategories] = useState<string[]>(defaultCategory ? [defaultCategory] : []);
   const [playerType, setPlayerType] = useState<"player" | "goalkeeper">(defaultPlayerType || "player");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [duplicates, setDuplicates] = useState<DuplicatePlayer[] | null>(null);
   const [confirmation, setConfirmation] = useState("");
 
-  const categories = useMemo(() => [
-    { value: "u-14", label: "Menores" },
+  const categoryOptions = useMemo(() => [
     { value: "youth", label: "Juveniles" },
     { value: "cat-c", label: "Categoría C" },
     { value: "cat-b", label: "Categoría B" },
     { value: "cat-a", label: "Categoría A" },
   ], []);
 
+  const toggleCategory = (value: string) => {
+    setCategories((prev) =>
+      prev.includes(value) ? prev.filter((c) => c !== value) : [...prev, value]
+    );
+  };
+
   const submit = async () => {
-    if (!category) {
-      setErr("Seleccioná una categoría");
+    if (categories.length === 0) {
+      setErr("Seleccioná al menos una categoría");
       return;
     }
 
@@ -218,7 +224,7 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
         last_name: lastName,
         ...(invitee ? {} : { dni }),
         fecha_nac: invitee ? null : (fechaNac || null),
-        category,
+        categories,
         invitee,
         player_type: playerType,
         // Sent in E.164 with the leading +, so the API can tell a foreign number
@@ -301,15 +307,39 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
           onChange={setEmergencyPhone}
         />
 
-        <label>
-          Categoría
-          <select value={category} onChange={(e) => setCategory(e.target.value)}>
-            <option value="" disabled>Seleccionar categoría</option>
-            {categories.map((c) => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
-          </select>
-        </label>
+        <div>
+          <span style={{ fontSize: "0.85rem", opacity: 0.7 }}>
+            Categorías (en orden de prioridad: la primera es la principal)
+          </span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
+            {categoryOptions.map((c) => {
+              const idx = categories.indexOf(c.value);
+              const selected = idx >= 0;
+              return (
+                <button
+                  key={c.value}
+                  type="button"
+                  onClick={() => toggleCategory(c.value)}
+                  style={{
+                    padding: "10px 0",
+                    borderRadius: 8,
+                    border: selected
+                      ? "2px solid var(--acemhh-green-3)"
+                      : "1px solid rgba(255,255,255,0.15)",
+                    background: selected
+                      ? "rgba(36, 179, 91, 0.15)"
+                      : "rgba(255,255,255,0.05)",
+                    cursor: "pointer",
+                    fontSize: "0.9rem",
+                    fontWeight: selected ? 600 : 400,
+                  }}
+                >
+                  {selected && categories.length > 1 ? `${idx + 1}. ` : ""}{c.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         <div>
           <span style={{ fontSize: "0.85rem", opacity: 0.7 }}>Posición</span>

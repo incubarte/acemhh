@@ -30,7 +30,7 @@ export const GET = withPermission('api', '/api/players', 'GET', async (sess, req
       let q = supabaseAdmin()
         .from("players")
         .select("id,name,last_name")
-        .eq("category", category);
+        .contains("categories", [category]);
       if (playerType) q = q.eq("player_type", playerType);
       const { data, error } = await q
         .order("last_name")
@@ -73,7 +73,7 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
       last_name: string;
       dni?: string;
       fecha_nac?: string | null;
-      category: string;
+      categories: string[];
       invitee?: boolean;
       player_type: 'player' | 'goalkeeper';
       phone?: string | null;
@@ -89,7 +89,12 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
     const lastName = (body?.last_name ?? "").trim();
     const dni = (body?.dni ?? "").trim();
 
-    if (!name || !lastName || !body?.category) {
+    // Ordered by priority: the first category is the player's main one.
+    const categories = Array.isArray(body?.categories)
+      ? [...new Set(body.categories.map((c) => (c ?? "").trim()).filter(Boolean))]
+      : [];
+
+    if (!name || !lastName || categories.length === 0) {
       return new NextResponse("Missing fields", { status: 400 });
     }
 
@@ -125,7 +130,7 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
     if (!matchesConfirmationPhrase(body.duplicate_confirmation)) {
       const { data: roster, error: rosterError } = await s
         .from("players")
-        .select("id,name,last_name,dni,category,invitee");
+        .select("id,name,last_name,dni,categories,invitee");
 
       if (rosterError) return new NextResponse(rosterError.message, { status: 500 });
 
@@ -149,7 +154,7 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
           last_name: lastName,
           dni: dni || null,
           fecha_nac: body.fecha_nac ?? null,
-          category: body.category,
+          categories,
           invitee: body.invitee || false,
           player_type: body.player_type,
           trains: !body.invitee,

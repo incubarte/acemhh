@@ -96,7 +96,6 @@ function TrainingSessionsContent() {
       case "cat-b": return "Categoría B";
       case "cat-c": return "Categoría C";
       case "youth": return "Juveniles";
-      case "u-14": return "Menores";
       default: return cat;
     }
   };

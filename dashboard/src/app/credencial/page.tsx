@@ -15,7 +15,7 @@ type CredentialData = {
     name: string;
     last_name: string;
     dni: string | null;
-    category: string;
+    categories: string[];
     invitee: boolean;
   };
   year: number;
@@ -34,7 +34,6 @@ function formatArs(amount: number) {
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
-  "u-14": "Sub-14",
   "youth": "Juv.",
   "cat-c": "Cat. C",
   "cat-b": "Cat. B",
@@ -302,7 +301,7 @@ function CredencialContent() {
                     Categoria
                   </div>
                   <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>
-                    {CATEGORY_LABELS[player.category] || player.category}
+                    {player.categories.map((c) => CATEGORY_LABELS[c] || c).join(", ")}
                   </div>
                 </div>
                 <div>

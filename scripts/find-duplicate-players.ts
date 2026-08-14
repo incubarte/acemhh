@@ -30,7 +30,7 @@ type Player = {
     last_name: string;
     dni: string | null;
     fecha_nac: string | null;
-    category: string | null;
+    categories: string[] | null;
     invitee: boolean | null;
 };
 
@@ -77,7 +77,7 @@ function compare(a: Player, b: Player): Candidate | null {
 function describe(p: Player): string {
     const bits = [
         p.dni ? `dni=${p.dni}` : "sin dni",
-        p.category ?? "sin categoria",
+        p.categories?.length ? p.categories.join(",") : "sin categoria",
         p.invitee ? "invitado" : "socio",
         p.fecha_nac ?? "sin fecha nac",
     ];
@@ -105,7 +105,7 @@ async function main() {
     const supabase = createClient(supabaseUrl, serviceKey);
     const { data, error } = await supabase
         .from("players")
-        .select("id,name,last_name,dni,fecha_nac,category,invitee");
+        .select("id,name,last_name,dni,fecha_nac,categories,invitee");
 
     if (error) {
         console.error("Failed to load players:", error.message);

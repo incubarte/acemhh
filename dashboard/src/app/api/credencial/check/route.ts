@@ -14,7 +14,7 @@ export async function GET(req: Request) {
     // Get player info
     const { data: player, error: playerErr } = await s
       .from("players")
-      .select("id,name,last_name,dni,category,invitee")
+      .select("id,name,last_name,dni,categories,invitee")
       .eq("id", playerId)
       .maybeSingle();
 
@@ -52,7 +52,7 @@ export async function GET(req: Request) {
         name: player.name,
         last_name: player.last_name,
         dni: player.dni,
-        category: player.category,
+        categories: player.categories,
         invitee: player.invitee,
       },
       year,

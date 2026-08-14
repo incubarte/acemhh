@@ -44,11 +44,12 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
 
     const s = supabaseAdmin();
 
-    // Fetch A: all players that belong to category and train
+    // Fetch A: all players that belong to any of the slot's categories and train.
+    // A player appears in the sessions of every category they belong to.
     const { data: categoryPlayers, error: playersError } = await s
       .from("players")
       .select("*")
-      .in("category", cats)
+      .overlaps("categories", cats)
       .eq("trains", true)
       .order("last_name")
       .order("name");

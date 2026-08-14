@@ -409,7 +409,7 @@ const FlowConsultaSocio: Flow = {
 
             const { data, error } = await supabaseAdmin
                 .from("players")
-                .select("name,last_name,category")
+                .select("name,last_name,categories")
                 .eq("dni", dni)
                 .maybeSingle();
 
@@ -427,7 +427,9 @@ const FlowConsultaSocio: Flow = {
             await sendText(
                 incoming.waId,
                 data
-                    ? `✅ ${data.name} ${data.last_name} está registrado en la categoría *${data.category}*.`
+                    ? `✅ ${data.name} ${data.last_name} está registrado en ${
+                        data.categories.length > 1 ? "las categorías" : "la categoría"
+                    } *${data.categories.join(", ")}*.`
                     : "No encontré a nadie con ese DNI. Consultá con la comisión.",
             );
 
