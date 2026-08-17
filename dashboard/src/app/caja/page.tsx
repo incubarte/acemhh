@@ -1,26 +1,61 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import ProtectedPage from "../components/ProtectedPage";
 import { usePageTitle } from "../components/PageTitleContext";
-import type { CajaUser, PendingHandoff } from "../api/caja/route";
+import type { CajaUser, FlowEntry, PendingHandoff } from "../api/caja/route";
+import { Card, formatArs, formatWhen } from "./ui";
 
 type CajaData = {
   me: string;
   users: CajaUser[];
-  pendingIn: PendingHandoff[];
-  pendingOut: PendingHandoff[];
+  pending: PendingHandoff[];
+  history: FlowEntry[];
 };
 
-function formatArs(amount: number) {
-  return `$${amount.toLocaleString("es-AR")}`;
-}
+function FlowLine({ entry }: { entry: FlowEntry }) {
+  const row = (icon: string, text: React.ReactNode, amount: string) => (
+    <div style={{
+      display: "flex",
+      alignItems: "baseline",
+      gap: 8,
+      padding: "8px 0",
+      borderBottom: "1px solid rgba(255,255,255,0.07)",
+    }}>
+      <span>{icon}</span>
+      <span style={{ flex: 1 }}>
+        {text}
+        <span style={{ display: "block", fontSize: "0.75rem", opacity: 0.5 }}>
+          {formatWhen(entry.at)}
+        </span>
+      </span>
+      <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{amount}</span>
+    </div>
+  );
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginTop: 28, marginBottom: 8 }}>
-      {children}
-    </h2>
+  if (entry.kind === "income") {
+    return row(
+      "💵",
+      <>{entry.name} cobró {entry.count === 1 ? "1 pago" : `${entry.count} pagos`}</>,
+      `+${formatArs(entry.amount)}`,
+    );
+  }
+  if (entry.kind === "expense") {
+    return row(
+      "📤",
+      <>
+        {entry.name} pagó {entry.concept}
+        {entry.notes ? ` — ${entry.notes}` : ""}
+        {entry.is_cash ? "" : " (banco)"}
+      </>,
+      `-${formatArs(entry.amount)}`,
+    );
+  }
+  return row(
+    "🔁",
+    <>{entry.from_name} le entregó caja a {entry.to_name}</>,
+    formatArs(entry.amount),
   );
 }
 
@@ -30,17 +65,6 @@ function CajaContent() {
   const [data, setData] = useState<CajaData | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  // Expense form
-  const [expAmount, setExpAmount] = useState("");
-  const [expConcept, setExpConcept] = useState("alquiler pista");
-  const [expPayee, setExpPayee] = useState("pista");
-  const [expMonth, setExpMonth] = useState("");
-  const [expCash, setExpCash] = useState(true);
-
-  // Handoff form
-  const [hoAmount, setHoAmount] = useState("");
-  const [hoTo, setHoTo] = useState("");
 
   const reload = useCallback(async () => {
     const res = await fetch("/api/caja");
@@ -56,40 +80,20 @@ function CajaContent() {
     reload();
   }, [reload]);
 
-  const post = async (url: string, body: unknown) => {
+  const accept = async (id: string) => {
     setBusy(true);
     setErr(null);
-    const res = await fetch(url, {
+    const res = await fetch("/api/handoffs/accept", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ id }),
     });
     setBusy(false);
     if (!res.ok) {
       setErr(await res.text());
-      return false;
+      return;
     }
     await reload();
-    return true;
-  };
-
-  const submitExpense = async () => {
-    const ok = await post("/api/expenses", {
-      amount: Number(expAmount),
-      concept: expConcept,
-      payee: expPayee,
-      month: expMonth || null,
-      is_cash: expCash,
-    });
-    if (ok) setExpAmount("");
-  };
-
-  const submitHandoff = async () => {
-    const ok = await post("/api/handoffs", { amount: Number(hoAmount), to_user: hoTo });
-    if (ok) {
-      setHoAmount("");
-      setHoTo("");
-    }
   };
 
   if (!data) {
@@ -98,116 +102,66 @@ function CajaContent() {
       : <p style={{ marginTop: 16 }}>Cargando...</p>;
   }
 
-  const mine = data.users.find((u) => u.id === data.me);
-  const others = data.users.filter((u) => u.id !== data.me);
+  const holders = data.users.filter((u) => u.balance !== 0);
 
   return (
     <div style={{ paddingBottom: 40 }}>
-      {mine ? (
-        <div style={{
-          marginTop: 16,
-          padding: "14px 16px",
-          borderRadius: 12,
-          border: "1px solid rgba(255,255,255,0.12)",
-          background: "rgba(255,255,255,0.04)",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "baseline",
-        }}>
-          <span style={{ opacity: 0.7 }}>Mi caja</span>
-          <span style={{ fontSize: "1.4rem", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-            {formatArs(mine.balance)}
-          </span>
-        </div>
-      ) : null}
-
-      {data.pendingIn.length > 0 && (
-        <>
-          <SectionTitle>Entregas por confirmar</SectionTitle>
-          {data.pendingIn.map((h) => (
-            <div key={h.id} className="row" style={{ marginTop: 8, alignItems: "center", gap: 10 }}>
-              <span style={{ flex: 1 }}>
-                {h.from_name} te entregó <strong>{formatArs(h.amount)}</strong>
+      <Card title="Cajas del club">
+        {holders.length === 0
+          ? <p style={{ margin: 0, opacity: 0.7 }}>Nadie tiene plata del club.</p>
+          : holders.map((u) => (
+            <div key={u.id} style={{
+              display: "flex",
+              justifyContent: "space-between",
+              padding: "6px 0",
+            }}>
+              <span>{u.name}{u.id === data.me ? " (yo)" : ""}</span>
+              <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
+                {formatArs(u.balance)}
               </span>
-              <button className="btnPrimary" disabled={busy}
-                onClick={() => post("/api/handoffs/accept", { id: h.id })}>
-                Confirmar
-              </button>
             </div>
           ))}
-        </>
-      )}
+      </Card>
 
-      {data.pendingOut.length > 0 && (
-        <>
-          <SectionTitle>Entregas esperando confirmación</SectionTitle>
-          {data.pendingOut.map((h) => (
-            <p key={h.id} style={{ marginTop: 6, opacity: 0.8 }}>
-              {formatArs(h.amount)} a {h.to_name} — pendiente
-            </p>
+      {data.pending.length > 0 && (
+        <Card title="Entregas pendientes de confirmación">
+          {data.pending.map((h) => (
+            <div key={h.id} style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "6px 0",
+            }}>
+              <span style={{ flex: 1 }}>
+                {h.from_name} → {h.to_user === data.me ? "vos" : h.to_name}:{" "}
+                <strong>{formatArs(h.amount)}</strong>
+              </span>
+              {h.to_user === data.me
+                ? (
+                  <button className="btnPrimary" disabled={busy} onClick={() => accept(h.id)}>
+                    Confirmar
+                  </button>
+                )
+                : <span style={{ opacity: 0.6, fontSize: "0.85rem" }}>pendiente</span>}
+            </div>
           ))}
-        </>
+        </Card>
       )}
 
-      <SectionTitle>Registrar egreso</SectionTitle>
-      <div className="grid">
-        <label>
-          Monto
-          <input inputMode="numeric" value={expAmount} onChange={(e) => setExpAmount(e.target.value)} />
-        </label>
-        <label>
-          Concepto
-          <input value={expConcept} onChange={(e) => setExpConcept(e.target.value)} />
-        </label>
-        <label>
-          Destinatario
-          <input value={expPayee} onChange={(e) => setExpPayee(e.target.value)} />
-        </label>
-        <label>
-          Mes (YYYY-MM, opcional)
-          <input value={expMonth} onChange={(e) => setExpMonth(e.target.value)} placeholder="2026-08" />
-        </label>
-        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input type="checkbox" checked={expCash} onChange={(e) => setExpCash(e.target.checked)} />
-          Pagado en efectivo (sale de mi caja)
-        </label>
-        <button className="btnPrimary" disabled={busy || !expAmount} onClick={submitExpense}>
-          Registrar egreso
-        </button>
-      </div>
+      <Card title="Movimientos">
+        {data.history.length === 0
+          ? <p style={{ margin: 0, opacity: 0.7 }}>Todavía no hay movimientos.</p>
+          : data.history.map((e, i) => <FlowLine key={i} entry={e} />)}
+      </Card>
 
-      <SectionTitle>Entregar caja</SectionTitle>
-      <div className="grid">
-        <label>
-          Monto
-          <input inputMode="numeric" value={hoAmount} onChange={(e) => setHoAmount(e.target.value)} />
-        </label>
-        <label>
-          A quién
-          <select value={hoTo} onChange={(e) => setHoTo(e.target.value)}>
-            <option value="" disabled>Elegir admin</option>
-            {others.map((u) => (
-              <option key={u.id} value={u.id}>{u.name}</option>
-            ))}
-          </select>
-        </label>
-        <button className="btnPrimary" disabled={busy || !hoAmount || !hoTo} onClick={submitHandoff}>
-          Registrar entrega
-        </button>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 20 }}>
+        <Link href="/caja/egreso" style={{ textDecoration: "none" }}>
+          <button className="btnPrimary" style={{ width: "100%" }}>📤 Registrar egreso</button>
+        </Link>
+        <Link href="/caja/handoff" style={{ textDecoration: "none" }}>
+          <button className="btnPrimary" style={{ width: "100%" }}>🔁 Entregar caja</button>
+        </Link>
       </div>
-
-      <SectionTitle>Cajas del club</SectionTitle>
-      {data.users.map((u) => (
-        <div key={u.id} style={{
-          display: "flex",
-          justifyContent: "space-between",
-          padding: "6px 0",
-          borderBottom: "1px solid rgba(255,255,255,0.08)",
-        }}>
-          <span>{u.name}{u.id === data.me ? " (yo)" : ""}</span>
-          <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatArs(u.balance)}</span>
-        </div>
-      ))}
 
       {err ? <p style={{ color: "crimson", marginTop: 12 }}>{err}</p> : null}
     </div>

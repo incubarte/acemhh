@@ -146,9 +146,9 @@ Deno.test("caja balances add up", async () => {
             },
         ]);
         await insert("expenses", [
-            { amount: 2000, concept: "alquiler pista", payee: "pista", paid_by: ids.userA, is_cash: true },
+            { amount: 2000, concept: "hora de pista", paid_by: ids.userA, is_cash: true },
             // Bank expense: touches no caja.
-            { amount: 7777, concept: "alquiler pista", payee: "pista", paid_by: ids.userA, is_cash: false },
+            { amount: 7777, concept: "hora de pista", paid_by: ids.userA, is_cash: false },
         ]);
         await insert("cash_handoffs", [
             { amount: 1000, from_user: ids.userA, to_user: ids.userB, accepted_at: new Date().toISOString() },
