@@ -1,7 +1,9 @@
 // WhatsApp Cloud API webhook.
 //
-// Public entrypoint for members: anyone messages the club number and gets a menu.
-// Admin operations stay on the Telegram bot.
+// Single-response bot: any inbound message gets one reply built from the
+// sender's identity (resolved by phone) — players see their recent payment and
+// attendance status, admins get a magic link into the dashboard, unknown
+// numbers get a shrug. No menu, no flows, no conversation state.
 //
 // Required env vars (supabase/functions/.env):
 //   WHATSAPP_APP_SECRET      - Meta app secret, used to verify X-Hub-Signature-256
@@ -12,20 +14,18 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import {
+    buildPlayerSection,
+    currentMonthBA,
+    fetchMonthStatuses,
+    monthsWindow,
+} from "./status.ts";
 
 const GraphVersionDefault = "v23.0";
 
-// WhatsApp rejects the whole message if any of these are exceeded, so we truncate
-// rather than risk a 400 on a long player name.
+// WhatsApp rejects the whole message if the body exceeds this, so we truncate
+// rather than risk a 400.
 const LimitTextBody = 4096;
-const LimitInteractiveBody = 1024;
-const LimitButtonTitle = 20;
-const LimitRowTitle = 24;
-const LimitRowDescription = 72;
-const MaxButtons = 3;
-const MaxRows = 10;
-
-const SessionTtlHours = 24;
 
 const supabaseAdmin = createClient(
     Deno.env.get("SUPABASE_URL")!,
@@ -46,13 +46,6 @@ type Incoming = {
     replyId: string | null;
 };
 
-type Session = {
-    wa_id: string;
-    flow: string | null;
-    step: string | null;
-    data: Record<string, unknown>;
-};
-
 /** A dashboard admin, resolved from the sender's phone. id is the users.id uuid. */
 type Admin = {
     id: string;
@@ -66,29 +59,10 @@ type PlayerLink = {
     last_name: string;
     categories: string[];
     invitee: boolean;
+    /** 0-100; at 100 the player pays nothing and only attendance is reported. */
+    scholarship: number;
     /** "self" when it is the player's own phone, "guardian" when it is their tutor's. */
     relation: "self" | "guardian";
-};
-
-type FlowContext = {
-    incoming: Incoming;
-    session: Session;
-    /** Non-null when the sender's phone matches a users row: same identity as the dashboard. */
-    admin: Admin | null;
-    /** Players linked to the sender's phone. The same number can be a player's own
-     * and the guardian's of several minors, so this can hold multiple entries. */
-    players: PlayerLink[];
-    /** Whatever the user just sent, normalized: reply id if interactive, else text. */
-    input: string;
-};
-
-type Flow = {
-    id: string;
-    /** Shown as the menu row. Kept short — WhatsApp truncates hard. */
-    title: string;
-    description: string;
-    start: (ctx: FlowContext) => Promise<void>;
-    steps: Record<string, (ctx: FlowContext) => Promise<void>>;
 };
 
 // ////////////////////////////////////
@@ -290,56 +264,6 @@ async function claimMessage(incoming: Incoming): Promise<boolean> {
 }
 
 // ////////////////////////////////////
-// SESSION
-// ////////////////////////////////////
-
-async function loadSession(waId: string): Promise<Session> {
-    const { data, error } = await supabaseAdmin
-        .from("whatsapp_sessions")
-        .select("wa_id,flow,step,data")
-        .eq("wa_id", waId)
-        .gt("expires_at", new Date().toISOString())
-        .maybeSingle();
-
-    if (error) console.error("Session load failed:", error);
-
-    return data
-        ? { ...data, data: (data.data ?? {}) as Record<string, unknown> }
-        : { wa_id: waId, flow: null, step: null, data: {} };
-}
-
-async function saveSession(
-    waId: string,
-    flow: string,
-    step: string,
-    data: Record<string, unknown>,
-) {
-    const now = new Date();
-    const expires = new Date(now.getTime() + SessionTtlHours * 60 * 60 * 1000);
-
-    const { error } = await supabaseAdmin
-        .from("whatsapp_sessions")
-        .upsert({
-            wa_id: waId,
-            flow,
-            step,
-            data,
-            updated_at: now.toISOString(),
-            expires_at: expires.toISOString(),
-        }, { onConflict: "wa_id" });
-
-    if (error) console.error("Session save failed:", error);
-}
-
-async function clearSession(waId: string) {
-    const { error } = await supabaseAdmin
-        .from("whatsapp_sessions")
-        .delete()
-        .eq("wa_id", waId);
-    if (error) console.error("Session clear failed:", error);
-}
-
-// ////////////////////////////////////
 // SENDER IDENTITY
 // ////////////////////////////////////
 
@@ -363,7 +287,7 @@ async function lookupPlayers(waId: string): Promise<PlayerLink[]> {
     // waId is all digits (Meta strips the +), so it is safe inside the filter.
     const { data, error } = await supabaseAdmin
         .from("players")
-        .select("id,name,last_name,categories,invitee,phone,guardian_phone")
+        .select("id,name,last_name,categories,invitee,scholarship,phone,guardian_phone")
         .or(`phone.eq.${waId},guardian_phone.eq.${waId}`);
 
     if (error) {
@@ -377,6 +301,7 @@ async function lookupPlayers(waId: string): Promise<PlayerLink[]> {
         last_name: p.last_name,
         categories: p.categories,
         invitee: p.invitee,
+        scholarship: p.scholarship ?? 0,
         relation: p.phone === waId ? "self" as const : "guardian" as const,
     }));
 }
@@ -386,7 +311,9 @@ const LoginTokenTtlMinutes = 15;
 // Dashboard access for admins without Telegram: the wa_id in a Meta-signed
 // webhook proves who is talking, so a short-lived single-use token can carry
 // that identity to the dashboard, which exchanges it for a session cookie.
-async function sendAdminLoginLink(waId: string, admin: Admin) {
+// Returns the login line for the reply, or null when minting failed (the rest
+// of the reply is still useful on its own).
+async function mintLoginSection(admin: Admin): Promise<string | null> {
     const bytes = crypto.getRandomValues(new Uint8Array(32));
     const token = Array.from(bytes)
         .map((b) => b.toString(16).padStart(2, "0"))
@@ -401,190 +328,68 @@ async function sendAdminLoginLink(waId: string, admin: Admin) {
         });
 
     if (error) {
-        // The menu was already useful on its own; don't surface an error for the extra.
         console.error("Login token insert failed:", error);
-        return;
+        return null;
     }
 
     const base = Deno.env.get("DASHBOARD_URL") ?? "https://acemhh-delta.vercel.app";
-    await sendText(
-        waId,
-        `🔑 Entrá al dashboard con este link (un solo uso, vale ${LoginTokenTtlMinutes} minutos):\n${base}/api/auth/whatsapp?token=${token}`,
-    );
+    return `🔑 Entrá al dashboard con este link (un solo uso, vale ${LoginTokenTtlMinutes} minutos):\n${base}/api/auth/whatsapp?token=${token}`;
 }
 
 // ////////////////////////////////////
-// ROUTER
+// REPLY
 // ////////////////////////////////////
 
-const MenuKeywords = ["menu", "menú", "hola", "start", "inicio", "ayuda"];
-const CancelKeywords = ["cancelar", "salir", "cancel"];
-
+// Whatever the message says, the reply is the same: a status tailored to who
+// is talking. Players get their recent payment/attendance record, guardians
+// get one section per player in their care, admins get a dashboard login
+// link, unknown numbers get a shrug.
 async function handleIncoming(incoming: Incoming) {
-    const [session, admin, players] = await Promise.all([
-        loadSession(incoming.waId),
+    const [admin, players] = await Promise.all([
         lookupAdmin(incoming.waId),
         lookupPlayers(incoming.waId),
     ]);
-    const input = incoming.replyId ?? incoming.text ?? "";
-    const normalized = normalize(input);
+    const self = players.find((p) => p.relation === "self") ?? null;
 
-    if (CancelKeywords.includes(normalized)) {
-        await clearSession(incoming.waId);
-        await sendText(incoming.waId, "Listo, cancelado.");
-        await sendMainMenu(incoming, admin, players);
+    if (!admin && players.length === 0) {
+        await sendText(incoming.waId, "Hola! Te conozco?");
         return;
     }
 
-    if (MenuKeywords.includes(normalized)) {
-        await clearSession(incoming.waId);
-        await sendMainMenu(incoming, admin, players);
-        // Only on an explicit greeting, so cancel/fallback menus don't spam links.
-        if (admin) await sendAdminLoginLink(incoming.waId, admin);
-        return;
-    }
+    // Names come from our own tables, never from the sender-controlled
+    // WhatsApp profile name. A pure guardian has no name of their own here.
+    const name = admin?.first_name ?? self?.name ?? null;
+    const sections: string[] = [name ? `Hola ${name}!` : "Hola!"];
 
-    const ctx: FlowContext = { incoming, session, admin, players, input };
-
-    // A menu selection (or a keyword matching a flow id) starts that flow.
-    const selected = FLOWS[input] ?? FLOWS[normalized];
-    if (selected) {
-        await selected.start(ctx);
-        return;
-    }
-
-    // Otherwise continue whatever flow is in progress.
-    if (session.flow && session.step) {
-        const flow = FLOWS[session.flow];
-        const handler = flow?.steps[session.step];
-        if (handler) {
-            await handler(ctx);
-            return;
-        }
-        console.error(`Unknown flow/step ${session.flow}/${session.step}, resetting`);
-        await clearSession(incoming.waId);
-    }
-
-    await sendMainMenu(incoming, admin, players);
-}
-
-function normalize(value: string): string {
-    return value.trim().toLowerCase();
-}
-
-async function sendMainMenu(incoming: Incoming, admin: Admin | null, players: PlayerLink[]) {
-    // Names from our own tables win over profileName, which is whatever the
-    // sender typed into WhatsApp. Guardians are not greeted with their kid's name.
-    const name = admin?.first_name ??
-        players.find((p) => p.relation === "self")?.name ??
-        incoming.profileName;
-    const greeting = name ? `Hola ${name}! ` : "Hola! ";
-    await sendList(
-        incoming.waId,
-        `${greeting}Soy el asistente de ACEMHH. ¿Qué necesitás?`,
-        "Ver opciones",
-        Object.values(FLOWS).map((f) => ({
-            id: f.id,
-            title: f.title,
-            description: f.description,
-        })),
-    );
-}
-
-// ////////////////////////////////////
-// FLOWS
-// ////////////////////////////////////
-
-// Add a flow by declaring it here — it shows up in the main menu automatically.
-// Each step handler is responsible for advancing (saveSession) or ending
-// (clearSession) the conversation.
-
-const FlowConsultaSocio: Flow = {
-    id: "consulta_socio",
-    title: "Consultar socio",
-    description: "Verificá que tus datos estén registrados",
-    start: async ({ incoming }) => {
-        await saveSession(incoming.waId, FlowConsultaSocio.id, "ask_dni", {});
-        await sendText(
-            incoming.waId,
-            "Decime el *DNI* del socio (solo números).\n\nEscribí *cancelar* para salir.",
-        );
-    },
-    steps: {
-        ask_dni: async ({ incoming, input }) => {
-            const dni = input.replace(/\D/g, "");
-            if (dni.length < 7) {
-                await sendText(
-                    incoming.waId,
-                    "Ese DNI no parece válido. Mandame solo los números, sin puntos.",
-                );
-                return; // stay on this step
-            }
-
-            const { data, error } = await supabaseAdmin
-                .from("players")
-                .select("name,last_name,categories")
-                .eq("dni", dni)
-                .maybeSingle();
-
-            if (error) {
-                console.error("Player lookup failed:", error);
-                await sendText(incoming.waId, "No pude consultar ahora. Probá de nuevo en un rato.");
-                await clearSession(incoming.waId);
-                return;
-            }
-
-            // NOTE: deliberately does not disclose payment or attendance data. The
-            // sender's number is not verified against the member, and there is no
-            // phone -> player mapping in the schema yet. Decide that policy before
-            // adding any flow that reveals personal or financial information.
-            await sendText(
-                incoming.waId,
-                data
-                    ? `✅ ${data.name} ${data.last_name} está registrado en ${
-                        data.categories.length > 1 ? "las categorías" : "la categoría"
-                    } *${data.categories.join(", ")}*.`
-                    : "No encontré a nadie con ese DNI. Consultá con la comisión.",
+    const months = monthsWindow(currentMonthBA());
+    if (months.length > 0) {
+        const reportFor = async (player: PlayerLink): Promise<string | null> => {
+            const statuses = await fetchMonthStatuses(supabaseAdmin, player.id, months);
+            const isSelf = player.relation === "self";
+            return buildPlayerSection(
+                statuses,
+                isSelf
+                    ? "Registro de tus pagos en los últimos meses:"
+                    : `Registro de pagos de ${player.name}:`,
+                { voice: isSelf ? "vos" : "el", fullScholarship: player.scholarship === 100 },
             );
+        };
 
-            // No follow-up step needed: both button ids route through handleIncoming
-            // on their own — "consulta_socio" restarts the flow, "menu" is a keyword.
-            await clearSession(incoming.waId);
-            await sendButtons(incoming.waId, "¿Querés hacer algo más?", [
-                { id: FlowConsultaSocio.id, title: "Consultar otro" },
-                { id: "menu", title: "Menú principal" },
-            ]);
-        },
-    },
-};
+        const ordered = [
+            ...(self ? [self] : []),
+            ...players.filter((p) => p.relation === "guardian"),
+        ];
+        const reports = await Promise.all(ordered.map(reportFor));
+        sections.push(...reports.filter((r): r is string => r !== null));
+    }
 
-const FlowContacto: Flow = {
-    id: "contacto",
-    title: "Dejar un mensaje",
-    description: "Te respondemos apenas podamos",
-    start: async ({ incoming }) => {
-        await saveSession(incoming.waId, FlowContacto.id, "ask_message", {});
-        await sendText(
-            incoming.waId,
-            "Contame tu consulta y se la paso a la comisión.\n\nEscribí *cancelar* para salir.",
-        );
-    },
-    steps: {
-        ask_message: async ({ incoming, admin, players, input }) => {
-            // TODO: persist to a table (or relay to the Telegram admin chat) once you
-            // decide where these should land.
-            console.log(`Consulta de ${incoming.waId} (${incoming.profileName}): ${input}`);
-            await sendText(incoming.waId, "¡Gracias! Recibimos tu mensaje.");
-            await clearSession(incoming.waId);
-            await sendMainMenu(incoming, admin, players);
-        },
-    },
-};
+    if (admin) {
+        const loginSection = await mintLoginSection(admin);
+        if (loginSection) sections.push(loginSection);
+    }
 
-const FLOWS: Record<string, Flow> = {
-    [FlowConsultaSocio.id]: FlowConsultaSocio,
-    [FlowContacto.id]: FlowContacto,
-};
+    await sendText(incoming.waId, sections.join("\n\n"));
+}
 
 // ////////////////////////////////////
 // SENDING
@@ -627,66 +432,6 @@ function sendText(to: string, body: string) {
         to,
         type: "text",
         text: { body: truncate(body, LimitTextBody), preview_url: false },
-    });
-}
-
-/**
- * Reply buttons. WhatsApp allows at most 3 — for anything longer use sendList,
- * and for more than 10 options you need pagination or a Flow.
- */
-function sendButtons(
-    to: string,
-    body: string,
-    buttons: { id: string; title: string }[],
-) {
-    if (buttons.length > MaxButtons) {
-        console.error(`Dropping ${buttons.length - MaxButtons} button(s): WhatsApp allows ${MaxButtons}`);
-    }
-    return sendMessage({
-        to,
-        type: "interactive",
-        interactive: {
-            type: "button",
-            body: { text: truncate(body, LimitInteractiveBody) },
-            action: {
-                buttons: buttons.slice(0, MaxButtons).map((b) => ({
-                    type: "reply",
-                    reply: { id: b.id, title: truncate(b.title, LimitButtonTitle) },
-                })),
-            },
-        },
-    });
-}
-
-/** List message. Max 10 rows total across all sections. */
-function sendList(
-    to: string,
-    body: string,
-    buttonLabel: string,
-    rows: { id: string; title: string; description?: string }[],
-) {
-    if (rows.length > MaxRows) {
-        console.error(`Dropping ${rows.length - MaxRows} row(s): WhatsApp allows ${MaxRows}`);
-    }
-    return sendMessage({
-        to,
-        type: "interactive",
-        interactive: {
-            type: "list",
-            body: { text: truncate(body, LimitInteractiveBody) },
-            action: {
-                button: truncate(buttonLabel, LimitButtonTitle),
-                sections: [{
-                    rows: rows.slice(0, MaxRows).map((r) => ({
-                        id: r.id,
-                        title: truncate(r.title, LimitRowTitle),
-                        ...(r.description
-                            ? { description: truncate(r.description, LimitRowDescription) }
-                            : {}),
-                    })),
-                }],
-            },
-        },
     });
 }
 
