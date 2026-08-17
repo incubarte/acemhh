@@ -44,10 +44,13 @@ export const POST = withPermission('api', '/api/payments/dues', 'POST', async (s
       id: crypto.randomUUID(),
       player_id: body.player_id,
       registered_by: formatRegisteredBy(sess),
+      registered_by_user_id: sess.id,
       concept: "membership dues",
       month,
       amount,
-      is_cash: true,
+      // Dues are paid straight to the bank account, never in cash, so they
+      // must not count toward the registering admin's caja.
+      is_cash: false,
     },
   ]);
 
