@@ -150,17 +150,6 @@ function TrainingSessionNewContent() {
   const storedSeqRef = useRef(0);
   const lastTouchRef = useRef(0);
 
-  useEffect(() => {
-    const touch = () => {
-      lastTouchRef.current = performance.now();
-    };
-    window.addEventListener("pointerdown", touch, true);
-    window.addEventListener("pointermove", touch, true);
-    return () => {
-      window.removeEventListener("pointerdown", touch, true);
-      window.removeEventListener("pointermove", touch, true);
-    };
-  }, []);
 
   // Scroll blocker while the wheel is engaged: a PERMANENT non-passive
   // touchmove listener, registered at mount and inert otherwise. It must
@@ -208,8 +197,9 @@ function TrainingSessionNewContent() {
     reload();
   }, [reload]);
 
-  // Ends the transition: 3s without touchscreen interaction, no gesture in
-  // progress and no refresh in flight (a running one is always waited for,
+  // Ends the transition: 3s without a new attendance gesture starting (plain
+  // scrolling doesn't postpone it), no gesture in progress, no live feedback
+  // animation and no refresh in flight (a running one is always waited for,
   // superseding the older responses).
   useEffect(() => {
     const t = window.setInterval(() => {
@@ -337,6 +327,8 @@ function TrainingSessionNewContent() {
       // Regrabbing THIS row takes over from its own snap-back, resuming from
       // wherever the wheel is; other rows' animations are untouched.
       cancelRowAnim(player.id);
+      // Only toggle-gesture starts count for the transition quiet window.
+      lastTouchRef.current = performance.now();
       const el = e.currentTarget as HTMLElement;
       const baseX = wheels.get(player.id)?.x ?? 0;
       gestureRef.current = {
@@ -464,13 +456,12 @@ function TrainingSessionNewContent() {
   const ausentesExtra = ausentesTodos.filter((p) => p.qualifies && !baseIds.has(p.id));
 
   // Transition reservations: a present→absent toggle gets its row among the
-  // absentees at its alphabetical spot; an absent→present one gets a black
-  // placeholder under "Pagó mes completo" until the refresh reveals where the
-  // player really lands.
+  // absentees at its alphabetical spot. An absent→present one reserves
+  // nothing — Presentes rows differ in height and the placeholder looked
+  // wrong; the player simply appears there after the refresh applies.
   const reservedAusentes = [...overrides.values()]
     .filter((o) => o.to === "ausente")
     .map((o) => o.player);
-  const reservedPresentes = [...overrides.values()].filter((o) => o.to === "presente");
   const ausentesConReservas = [
     ...ausentesBase.map((p) => ({ p, reserved: false })),
     ...reservedAusentes.map((p) => ({ p, reserved: true })),
@@ -566,11 +557,14 @@ function TrainingSessionNewContent() {
             WebkitTouchCallout: "none",
             position: "relative",
             overflow: "hidden",
-            // The committed row shrinks away; the reload then drops it for real.
+            // The committed row shrinks away, painted black with its normal
+            // content gone so the player's name can never flicker through;
+            // the reload then drops it for real.
             ...(committing
               ? {
                 height: committing.collapsed ? 0 : committing.height,
                 transition: "height 180ms ease, padding 180ms ease",
+                background: "#000",
               }
               : {}),
           }}
@@ -578,7 +572,7 @@ function TrainingSessionNewContent() {
           {/* Resting highlight (debt / unpaid dues): same colors and gradient
               as the wheel cells, tinted by attendance so it never contradicts
               the wheel (green among Presentes, red among Ausentes). */}
-          {hasDebt || (!p.invitee && !p.paidMembershipDues) ? (
+          {!committing && (hasDebt || (!p.invitee && !p.paidMembershipDues)) ? (
             <div style={{
               position: "absolute",
               top: 9,
@@ -611,6 +605,7 @@ function TrainingSessionNewContent() {
               <div style={cellStyle(otherWord, otherColor)}>{otherWord}</div>
             </div>
           )}
+          {!committing && (
           <span
             onClick={hasDebt ? () => setDebtModalPlayer(p) : undefined}
             style={{
@@ -627,8 +622,9 @@ function TrainingSessionNewContent() {
             {p.last_name}, {p.name}
             {dot(p)}
           </span>
+          )}
 
-          {opts.payments && (
+          {!committing && opts.payments && (
             <>
               {p.payments > 0 && (
                 <span style={{ fontSize: "0.85rem", fontVariantNumeric: "tabular-nums", position: "relative" }}>
@@ -744,20 +740,9 @@ function TrainingSessionNewContent() {
           : pagoSesion.map((p) => renderRow(p, { payments: true }))}
 
         {subheader("Pagó mes completo")}
-        {pagoMes.length === 0 && reservedPresentes.length === 0
+        {pagoMes.length === 0
           ? <p style={{ margin: 0, padding: "8px", fontSize: "0.85rem", opacity: 0.5 }}>Nadie</p>
-          : (
-            <>
-              {pagoMes.map((p) => renderRow(p, { payments: true }))}
-              {reservedPresentes.map((o) => (
-                <div
-                  key={`resp-${o.player.id}`}
-                  data-testid="reserved-black"
-                  style={{ height: 42, background: "#000", borderBottom: rowBorder }}
-                />
-              ))}
-            </>
-          )}
+          : pagoMes.map((p) => renderRow(p, { payments: true }))}
       </div>
 
       {sectionTitle("Ausentes")}

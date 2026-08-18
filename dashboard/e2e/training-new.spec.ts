@@ -245,10 +245,12 @@ test("la ruedita también gira a la izquierda: presente pasa a ausente", async (
 test("toggles rápidos encadenados durante el refresh", async ({ page }) => {
   await openPage(page);
 
-  // First toggle: Mensual (absent) slides right — a black slot is reserved
-  // under "Pagó mes completo" while the refresh runs.
+  // First toggle: Mensual (absent) slides right. No slot is reserved among
+  // Presentes — the player appears there only once the refresh applies.
   await slideWheel(page, "Mensual", 0.8);
-  await expect(page.getByTestId("reserved-black")).toBeVisible();
+  await expect(
+    page.getByTestId("section-presentes").getByText(`${LAST}, Mensual`),
+  ).toHaveCount(0);
 
   // Without waiting for any refresh, second toggle: Sesionista slides left to
   // absent, and their reserved row shows among Ausentes immediately.
@@ -258,10 +260,9 @@ test("toggles rápidos encadenados durante el refresh", async ({ page }) => {
   ).toBeVisible();
 
   // After the 3s quiet window the LAST refresh renders the real diff.
-  await expect(page.getByTestId("reserved-black")).toHaveCount(0, { timeout: 8000 });
   await expect(
     page.getByTestId("section-presentes").getByText(`${LAST}, Mensual`),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 8000 });
   await expect(
     page.getByTestId("section-ausentes").getByText(`${LAST}, Sesionista`),
   ).toBeVisible();
