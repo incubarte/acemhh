@@ -84,6 +84,7 @@ async function seed() {
       registered_by: "__test",
       concept: "monthly",
       month: "2026-08",
+      slot: "jue 22hs",
       amount: 75000,
       is_cash: true,
     },
@@ -146,24 +147,26 @@ function row(page: Page, name: string) {
   return page.locator(`[data-player-row="${ids.get(name)}"]`);
 }
 
-/** Slides the attendance wheel: right by `fraction` of the row width, slow
- * (release velocity ~0), so the majority-area rule decides. */
+/** Slides the attendance wheel by `fraction` of the row width — negative
+ * fraction slides left — slow (release velocity ~0), so the majority-area
+ * rule decides. */
 async function slideWheel(page: Page, name: string, fraction: number) {
   const box = (await row(page, name).boundingBox())!;
-  const startX = box.x + 20;
+  const startX = fraction >= 0 ? box.x + 20 : box.x + box.width - 20;
   const y = box.y + box.height / 2;
   await page.mouse.move(startX, y);
   await page.mouse.down();
+  // The state word shows from the finger-down, before any movement.
+  await expect(page.getByTestId("attendance-wheel")).toBeVisible();
   const distance = box.width * fraction;
   for (let i = 1; i <= 10; i++) {
     await page.mouse.move(startX + (distance * i) / 10, y);
     await page.waitForTimeout(30);
   }
-  await expect(page.getByTestId("attendance-wheel")).toBeVisible();
   // Pause so the release velocity is ~zero.
   await page.waitForTimeout(250);
   await page.mouse.up();
-  // Wait for the spring to settle and the wheel to unmount.
+  // Wait for the spring (and the commit collapse) to finish.
   await expect(page.getByTestId("attendance-wheel")).toHaveCount(0);
 }
 
@@ -228,6 +231,17 @@ test("un deslizamiento corto vuelve atrás sin cambiar nada", async ({ page }) =
   ).toBeVisible();
 });
 
+test("la ruedita también gira a la izquierda: presente pasa a ausente", async ({ page }) => {
+  await openPage(page);
+
+  await slideWheel(page, "Mensual", -0.8);
+
+  await expect(page.getByText("Presentes — total: 3")).toBeVisible();
+  await expect(
+    page.getByTestId("section-ausentes").getByText(`${LAST}, Mensual`),
+  ).toBeVisible();
+});
+
 test("buscar jugador lo marca presente", async ({ page }) => {
   await openPage(page);
 
@@ -235,5 +249,5 @@ test("buscar jugador lo marca presente", async ({ page }) => {
   await page.getByPlaceholder("Nombre o apellido").fill("Fantasma");
   await page.getByRole("button", { name: `${LAST}, Fantasma` }).click();
 
-  await expect(page.getByText("Presentes — total: 5")).toBeVisible();
+  await expect(page.getByText("Presentes — total: 4")).toBeVisible();
 });

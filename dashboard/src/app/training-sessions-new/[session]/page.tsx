@@ -51,13 +51,16 @@ function formatArs(amount: number) {
 const rowBorder = "1px solid rgba(255,255,255,0.07)";
 
 // ---- Attendance wheel (horizontal thumb-wheel toggle) ----
-// x is the wheel travel in px: 0 = current state centered, width = the other
-// state centered (committing the toggle on release).
+// x is the wheel travel in px. Detents at -width, 0 and +width: 0 centers the
+// current state, either extreme centers the other one (committing the toggle
+// on release) — the wheel turns both ways.
 type WheelState = {
   playerId: string;
   attended: boolean;
   x: number;
   width: number;
+  /** Set while the committed row shrinks away after the toggle lands. */
+  commit?: { height: number; collapsed: boolean };
 };
 
 /** Horizontal movement needed before the wheel engages (vs a tap). */
@@ -66,6 +69,11 @@ const WheelSlop = 10;
 const FlickVelocity = 0.4;
 const PresentGreen = "#15803d";
 const AbsentRed = "#b91c1c";
+
+/** Solid state color with a ~1-character fade to black at both edges; shared
+ * by the wheel cells and the resting row's highlight band. */
+const bandBg = (color: string) =>
+  `linear-gradient(90deg, #000 0, ${color} 14px, ${color} calc(100% - 14px), #000 100%)`;
 
 function TrainingSessionNewContent() {
   const params = useParams();
@@ -98,6 +106,7 @@ function TrainingSessionNewContent() {
     startX: number;
     startY: number;
     width: number;
+    height: number;
     engaged: boolean;
     x: number;
     /** Recent [time, x] samples for release velocity. */
@@ -156,14 +165,15 @@ function TrainingSessionNewContent() {
       return;
     }
 
-    // Magnetic detents: a flick snaps to the next section in its direction
-    // (it never spins past — there is no further detent); otherwise whichever
-    // section covers most of the row wins.
+    // Magnetic detents at -W, 0, +W: a flick snaps to the next detent in its
+    // direction (never past it); otherwise the nearest one — i.e. whichever
+    // section covers most of the row — wins.
+    const W = g.width;
     const target = releaseVx > FlickVelocity
-      ? g.width
+      ? Math.min(W, (Math.floor(g.x / W) + 1) * W)
       : releaseVx < -FlickVelocity
-      ? 0
-      : (g.x > g.width / 2 ? g.width : 0);
+      ? Math.max(-W, (Math.ceil(g.x / W) - 1) * W)
+      : Math.max(-W, Math.min(W, Math.round(g.x / W) * W));
 
     // Damped spring from the release position with the release velocity, so
     // the wheel keeps its inertia and the magnet reels it into the detent.
@@ -179,11 +189,29 @@ function TrainingSessionNewContent() {
       x += v * dt;
       if (Math.abs(target - x) < 1 && Math.abs(v) < 0.05) {
         animRef.current = null;
-        setWheel(null);
-        if (target === g.width) setAttendance(g.playerId, !g.attended);
+        if (target === 0) {
+          setWheel(null);
+          return;
+        }
+        // Toggle landed: keep the winning word on screen and shrink the row
+        // away; the player reappears in their new section after the reload.
+        setWheel({
+          playerId: g.playerId,
+          attended: g.attended,
+          x: target,
+          width: W,
+          commit: { height: g.height, collapsed: false },
+        });
+        requestAnimationFrame(() =>
+          setWheel((w) => w?.commit ? { ...w, commit: { ...w.commit, collapsed: true } } : w)
+        );
+        window.setTimeout(async () => {
+          await setAttendance(g.playerId, !g.attended);
+          setWheel(null);
+        }, 240);
         return;
       }
-      setWheel({ playerId: g.playerId, attended: g.attended, x, width: g.width });
+      setWheel({ playerId: g.playerId, attended: g.attended, x, width: W });
       animRef.current = requestAnimationFrame(step);
     };
     animRef.current = requestAnimationFrame(step);
@@ -192,22 +220,28 @@ function TrainingSessionNewContent() {
 
   const rowPressHandlers = (player: RosterPlayer) => ({
     onPointerDown: (e: React.PointerEvent) => {
+      // Payment controls keep their own tap semantics, wheel-free.
+      if ((e.target as HTMLElement).closest("button,input,select")) return;
       if (animRef.current) {
         cancelAnimationFrame(animRef.current);
         animRef.current = null;
-        setWheel(null);
       }
+      if (wheel?.commit) return; // a committing row is already on its way out
+      const el = e.currentTarget as HTMLElement;
       gestureRef.current = {
         playerId: player.id,
         attended: player.attended,
         pointerId: e.pointerId,
         startX: e.clientX,
         startY: e.clientY,
-        width: (e.currentTarget as HTMLElement).clientWidth,
+        width: el.clientWidth,
+        height: el.getBoundingClientRect().height,
         engaged: false,
         x: 0,
         samples: [[performance.now(), 0]],
       };
+      // The state word shows from the very finger-down.
+      setWheel({ playerId: player.id, attended: player.attended, x: 0, width: el.clientWidth });
     },
     onPointerMove: (e: React.PointerEvent) => {
       const g = gestureRef.current;
@@ -219,6 +253,7 @@ function TrainingSessionNewContent() {
         // Vertical intent: the scroller's gesture, not ours.
         if (Math.abs(dy) > WheelSlop && Math.abs(dy) >= Math.abs(dx)) {
           gestureRef.current = null;
+          setWheel(null);
           return;
         }
         if (Math.abs(dx) > WheelSlop && Math.abs(dx) > Math.abs(dy)) {
@@ -231,19 +266,21 @@ function TrainingSessionNewContent() {
         }
       }
 
-      // Rubber-band outside [0, width]: the wheel resists but hints.
-      const x = dx < 0 ? dx / 4 : dx > g.width ? g.width + (dx - g.width) / 4 : dx;
+      // The wheel turns both ways; rubber-band beyond the detents at ±width.
+      const W = g.width;
+      const x = dx > W ? W + (dx - W) / 4 : dx < -W ? -W + (dx + W) / 4 : dx;
       g.x = x;
       const now = performance.now();
       g.samples.push([now, x]);
       while (g.samples.length > 2 && now - g.samples[0][0] > 90) g.samples.shift();
-      setWheel({ playerId: g.playerId, attended: g.attended, x, width: g.width });
+      setWheel({ playerId: g.playerId, attended: g.attended, x, width: W });
     },
     onPointerUp: () => {
       const g = gestureRef.current;
       if (!g) return;
       if (!g.engaged) {
         gestureRef.current = null;
+        setWheel(null);
         return;
       }
       const [t0, x0] = g.samples[0];
@@ -254,9 +291,8 @@ function TrainingSessionNewContent() {
       settleWheel(!stale && t1 > t0 ? (x1 - x0) / (t1 - t0) : 0);
     },
     onPointerCancel: () => {
-      const engaged = gestureRef.current?.engaged;
       gestureRef.current = null;
-      if (engaged) setWheel(null);
+      setWheel((w) => (w?.commit ? w : null));
     },
   });
 
@@ -326,17 +362,17 @@ function TrainingSessionNewContent() {
 
   const renderRow = (p: RosterPlayer, opts: { payments?: boolean } = {}) => {
     const hasDebt = (p.debt ?? 0) > 0;
-    const nameBg = hasDebt || (!p.invitee && !p.paidMembershipDues)
-      ? "rgba(220, 38, 38, 0.45)"
-      : "transparent";
-
     const rowWheel = wheel && wheel.playerId === p.id ? wheel : null;
-    // The wheel strip is twice the row wide: the other state's cell on the
-    // left, the current one on the right. Sliding right (x: 0 → width)
-    // uncovers the other state; the gradient runs green at the center of
-    // PRESENTE, black at the seam, red at the center of AUSENTE.
-    const cellStyle: React.CSSProperties = {
-      width: "50%",
+    const committing = rowWheel?.commit;
+    // Three cells — [other][current][other] — so the wheel turns both ways.
+    // Each cell is solid state color with the shared ~1-character edge fade;
+    // the seam between sections is just where two fades meet.
+    const currentWord = p.attended ? "PRESENTE" : "AUSENTE";
+    const currentColor = p.attended ? PresentGreen : AbsentRed;
+    const otherWord = p.attended ? "AUSENTE" : "PRESENTE";
+    const otherColor = p.attended ? AbsentRed : PresentGreen;
+    const cellStyle = (word: string, color: string): React.CSSProperties => ({
+      width: "33.3333%",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
@@ -344,7 +380,9 @@ function TrainingSessionNewContent() {
       fontSize: "0.85rem",
       letterSpacing: "0.12em",
       color: "#fff",
-    };
+      background: bandBg(color),
+      borderRadius: 6,
+    });
 
     return (
       <React.Fragment key={p.id}>
@@ -358,16 +396,36 @@ function TrainingSessionNewContent() {
             display: "flex",
             alignItems: "center",
             gap: 8,
-            padding: "10px 8px",
-            borderBottom: rowBorder,
+            padding: committing?.collapsed ? "0 8px" : "10px 8px",
+            borderBottom: committing?.collapsed ? "none" : rowBorder,
             touchAction: "pan-y",
             userSelect: "none",
             WebkitUserSelect: "none",
             WebkitTouchCallout: "none",
             position: "relative",
             overflow: "hidden",
+            // The committed row shrinks away; the reload then drops it for real.
+            ...(committing
+              ? {
+                height: committing.collapsed ? 0 : committing.height,
+                transition: "height 180ms ease, padding 180ms ease",
+              }
+              : {}),
           }}
         >
+          {/* Resting highlight (debt / unpaid dues): same colors and gradient
+              as the wheel cells. */}
+          {hasDebt || (!p.invitee && !p.paidMembershipDues) ? (
+            <div style={{
+              position: "absolute",
+              top: 9,
+              bottom: 10,
+              left: 0,
+              right: 0,
+              borderRadius: 6,
+              background: bandBg(AbsentRed),
+            }} />
+          ) : null}
           {rowWheel && (
             <div
               data-testid="attendance-wheel"
@@ -378,19 +436,16 @@ function TrainingSessionNewContent() {
                 top: 9,
                 bottom: 10,
                 left: 0,
-                width: "200%",
+                width: "300%",
                 display: "flex",
                 zIndex: 5,
                 pointerEvents: "none",
-                borderRadius: 6,
                 transform: `translateX(${-rowWheel.width + rowWheel.x}px)`,
-                background: p.attended
-                  ? `linear-gradient(90deg, ${AbsentRed} 15%, #000 50%, ${PresentGreen} 85%)`
-                  : `linear-gradient(90deg, ${PresentGreen} 15%, #000 50%, ${AbsentRed} 85%)`,
               }}
             >
-              <div style={cellStyle}>{p.attended ? "AUSENTE" : "PRESENTE"}</div>
-              <div style={cellStyle}>{p.attended ? "PRESENTE" : "AUSENTE"}</div>
+              <div style={cellStyle(otherWord, otherColor)}>{otherWord}</div>
+              <div style={cellStyle(currentWord, currentColor)}>{currentWord}</div>
+              <div style={cellStyle(otherWord, otherColor)}>{otherWord}</div>
             </div>
           )}
           <span
@@ -401,10 +456,9 @@ function TrainingSessionNewContent() {
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
               fontSize: "0.9rem",
-              background: nameBg,
-              borderRadius: 4,
               padding: "2px 6px",
               cursor: hasDebt ? "pointer" : undefined,
+              position: "relative",
             }}
           >
             {p.last_name}, {p.name}
@@ -414,7 +468,7 @@ function TrainingSessionNewContent() {
           {opts.payments && (
             <>
               {p.payments > 0 && (
-                <span style={{ fontSize: "0.85rem", fontVariantNumeric: "tabular-nums" }}>
+                <span style={{ fontSize: "0.85rem", fontVariantNumeric: "tabular-nums", position: "relative" }}>
                   ${formatArs(p.payments)}
                 </span>
               )}
