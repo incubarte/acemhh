@@ -3,6 +3,7 @@
 import React, { Suspense, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import ProtectedPage from "../../components/ProtectedPage";
+import Overlay from "../../components/Overlay";
 import { usePageTitle } from "../../components/PageTitleContext";
 import { paymentThresholdOverride } from "@/lib/thresholds";
 
@@ -1112,6 +1113,7 @@ function TrainingSessionDetailContent() {
 
         {/* Debt detail modal, opened by tapping a red (indebted) player name. */}
         {debtModalPlayer && (
+          <Overlay>
           <div
             onClick={() => setDebtModalPlayer(null)}
             style={{
@@ -1160,6 +1162,7 @@ function TrainingSessionDetailContent() {
               </button>
             </div>
           </div>
+          </Overlay>
         )}
 
       </div>

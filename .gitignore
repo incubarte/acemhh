@@ -18,3 +18,5 @@ dashboard/.env.*
 dashboard/*.tsbuildinfo
 
 **/.DS_Store
+test-results/
+playwright-report/

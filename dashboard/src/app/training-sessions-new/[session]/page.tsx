@@ -3,6 +3,7 @@
 import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import ProtectedPage from "../../components/ProtectedPage";
+import Overlay from "../../components/Overlay";
 import { usePageTitle } from "../../components/PageTitleContext";
 
 // Redesigned attendance & payments screen. Presence is expressed by the
@@ -276,6 +277,9 @@ function TrainingSessionNewContent() {
         <div
           data-player-row={p.id}
           {...rowPressHandlers(p)}
+          // The browser's own long-press UI (context menu, iOS callout) would
+          // steal the gesture before our timer fires.
+          onContextMenu={(e) => e.preventDefault()}
           style={{
             display: "flex",
             alignItems: "center",
@@ -285,6 +289,7 @@ function TrainingSessionNewContent() {
             touchAction: "pan-y",
             userSelect: "none",
             WebkitUserSelect: "none",
+            WebkitTouchCallout: "none",
             background: dragging ? "rgba(36, 179, 91, 0.25)" : undefined,
             transform: dragging ? "scale(1.04)" : undefined,
             boxShadow: dragging ? "0 6px 18px rgba(0,0,0,0.5)" : undefined,
@@ -466,6 +471,7 @@ function TrainingSessionNewContent() {
 
       {/* Goal bar for the drag-to-toggle gesture. */}
       {drag && (
+        <Overlay>
         <div
           ref={goalRef}
           style={{
@@ -488,10 +494,12 @@ function TrainingSessionNewContent() {
         >
           🥅 Cambiar a {drag.toPresent ? "PRESENTE" : "AUSENTE"}
         </div>
+        </Overlay>
       )}
 
       {/* Full-screen feedback flash. */}
       {flash && (
+        <Overlay>
         <div style={{
           position: "fixed",
           inset: 0,
@@ -504,10 +512,12 @@ function TrainingSessionNewContent() {
         }}>
           {flash === "ok" ? "✅" : "❌"}
         </div>
+        </Overlay>
       )}
 
       {/* Search popup: pick a player and mark them present. */}
       {searchOpen && (
+        <Overlay>
         <div
           onClick={() => setSearchOpen(false)}
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 80, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 20, paddingTop: 60 }}
@@ -545,10 +555,12 @@ function TrainingSessionNewContent() {
             </div>
           </div>
         </div>
+        </Overlay>
       )}
 
       {/* Debt detail modal. */}
       {debtModalPlayer && (
+        <Overlay>
         <div
           onClick={() => setDebtModalPlayer(null)}
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}
@@ -575,6 +587,7 @@ function TrainingSessionNewContent() {
             </button>
           </div>
         </div>
+        </Overlay>
       )}
 
     </div>

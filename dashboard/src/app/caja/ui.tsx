@@ -1,5 +1,7 @@
 "use client";
 
+import Overlay from "../components/Overlay";
+
 // Shared building blocks for the caja screens: bordered section cards that
 // keep each block visually delimited, currency formatting, and the low-amount
 // confirmation dialog.
@@ -52,6 +54,7 @@ export function LowAmountDialog({ amount, onConfirm, onCancel }: {
   onCancel: () => void;
 }) {
   return (
+    <Overlay>
     <div style={{
       position: "fixed",
       inset: 0,
@@ -86,5 +89,6 @@ export function LowAmountDialog({ amount, onConfirm, onCancel }: {
         </div>
       </div>
     </div>
+    </Overlay>
   );
 }
