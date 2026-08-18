@@ -57,6 +57,8 @@ type DragState = {
   toPresent: boolean;
   goalAt: "top" | "bottom";
   overGoal: boolean;
+  /** Current pointer position: the name chip follows it. */
+  pos: { x: number; y: number };
 };
 
 function TrainingSessionNewContent() {
@@ -87,6 +89,25 @@ function TrainingSessionNewContent() {
   dragRef.current = drag;
   const goalRef = useRef<HTMLDivElement | null>(null);
   const pressRef = useRef<{ timer: number; x: number; y: number } | null>(null);
+
+  // Scroll blocker for the drag. It must be registered at gesture start
+  // (pointerdown): browsers decide then whether touchmove will be cancelable,
+  // so a listener added when the long-press fires arrives too late and the
+  // native pan wins — the exact "it scrolls instead of dragging" failure.
+  const blockerRef = useRef<((e: TouchEvent) => void) | null>(null);
+  const addScrollBlocker = () => {
+    if (blockerRef.current) return;
+    const fn = (e: TouchEvent) => {
+      if (dragRef.current) e.preventDefault();
+    };
+    blockerRef.current = fn;
+    window.addEventListener("touchmove", fn, { passive: false });
+  };
+  const removeScrollBlocker = () => {
+    if (!blockerRef.current) return;
+    window.removeEventListener("touchmove", blockerRef.current);
+    blockerRef.current = null;
+  };
 
   const reload = useCallback(async () => {
     const res = await fetch(`/api/training-sessions-new/${session}`);
@@ -122,11 +143,14 @@ function TrainingSessionNewContent() {
       window.clearTimeout(pressRef.current.timer);
       pressRef.current = null;
     }
+    // A dead press releases the scroll blocker; an active drag keeps it.
+    if (!dragRef.current) removeScrollBlocker();
   };
 
   const finishDrag = useCallback(async (clientX: number, clientY: number) => {
     const current = dragRef.current;
     setDrag(null);
+    removeScrollBlocker();
     if (!current) return;
 
     const rect = goalRef.current?.getBoundingClientRect();
@@ -144,50 +168,54 @@ function TrainingSessionNewContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const activateDrag = (player: RosterPlayer, rowMidY: number) => {
+  const activateDrag = (player: RosterPlayer, rowMidY: number, x: number, y: number) => {
     pressRef.current = null;
     const goalAt = rowMidY < window.innerHeight / 2 ? "bottom" : "top";
-    setDrag({ player, toPresent: !player.attended, goalAt, overGoal: false });
+    setDrag({ player, toPresent: !player.attended, goalAt, overGoal: false, pos: { x, y } });
 
     const onMove = (e: PointerEvent) => {
       const rect = goalRef.current?.getBoundingClientRect();
       const over = !!rect &&
         e.clientX >= rect.left && e.clientX <= rect.right &&
         e.clientY >= rect.top && e.clientY <= rect.bottom;
-      setDrag((prev) => (prev && prev.overGoal !== over ? { ...prev, overGoal: over } : prev));
+      setDrag((prev) =>
+        prev ? { ...prev, overGoal: over, pos: { x: e.clientX, y: e.clientY } } : prev
+      );
     };
-    // While dragging, the finger must not scroll the page.
-    const onTouchMove = (e: TouchEvent) => e.preventDefault();
-    const onUp = (e: PointerEvent) => {
+    const detach = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onCancel);
-      window.removeEventListener("touchmove", onTouchMove);
+    };
+    const onUp = (e: PointerEvent) => {
+      detach();
       finishDrag(e.clientX, e.clientY);
     };
     const onCancel = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onCancel);
-      window.removeEventListener("touchmove", onTouchMove);
+      detach();
+      removeScrollBlocker();
       setDrag(null);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onCancel);
-    window.addEventListener("touchmove", onTouchMove, { passive: false });
   };
 
   const rowPressHandlers = (player: RosterPlayer) => ({
     onPointerDown: (e: React.PointerEvent) => {
       if (dragRef.current) return;
       cancelPress();
+      addScrollBlocker();
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const rowMidY = rect.top + rect.height / 2;
+      const { clientX, clientY } = e;
       pressRef.current = {
-        x: e.clientX,
-        y: e.clientY,
-        timer: window.setTimeout(() => activateDrag(player, rowMidY), LongPressMs),
+        x: clientX,
+        y: clientY,
+        timer: window.setTimeout(
+          () => activateDrag(player, rowMidY, clientX, clientY),
+          LongPressMs,
+        ),
       };
     },
     onPointerMove: (e: React.PointerEvent) => {
@@ -469,30 +497,56 @@ function TrainingSessionNewContent() {
           ))}
       </div>
 
-      {/* Goal bar for the drag-to-toggle gesture. */}
+      {/* Drag overlay: dim backdrop, goal bar midway into the free half of
+          the screen, and a name chip following the finger. */}
       {drag && (
         <Overlay>
+        <div data-testid="drag-backdrop" style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 70,
+          background: "rgba(0,0,0,0.7)",
+        }} />
         <div
           ref={goalRef}
           style={{
             position: "fixed",
             left: 10,
             right: 10,
-            [drag.goalAt]: 10,
-            height: 90,
-            zIndex: 50,
+            top: drag.goalAt === "top" ? "25%" : "75%",
+            transform: "translateY(-50%)",
+            height: 110,
+            zIndex: 75,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             borderRadius: 14,
             border: drag.overGoal ? "3px solid #4ade80" : "2px dashed rgba(255,255,255,0.5)",
-            background: drag.overGoal ? "rgba(36, 179, 91, 0.35)" : "rgba(20, 30, 24, 0.92)",
+            background: drag.overGoal ? "rgba(36, 179, 91, 0.45)" : "rgba(20, 30, 24, 0.95)",
             fontSize: "1rem",
             fontWeight: 700,
             letterSpacing: "0.03em",
-          } as React.CSSProperties}
+          }}
         >
           🥅 Cambiar a {drag.toPresent ? "PRESENTE" : "AUSENTE"}
+        </div>
+        <div style={{
+          position: "fixed",
+          left: drag.pos.x,
+          top: drag.pos.y,
+          transform: "translate(-50%, -140%)",
+          zIndex: 80,
+          pointerEvents: "none",
+          padding: "8px 14px",
+          borderRadius: 999,
+          background: "rgba(36, 179, 91, 0.95)",
+          color: "#0b1a10",
+          fontWeight: 700,
+          fontSize: "0.95rem",
+          whiteSpace: "nowrap",
+          boxShadow: "0 8px 22px rgba(0,0,0,0.6)",
+        }}>
+          {drag.player.last_name}, {drag.player.name}
         </div>
         </Overlay>
       )}

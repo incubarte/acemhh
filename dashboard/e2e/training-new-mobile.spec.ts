@@ -74,6 +74,16 @@ test("el arco aparece dentro del viewport aunque la página esté scrolleada", a
   await expect(goal).toBeVisible();
   await expect(goal).toBeInViewport({ ratio: 0.9 });
 
+  // The screen dims behind the gesture.
+  await expect(page.getByTestId("drag-backdrop")).toBeVisible();
+
+  // The pressed row sits in the lower half, so the goal centers midway into
+  // the upper half (~25% of the viewport), not glued to the edge.
+  const goalBox = (await goal.boundingBox())!;
+  const centerRatio = (goalBox.y + goalBox.height / 2) / 664;
+  expect(centerRatio).toBeGreaterThan(0.15);
+  expect(centerRatio).toBeLessThan(0.4);
+
   await page.mouse.up();
 });
 
