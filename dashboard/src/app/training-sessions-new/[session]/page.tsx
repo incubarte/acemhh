@@ -90,28 +90,22 @@ function TrainingSessionNewContent() {
   const goalRef = useRef<HTMLDivElement | null>(null);
   const pressRef = useRef<{ timer: number; x: number; y: number } | null>(null);
 
-  // Scroll blocker for the drag. Registered at gesture start (pointerdown)
-  // and preventing from the FIRST touchmove: browsers — iOS Safari especially
-  // — commit a gesture to native scrolling as soon as any touchmove goes
-  // unprevented, and later preventDefaults are ignored (the drag then dies
-  // with a pointercancel). Preventing sub-slop moves is harmless: they are
-  // below the browser's own scroll threshold anyway, and if early movement
-  // exceeds our slop we cancel the press and stop preventing, so a real
-  // scroll swipe still wins.
-  const blockerRef = useRef<((e: TouchEvent) => void) | null>(null);
-  const addScrollBlocker = () => {
-    if (blockerRef.current) return;
+  // Scroll blocker for the drag: a PERMANENT non-passive touchmove listener,
+  // registered at mount and inert unless a row press is pending or a drag is
+  // active. It must pre-exist the touch: iOS Safari decides at touchstart
+  // whether touchmove is cancelable, so a listener added inside pointerdown
+  // (mid-touchstart) arrives too late and the same finger scrolls the page —
+  // while a second finger, whose touch starts after registration, can drag.
+  // Preventing sub-slop moves during the press is harmless (they are below
+  // the browser's own scroll threshold), and once early movement cancels the
+  // press the handler goes inert, so a real scroll swipe still wins.
+  useEffect(() => {
     const fn = (e: TouchEvent) => {
       if (pressRef.current || dragRef.current) e.preventDefault();
     };
-    blockerRef.current = fn;
     window.addEventListener("touchmove", fn, { passive: false });
-  };
-  const removeScrollBlocker = () => {
-    if (!blockerRef.current) return;
-    window.removeEventListener("touchmove", blockerRef.current);
-    blockerRef.current = null;
-  };
+    return () => window.removeEventListener("touchmove", fn);
+  }, []);
 
   const reload = useCallback(async () => {
     const res = await fetch(`/api/training-sessions-new/${session}`);
@@ -147,14 +141,11 @@ function TrainingSessionNewContent() {
       window.clearTimeout(pressRef.current.timer);
       pressRef.current = null;
     }
-    // A dead press releases the scroll blocker; an active drag keeps it.
-    if (!dragRef.current) removeScrollBlocker();
   };
 
   const finishDrag = useCallback(async (clientX: number, clientY: number) => {
     const current = dragRef.current;
     setDrag(null);
-    removeScrollBlocker();
     if (!current) return;
 
     const rect = goalRef.current?.getBoundingClientRect();
@@ -197,7 +188,6 @@ function TrainingSessionNewContent() {
     };
     const onCancel = () => {
       detach();
-      removeScrollBlocker();
       setDrag(null);
     };
     window.addEventListener("pointermove", onMove);
@@ -209,7 +199,6 @@ function TrainingSessionNewContent() {
     onPointerDown: (e: React.PointerEvent) => {
       if (dragRef.current) return;
       cancelPress();
-      addScrollBlocker();
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const rowMidY = rect.top + rect.height / 2;
       const { clientX, clientY } = e;
