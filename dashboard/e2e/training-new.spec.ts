@@ -242,6 +242,32 @@ test("la ruedita también gira a la izquierda: presente pasa a ausente", async (
   ).toBeVisible();
 });
 
+test("toggles rápidos encadenados durante el refresh", async ({ page }) => {
+  await openPage(page);
+
+  // First toggle: Mensual (absent) slides right — a black slot is reserved
+  // under "Pagó mes completo" while the refresh runs.
+  await slideWheel(page, "Mensual", 0.8);
+  await expect(page.getByTestId("reserved-black")).toBeVisible();
+
+  // Without waiting for any refresh, second toggle: Sesionista slides left to
+  // absent, and their reserved row shows among Ausentes immediately.
+  await slideWheel(page, "Sesionista", -0.8);
+  await expect(
+    page.getByTestId("section-ausentes").getByText(`${LAST}, Sesionista`),
+  ).toBeVisible();
+
+  // After the 3s quiet window the LAST refresh renders the real diff.
+  await expect(page.getByTestId("reserved-black")).toHaveCount(0, { timeout: 8000 });
+  await expect(
+    page.getByTestId("section-presentes").getByText(`${LAST}, Mensual`),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId("section-ausentes").getByText(`${LAST}, Sesionista`),
+  ).toBeVisible();
+  await expect(page.getByText("Presentes — total: 3")).toBeVisible();
+});
+
 test("buscar jugador lo marca presente", async ({ page }) => {
   await openPage(page);
 

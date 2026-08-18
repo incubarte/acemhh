@@ -100,6 +100,7 @@ function TrainingSessionNewContent() {
   const [wheel, setWheel] = useState<WheelState | null>(null);
   // Live gesture bookkeeping, mutated at pointer-event rate.
   const gestureRef = useRef<{
+    player: RosterPlayer;
     playerId: string;
     attended: boolean;
     pointerId: number;
@@ -113,6 +114,35 @@ function TrainingSessionNewContent() {
     samples: [number, number][];
   } | null>(null);
   const animRef = useRef<number | null>(null);
+
+  // ---- Transition period ----
+  // Committed toggles don't re-render the roster immediately: the old row is
+  // gone (collapsed) and a placeholder is reserved in the target section,
+  // while reloads accumulate off-screen. Only after 3s without touchscreen
+  // interaction does the LATEST refresh render for real — so a burst of
+  // toggles flows without waiting for any refresh.
+  const [overrides, setOverrides] = useState<Map<string, { to: "presente" | "ausente"; player: RosterPlayer }>>(new Map());
+  const overridesRef = useRef(overrides);
+  overridesRef.current = overrides;
+  const pendingRosterRef = useRef<RosterPlayer[] | null>(null);
+  const inFlightRef = useRef(0);
+  const reqSeqRef = useRef(0);
+  const storedSeqRef = useRef(0);
+  const lastTouchRef = useRef(0);
+  /** Finishes a commit collapse early if a new gesture starts meanwhile. */
+  const commitFlushRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    const touch = () => {
+      lastTouchRef.current = performance.now();
+    };
+    window.addEventListener("pointerdown", touch, true);
+    window.addEventListener("pointermove", touch, true);
+    return () => {
+      window.removeEventListener("pointerdown", touch, true);
+      window.removeEventListener("pointermove", touch, true);
+    };
+  }, []);
 
   // Scroll blocker while the wheel is engaged: a PERMANENT non-passive
   // touchmove listener, registered at mount and inert otherwise. It must
@@ -129,20 +159,57 @@ function TrainingSessionNewContent() {
   }, []);
 
   const reload = useCallback(async () => {
-    const res = await fetch(`/api/training-sessions-new/${session}`);
-    if (!res.ok) {
-      setErr(await res.text());
+    const seq = ++reqSeqRef.current;
+    inFlightRef.current++;
+    try {
+      const res = await fetch(`/api/training-sessions-new/${session}`);
+      if (!res.ok) {
+        setErr(await res.text());
+        setLoading(false);
+        return;
+      }
+      const data = await res.json();
+      const roster = (data.players ?? []) as RosterPlayer[];
+      if (seq <= storedSeqRef.current) return; // an older response arriving late
+      storedSeqRef.current = seq;
+      if (overridesRef.current.size > 0) {
+        // Transition in progress: park it; only the newest survives.
+        pendingRosterRef.current = roster;
+      } else {
+        pendingRosterRef.current = null;
+        setPlayers(roster);
+      }
+      setErr(null);
       setLoading(false);
-      return;
+    } finally {
+      inFlightRef.current--;
     }
-    const data = await res.json();
-    setPlayers((data.players ?? []) as RosterPlayer[]);
-    setErr(null);
-    setLoading(false);
   }, [session]);
 
   useEffect(() => {
     reload();
+  }, [reload]);
+
+  // Ends the transition: 3s without touchscreen interaction, no gesture in
+  // progress and no refresh in flight (a running one is always waited for,
+  // superseding the older responses).
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      if (overridesRef.current.size === 0) return;
+      if (performance.now() - lastTouchRef.current < 3000) return;
+      if (gestureRef.current || commitFlushRef.current) return;
+      if (inFlightRef.current > 0) return;
+      const pending = pendingRosterRef.current;
+      if (!pending) {
+        // The commit's reload failed or never landed: fetch a fresh one.
+        reload();
+        return;
+      }
+      pendingRosterRef.current = null;
+      setPlayers(pending);
+      setOverrides(new Map());
+    }, 300);
+    return () => window.clearInterval(t);
   }, [reload]);
 
   const setAttendance = async (playerId: string, attended: boolean) => {
@@ -193,8 +260,27 @@ function TrainingSessionNewContent() {
           setWheel(null);
           return;
         }
-        // Toggle landed: keep the winning word on screen and shrink the row
-        // away; the player reappears in their new section after the reload.
+
+        // Toggle landed. Goalies never change section: no collapse and no
+        // reservation, just the write and its refresh.
+        if (g.player.player_type === "goalkeeper") {
+          setWheel(null);
+          setAttendance(g.playerId, !g.attended);
+          return;
+        }
+
+        // The override (old row gone + reserved slot in the target section)
+        // starts NOW, before the refresh can land, so the reload parks into
+        // the pending roster instead of re-rendering mid-burst.
+        setOverrides((prev) =>
+          new Map(prev).set(g.playerId, {
+            to: g.attended ? "ausente" : "presente",
+            player: g.player,
+          })
+        );
+        setAttendance(g.playerId, !g.attended);
+
+        // Keep the winning word on screen while the row shrinks away.
         setWheel({
           playerId: g.playerId,
           attended: g.attended,
@@ -205,10 +291,13 @@ function TrainingSessionNewContent() {
         requestAnimationFrame(() =>
           setWheel((w) => w?.commit ? { ...w, commit: { ...w.commit, collapsed: true } } : w)
         );
-        window.setTimeout(async () => {
-          await setAttendance(g.playerId, !g.attended);
-          setWheel(null);
-        }, 240);
+        const finish = () => {
+          commitFlushRef.current = null;
+          window.clearTimeout(timer);
+          setWheel((w) => (w && w.playerId === g.playerId ? null : w));
+        };
+        const timer = window.setTimeout(finish, 240);
+        commitFlushRef.current = finish;
         return;
       }
       setWheel({ playerId: g.playerId, attended: g.attended, x, width: W });
@@ -222,13 +311,17 @@ function TrainingSessionNewContent() {
     onPointerDown: (e: React.PointerEvent) => {
       // Payment controls keep their own tap semantics, wheel-free.
       if ((e.target as HTMLElement).closest("button,input,select")) return;
+      // A row still mid-collapse resolves instantly so states never overlap.
+      if (commitFlushRef.current) commitFlushRef.current();
+      // Rows already toggled away (reserved elsewhere) take no new gestures.
+      if (overridesRef.current.has(player.id)) return;
       if (animRef.current) {
         cancelAnimationFrame(animRef.current);
         animRef.current = null;
       }
-      if (wheel?.commit) return; // a committing row is already on its way out
       const el = e.currentTarget as HTMLElement;
       gestureRef.current = {
+        player,
         playerId: player.id,
         attended: player.attended,
         pointerId: e.pointerId,
@@ -348,6 +441,51 @@ function TrainingSessionNewContent() {
   const baseIds = new Set(ausentesBase.map((p) => p.id));
   const ausentesExtra = ausentesTodos.filter((p) => p.qualifies && !baseIds.has(p.id));
 
+  // Transition reservations: a present→absent toggle gets its row among the
+  // absentees at its alphabetical spot; an absent→present one gets a black
+  // placeholder under "Pagó mes completo" until the refresh reveals where the
+  // player really lands.
+  const reservedAusentes = [...overrides.values()]
+    .filter((o) => o.to === "ausente")
+    .map((o) => o.player);
+  const reservedPresentes = [...overrides.values()].filter((o) => o.to === "presente");
+  const ausentesConReservas = [
+    ...ausentesBase.map((p) => ({ p, reserved: false })),
+    ...reservedAusentes.map((p) => ({ p, reserved: true })),
+  ].sort((a, b) =>
+    `${a.p.last_name} ${a.p.name}`.localeCompare(`${b.p.last_name} ${b.p.name}`)
+  );
+
+  const renderReservedRow = (p: RosterPlayer) => (
+    <div
+      key={`res-${p.id}`}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "10px 8px",
+        borderBottom: rowBorder,
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      {(p.debt ?? 0) > 0 || (!p.invitee && !p.paidMembershipDues) ? (
+        <div style={{
+          position: "absolute",
+          top: 9,
+          bottom: 10,
+          left: 0,
+          right: 0,
+          borderRadius: 6,
+          background: bandBg(AbsentRed),
+        }} />
+      ) : null}
+      <span style={{ flex: 1, fontSize: "0.9rem", padding: "2px 6px", position: "relative" }}>
+        {p.last_name}, {p.name}
+      </span>
+    </div>
+  );
+
   // ---- Rendering ----
 
   const dot = (p: RosterPlayer) =>
@@ -364,6 +502,8 @@ function TrainingSessionNewContent() {
     const hasDebt = (p.debt ?? 0) > 0;
     const rowWheel = wheel && wheel.playerId === p.id ? wheel : null;
     const committing = rowWheel?.commit;
+    // Already toggled away: the collapse ran, the reserved slot took over.
+    if (overrides.has(p.id) && !rowWheel) return null;
     // Three cells — [other][current][other] — so the wheel turns both ways.
     // Each cell is solid state color with the shared ~1-character edge fade;
     // the seam between sections is just where two fades meet.
@@ -414,7 +554,8 @@ function TrainingSessionNewContent() {
           }}
         >
           {/* Resting highlight (debt / unpaid dues): same colors and gradient
-              as the wheel cells. */}
+              as the wheel cells, tinted by attendance so it never contradicts
+              the wheel (green among Presentes, red among Ausentes). */}
           {hasDebt || (!p.invitee && !p.paidMembershipDues) ? (
             <div style={{
               position: "absolute",
@@ -423,7 +564,7 @@ function TrainingSessionNewContent() {
               left: 0,
               right: 0,
               borderRadius: 6,
-              background: bandBg(AbsentRed),
+              background: bandBg(p.attended ? PresentGreen : AbsentRed),
             }} />
           ) : null}
           {rowWheel && (
@@ -581,14 +722,27 @@ function TrainingSessionNewContent() {
           : pagoSesion.map((p) => renderRow(p, { payments: true }))}
 
         {subheader("Pagó mes completo")}
-        {pagoMes.length === 0
+        {pagoMes.length === 0 && reservedPresentes.length === 0
           ? <p style={{ margin: 0, padding: "8px", fontSize: "0.85rem", opacity: 0.5 }}>Nadie</p>
-          : pagoMes.map((p) => renderRow(p, { payments: true }))}
+          : (
+            <>
+              {pagoMes.map((p) => renderRow(p, { payments: true }))}
+              {reservedPresentes.map((o) => (
+                <div
+                  key={`resp-${o.player.id}`}
+                  data-testid="reserved-black"
+                  style={{ height: 42, background: "#000", borderBottom: rowBorder }}
+                />
+              ))}
+            </>
+          )}
       </div>
 
       {sectionTitle("Ausentes")}
       <div data-testid="section-ausentes" style={{ border: rowBorder, borderRadius: 10, overflow: "hidden" }}>
-        {ausentesBase.map((p) => renderRow(p))}
+        {ausentesConReservas.map(({ p, reserved }) =>
+          reserved ? renderReservedRow(p) : renderRow(p)
+        )}
         {expandedAbsent && ausentesExtra.map((p) => renderRow(p))}
         {!expandedAbsent && ausentesExtra.length > 0 && (
           <button
