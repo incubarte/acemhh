@@ -1,92 +1,47 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import ProtectedPage from "../components/ProtectedPage";
 import { usePageTitle } from "../components/PageTitleContext";
-import { slotsForDate as scheduleSlotsForDate } from "@/lib/schedule";
-
-type TrainingSlot = {
-  date: string;
-  hour: number;
-  categories: string[];
-};
-
-function findThursday(direction: 'prev' | 'next', from: Date): string {
-  const d = new Date(from);
-  d.setHours(12, 0, 0, 0);
-  const offset = direction === 'prev' ? -1 : 1;
-  for (let i = 1; i <= 14; i++) {
-    const check = new Date(d);
-    check.setDate(d.getDate() + i * offset);
-    if (check.getDay() === 4) {
-      const y = check.getFullYear();
-      const m = String(check.getMonth() + 1).padStart(2, '0');
-      const dd = String(check.getDate()).padStart(2, '0');
-      return `${y}-${m}-${dd}`;
-    }
-  }
-  return '';
-}
-
-function findClosestThursday(): string {
-  const today = new Date();
-  today.setHours(12, 0, 0, 0);
-  for (let i = 0; i <= 14; i++) {
-    const check = new Date(today);
-    check.setDate(today.getDate() - i);
-    if (check.getDay() === 4) {
-      const y = check.getFullYear();
-      const m = String(check.getMonth() + 1).padStart(2, '0');
-      const dd = String(check.getDate()).padStart(2, '0');
-      return `${y}-${m}-${dd}`;
-    }
-  }
-  return '';
-}
-
-function slotsForDate(dateStr: string): TrainingSlot[] {
-  return scheduleSlotsForDate(dateStr).map(({ hour, categories }) => ({
-    date: dateStr,
-    hour,
-    categories,
-  }));
-}
+import type { TrainingDay } from "../api/training-slots/route";
 
 function TrainingSessionsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [currentDate, setCurrentDate] = useState(() => searchParams.get("date") || findClosestThursday());
+  const initialDate = searchParams.get("date");
 
-  const slots = currentDate ? slotsForDate(currentDate) : [];
+  const [day, setDay] = useState<TrainingDay | null | undefined>(undefined);
+  const [err, setErr] = useState<string | null>(null);
 
-  const navigateToDate = (date: string) => {
-    setCurrentDate(date);
-    router.replace(`/training-sessions?date=${date}`, { scroll: false });
-  };
+  // The agenda lives in training_slots: navigation walks the dates that
+  // actually have trainings, so holidays are skipped without special cases.
+  const load = useCallback(async (date: string | null) => {
+    const res = await fetch(`/api/training-slots${date ? `?date=${date}` : ""}`);
+    if (!res.ok) {
+      setErr(await res.text());
+      return;
+    }
+    const body = (await res.json()) as { day: TrainingDay | null };
+    setErr(null);
+    setDay(body.day);
+    if (body.day) {
+      router.replace(`/training-sessions?date=${body.day.date}`, { scroll: false });
+    }
+  }, [router]);
 
-  const goToPrev = () => {
-    const prev = findThursday('prev', new Date(currentDate + 'T12:00:00'));
-    if (prev) navigateToDate(prev);
-  };
-
-  const goToNext = () => {
-    const next = findThursday('next', new Date(currentDate + 'T12:00:00'));
-    if (next) navigateToDate(next);
-  };
-
-  const handleSlotClick = (slot: TrainingSlot) => {
-    const sessionId = `${slot.date}-${slot.hour}`;
-    router.push(`/training-sessions/${sessionId}`);
-  };
+  useEffect(() => {
+    load(initialDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const formatDateShort = (dateStr: string) => {
     const date = new Date(dateStr + "T12:00:00");
-    return date.toLocaleDateString("es-AR", { 
-      weekday: "short", 
-      year: "numeric", 
-      month: "short", 
-      day: "numeric" 
+    return date.toLocaleDateString("es-AR", {
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "numeric"
     });
   };
 
@@ -102,11 +57,23 @@ function TrainingSessionsContent() {
 
   usePageTitle("Sesiones de Entrenamiento");
 
-  if (!currentDate) {
+  if (day === undefined) {
     return (
       <ProtectedPage requiredPage="/training-sessions">
         <div>
-          <p style={{ marginTop: 12 }}>No se encontraron sesiones de entrenamiento recientes.</p>
+          {err
+            ? <p style={{ marginTop: 12, color: "crimson" }}>{err}</p>
+            : <p style={{ marginTop: 12 }}>Cargando...</p>}
+        </div>
+      </ProtectedPage>
+    );
+  }
+
+  if (day === null) {
+    return (
+      <ProtectedPage requiredPage="/training-sessions">
+        <div>
+          <p style={{ marginTop: 12 }}>No hay entrenamientos en la agenda.</p>
         </div>
       </ProtectedPage>
     );
@@ -115,44 +82,61 @@ function TrainingSessionsContent() {
   return (
     <ProtectedPage requiredPage="/training-sessions">
       <div>
-        
-        <div style={{ 
-          marginTop: 16, 
-          marginBottom: 12, 
-          display: "flex", 
-          alignItems: "center", 
+
+        <div style={{
+          marginTop: 16,
+          marginBottom: 12,
+          display: "flex",
+          alignItems: "center",
           justifyContent: "center",
           gap: 16
         }}>
           <span
-            onClick={goToPrev}
-            style={{ cursor: "pointer", fontSize: "1.2rem", userSelect: "none", WebkitTapHighlightColor: "transparent" }}
+            onClick={() => day.prev && load(day.prev)}
+            style={{
+              cursor: day.prev ? "pointer" : "default",
+              opacity: day.prev ? 1 : 0.25,
+              fontSize: "1.2rem",
+              userSelect: "none",
+              WebkitTapHighlightColor: "transparent",
+            }}
           >
             «
           </span>
-          <span style={{ opacity: 0.8 }}>{formatDateShort(currentDate)}</span>
+          <span style={{ opacity: 0.8 }}>{formatDateShort(day.date)}</span>
           <span
-            onClick={goToNext}
-            style={{ cursor: "pointer", fontSize: "1.2rem", userSelect: "none", WebkitTapHighlightColor: "transparent" }}
+            onClick={() => day.next && load(day.next)}
+            style={{
+              cursor: day.next ? "pointer" : "default",
+              opacity: day.next ? 1 : 0.25,
+              fontSize: "1.2rem",
+              userSelect: "none",
+              WebkitTapHighlightColor: "transparent",
+            }}
           >
             »
           </span>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {slots.map((slot) => (
+          {day.slots.length === 0 && (
+            <p style={{ textAlign: "center", opacity: 0.7 }}>
+              No hay entrenamiento este día.
+            </p>
+          )}
+          {day.slots.map((slot) => (
             <button
-              key={`${slot.date}-${slot.hour}`}
+              key={`${day.date}-${slot.hour}`}
               className="btnPrimary"
-              onClick={() => handleSlotClick(slot)}
-              style={{ 
+              onClick={() => router.push(`/training-sessions/${day.date}-${slot.hour}`)}
+              style={{
                 textAlign: "left",
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center"
               }}
             >
-              <span>{slot.categories.length > 0 ? slot.categories.map(getCategoryLabel).join(" + ") : "—"}</span>
+              <span>{slot.categories.map(getCategoryLabel).join(" + ")}</span>
               <span style={{ opacity: 0.7 }}>{slot.hour}:00hs</span>
             </button>
           ))}

@@ -4,8 +4,7 @@ import React, { Suspense, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import ProtectedPage from "../../components/ProtectedPage";
 import { usePageTitle } from "../../components/PageTitleContext";
-import { categoriesForHour, isGoalkeeperFriendlyHour } from "@/lib/schedule";
-import { paymentThresholdForSession } from "@/lib/thresholds";
+import { paymentThresholdOverride } from "@/lib/thresholds";
 
 type Player = {
   id: string;
@@ -22,10 +21,29 @@ type PlayerWithAttendance = Player & {
   invitee: boolean;
   player_type: "player" | "goalkeeper";
   scholarship: number;
+  /** Bonified sessions from last month (club's fault), usable this month. */
+  carryover_sessions: number;
+  /** Accumulated unpaid pesos from earlier months. */
+  debt: number;
+  debt_months: { month: string; charge: number; paid: number }[];
+  /** This month's bundle for the player, carryover-adjusted; null = no bundle. */
+  month_preset: number | null;
+  session_preset: number | null;
+  /** Whether this month's charge is currently unpaid; null on pre-ledger sessions. */
+  owes_now: boolean | null;
   section: "jugadores" | "invitados" | "arqueros";
 };
 
-const ALL_CATEGORIES = ["u-14", "youth", "cat-c", "cat-b", "cat-a"];
+const MONTH_NAMES_ES = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
+function monthNameEs(month: string) {
+  return MONTH_NAMES_ES[Number(month.slice(5)) - 1] ?? month;
+}
+
+const ALL_CATEGORIES = ["youth", "cat-c", "cat-b", "cat-a"];
 
 // How faded the attendance face is when a player did not attend. Low enough to read
 // as "off" at a glance on a phone, high enough to stay visible on the dark theme.
@@ -61,6 +79,10 @@ function TrainingSessionDetailContent() {
   const [addArqueroStep, setAddArqueroStep] = useState<'choose' | 'selectCategory' | 'selectPlayer' | null>(null);
   const [categoryPlayersForInvite, setCategoryPlayersForInvite] = useState<Player[]>([]);
   const [categoryPlayersForArquero, setCategoryPlayersForArquero] = useState<Player[]>([]);
+  // The slot definition (categories, goalie-friendliness) comes from the
+  // roster API, which reads it from the database.
+  const [slotInfo, setSlotInfo] = useState<{ categories: string[]; goalies: boolean } | null>(null);
+  const [debtModalPlayer, setDebtModalPlayer] = useState<PlayerWithAttendance | null>(null);
 
   // Parse session string
   const [dateStr, hourStr] = session.split('-').length === 4
@@ -103,6 +125,7 @@ function TrainingSessionDetailContent() {
 
         const data = await res.json();
         setPlayers(data.players || []);
+        if (data.slot) setSlotInfo(data.slot);
         setLoading(false);
       } catch {
         setErr("Error al cargar jugadores");
@@ -186,6 +209,7 @@ function TrainingSessionDetailContent() {
       if (playersRes.ok) {
         const data = await playersRes.json();
         setPlayers(data.players || []);
+        if (data.slot) setSlotInfo(data.slot);
       }
 
       setPaymentProcessing(false);
@@ -226,8 +250,8 @@ function TrainingSessionDetailContent() {
     setCustomAmount("");
   };
 
-  const sessionCategories = dateStr && !isNaN(hour) ? categoriesForHour(dateStr, hour) : [];
-  const isGkFriendly = !isNaN(hour) && isGoalkeeperFriendlyHour(hour);
+  const sessionCategories = slotInfo?.categories ?? [];
+  const isGkFriendly = slotInfo?.goalies ?? false;
   const newPlayerCategoryParam = sessionCategories.length === 1 ? `category=${sessionCategories[0]}&` : "";
 
   const selectCategoryForInvite = async (cat: string) => {
@@ -255,6 +279,7 @@ function TrainingSessionDetailContent() {
       if (res.ok) {
         const data = await res.json();
         setPlayers(data.players || []);
+        if (data.slot) setSlotInfo(data.slot);
       }
     } catch {
       alert("Error al agregar invitado");
@@ -293,6 +318,7 @@ function TrainingSessionDetailContent() {
       if (res.ok) {
         const data = await res.json();
         setPlayers(data.players || []);
+        if (data.slot) setSlotInfo(data.slot);
       }
     } catch {
       alert("Error al agregar arquero");
@@ -325,10 +351,12 @@ function TrainingSessionDetailContent() {
     }).format(amount);
   };
 
-  const PAYMENT_THRESHOLD = paymentThresholdForSession(dateStr, hour);
+  // Pre-ledger sessions (before LEDGER_FROM) fall back to the legacy
+  // threshold; the API computes owes_now from the ledger for the rest.
+  const PAYMENT_THRESHOLD = paymentThresholdOverride(dateStr, hour) ?? 100000;
 
   const playerOwes = (p: PlayerWithAttendance) =>
-    p.payments < PAYMENT_THRESHOLD * (100 - p.scholarship) / 100;
+    p.owes_now ?? (p.payments < PAYMENT_THRESHOLD * (100 - p.scholarship) / 100);
 
   const jugadores = players
     .filter(p => p.section === "jugadores")
@@ -343,21 +371,39 @@ function TrainingSessionDetailContent() {
   const renderPlayerRow = (player: PlayerWithAttendance, bgColor: string, hidePayment = false) => {
     const owes = playerOwes(player);
     const statusIcon = owes ? "💸" : player.scholarship > 0 ? "🏦" : "💰";
-    const nameBgColor = !player.invitee && !player.paidMembershipDues ? "rgba(220, 38, 38, 0.45)" : bgColor;
+    const hasDebt = (player.debt ?? 0) > 0;
+    // The same red as unpaid membership dues: money owed to the club. The
+    // debt one opens a detail modal on tap.
+    const nameBgColor = hasDebt || (!player.invitee && !player.paidMembershipDues)
+      ? "rgba(220, 38, 38, 0.45)"
+      : bgColor;
     return (
       <React.Fragment key={player.id}>
         {/* Name */}
-        <div style={{
-          fontSize: "0.875rem",
-          fontWeight: 400,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          padding: "8px",
-          background: nameBgColor,
-          borderBottom: "1px solid rgba(255,255,255,0.05)"
-        }}>
+        <div
+          onClick={hasDebt ? () => setDebtModalPlayer(player) : undefined}
+          style={{
+            fontSize: "0.875rem",
+            fontWeight: 400,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            padding: "8px",
+            background: nameBgColor,
+            borderBottom: "1px solid rgba(255,255,255,0.05)",
+            cursor: hasDebt ? "pointer" : undefined,
+          }}
+        >
           {player.last_name}, {player.name}
+          {(player.carryover_sessions ?? 0) > 0 && (
+            // One dot per bonified session from last month.
+            <span
+              title={`${player.carryover_sessions} sesión(es) bonificada(s)`}
+              style={{ color: "#4ade80", marginLeft: 4, letterSpacing: 2 }}
+            >
+              {"•".repeat(Math.min(3, player.carryover_sessions))}
+            </span>
+          )}
         </div>
 
         {/* Attendance emoji */}
@@ -577,10 +623,25 @@ function TrainingSessionDetailContent() {
                   ✕
                 </button>
                 <div style={{ display: "flex", gap: 6 }}>
-                  {[100, 75, 50, 30].map((amount) => (
+                  {(player.month_preset || player.session_preset
+                    ? [
+                      // The month's bundle for this player, carryover-adjusted.
+                      ...(player.month_preset
+                        ? [{ label: `Mes ${formatArs(player.month_preset)}`, amount: player.month_preset }]
+                        : []),
+                      ...(player.session_preset
+                        ? [{ label: `Sesión ${formatArs(player.session_preset)}`, amount: player.session_preset }]
+                        : []),
+                    ]
+                    // Pre-ledger sessions keep the historical amounts.
+                    : [100000, 75000, 50000, 30000].map((amount) => ({
+                      label: formatArs(amount),
+                      amount,
+                    }))
+                  ).map(({ label, amount }) => (
                     <button
-                      key={amount}
-                      onClick={() => setPendingPayment({ playerId: player.id, amount: amount * 1000 })}
+                      key={label}
+                      onClick={() => setPendingPayment({ playerId: player.id, amount })}
                       style={{
                         padding: "6px 10px",
                         borderRadius: 6,
@@ -590,7 +651,7 @@ function TrainingSessionDetailContent() {
                         fontSize: "0.85rem",
                       }}
                     >
-                      {amount}k
+                      {label}
                     </button>
                   ))}
                   <button
@@ -1048,6 +1109,58 @@ function TrainingSessionDetailContent() {
             )}
           </div>
         </div>
+
+        {/* Debt detail modal, opened by tapping a red (indebted) player name. */}
+        {debtModalPlayer && (
+          <div
+            onClick={() => setDebtModalPlayer(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.6)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 100,
+              padding: 20,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                maxWidth: 380,
+                width: "100%",
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,0.18)",
+                background: "#261c1c",
+                padding: 20,
+              }}
+            >
+              <p style={{ fontSize: "1rem", fontWeight: 600, margin: 0 }}>
+                {debtModalPlayer.last_name}, {debtModalPlayer.name}
+              </p>
+              <p style={{ marginTop: 8, fontSize: "1.2rem", fontWeight: 700, color: "#f87171" }}>
+                Debe {formatArs(debtModalPlayer.debt)}
+              </p>
+              <div style={{ marginTop: 10, fontSize: "0.85rem", opacity: 0.85 }}>
+                {debtModalPlayer.debt_months.map((d) => (
+                  <div key={d.month} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
+                    <span>{monthNameEs(d.month)}</span>
+                    <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                      pagó {formatArs(d.paid)} de {formatArs(d.charge)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p style={{ marginTop: 10, fontSize: "0.75rem", opacity: 0.55 }}>
+                La deuda se descuenta automáticamente cuando el pago del mes supera el cargo.
+              </p>
+              <button onClick={() => setDebtModalPlayer(null)} style={{ marginTop: 12, width: "100%" }}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        )}
 
       </div>
     </ProtectedPage>

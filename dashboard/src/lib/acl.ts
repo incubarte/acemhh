@@ -13,6 +13,7 @@ const wheelPermissions: Permission[] = [
   { type: 'api', resource: '/api/players', method: 'GET' },
   { type: 'api', resource: '/api/players', method: 'POST' },
   { type: 'api', resource: '/api/training-sessions', method: 'GET' },
+  { type: 'api', resource: '/api/training-slots', method: 'GET' },
   { type: 'api', resource: '/api/training-sessions/attendance', method: 'POST' },
   { type: 'api', resource: '/api/training-sessions/payment', method: 'POST' },
   { type: 'api', resource: '/api/caja', method: 'GET' },

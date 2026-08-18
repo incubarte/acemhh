@@ -11,9 +11,9 @@ const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ??
 // cleanup by DNI cannot touch real rows.
 const TEST_PLAYER = { name: "Plwtest", last_name: "Multicat", dni: "99000101" };
 
-// Thursday after NEW_SCHEDULE_FROM: jue 22hs = cat-a + cat-b, jue 23hs = cat-c,
-// jue 21hs = youth.
-const THURSDAY = "2026-08-13";
+// A Thursday seeded in training_slots by the prices_and_training_slots
+// migration: 21hs = youth (goalies), 22hs = cat-a + cat-b, 23hs = cat-c.
+const THURSDAY = "2026-08-20";
 
 function admin(): SupabaseClient {
   return createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {

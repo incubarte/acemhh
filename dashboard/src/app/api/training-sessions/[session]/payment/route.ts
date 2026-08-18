@@ -43,7 +43,26 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
 
     const registeredBy = `${sess.first_name}${sess.last_name ? ` ${sess.last_name}` : ''} ${sess.username ? `(@${sess.username})` : ''} [id=${sess.id}]`.trim();
 
-    const { error } = await supabaseAdmin()
+    const s = supabaseAdmin();
+
+    // Anything up to one session's price is a per-session payment; more than
+    // that is a monthly. The tariff valid at the session's date decides.
+    const { data: price, error: priceError } = await s
+      .from("prices")
+      .select("session_price")
+      .lte("valid_from", isoDate)
+      .order("valid_from", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (priceError || !price) {
+      console.error("Price lookup failed:", priceError);
+      return new NextResponse("No price configured for this date", { status: 500 });
+    }
+
+    const isSession = amount <= Number(price.session_price);
+
+    const { error } = await s
       .from("payments")
       .insert([{
         id: paymentId,
@@ -51,9 +70,9 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
         registered_by: registeredBy,
         registered_by_user_id: sess.id,
         slot: genericSlot,
-        concept: amount <= 30000 ? "session" : "monthly",
+        concept: isSession ? "session" : "monthly",
         month: selectedMonth,
-        session: amount <= 30000 ? `${isoDate} ${hour}hs` : null,
+        session: isSession ? `${isoDate} ${hour}hs` : null,
         amount,
         is_cash: true,
       }]);

@@ -15,10 +15,15 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
+    activeMonths,
     buildPlayerSection,
+    computeLedger,
     currentMonthBA,
     fetchMonthStatuses,
-    monthsWindow,
+    fetchPrices,
+    fetchTrainingSlots,
+    semesterActiveMonths,
+    trainingsFor,
 } from "./status.ts";
 
 const GraphVersionDefault = "v23.0";
@@ -59,6 +64,7 @@ type PlayerLink = {
     last_name: string;
     categories: string[];
     invitee: boolean;
+    goalkeeper: boolean;
     /** 0-100; at 100 the player pays nothing and only attendance is reported. */
     scholarship: number;
     /** "self" when it is the player's own phone, "guardian" when it is their tutor's. */
@@ -287,7 +293,7 @@ async function lookupPlayers(waId: string): Promise<PlayerLink[]> {
     // waId is all digits (Meta strips the +), so it is safe inside the filter.
     const { data, error } = await supabaseAdmin
         .from("players")
-        .select("id,name,last_name,categories,invitee,scholarship,phone,guardian_phone")
+        .select("id,name,last_name,categories,invitee,player_type,scholarship,phone,guardian_phone")
         .or(`phone.eq.${waId},guardian_phone.eq.${waId}`);
 
     if (error) {
@@ -301,6 +307,7 @@ async function lookupPlayers(waId: string): Promise<PlayerLink[]> {
         last_name: p.last_name,
         categories: p.categories,
         invitee: p.invitee,
+        goalkeeper: p.player_type === "goalkeeper",
         scholarship: p.scholarship ?? 0,
         relation: p.phone === waId ? "self" as const : "guardian" as const,
     }));
@@ -361,13 +368,30 @@ async function handleIncoming(incoming: Incoming) {
     const name = admin?.first_name ?? self?.name ?? null;
     const sections: string[] = [name ? `Hola ${name}!` : "Hola!"];
 
-    const months = monthsWindow(currentMonthBA());
+    // Agenda and tariffs live in the database (training_slots, prices). The
+    // ledger runs over the semester: debt accumulates, and last month's
+    // bonified sessions apply to the current one; the reply displays the last
+    // three months plus the balance lines.
+    const slots = players.length > 0 ? await fetchTrainingSlots(supabaseAdmin) : [];
+    const months = semesterActiveMonths(currentMonthBA(), activeMonths(slots));
     if (months.length > 0) {
+        const prices = await fetchPrices(supabaseAdmin);
         const reportFor = async (player: PlayerLink): Promise<string | null> => {
-            const statuses = await fetchMonthStatuses(supabaseAdmin, player.id, months);
+            // n is per slot: every player of a category shares their slot's
+            // training count, so they all pay the same — carryover is the
+            // only per-player variable.
+            const trainings = trainingsFor(slots, player.categories, player.goalkeeper);
+            const statuses = await fetchMonthStatuses(
+                supabaseAdmin,
+                player.id,
+                months,
+                prices,
+                trainings,
+            );
+            const ledger = computeLedger(statuses, player.scholarship);
             const isSelf = player.relation === "self";
             return buildPlayerSection(
-                statuses,
+                ledger,
                 isSelf
                     ? "Registro de tus pagos en los últimos meses:"
                     : `Registro de pagos de ${player.name}:`,

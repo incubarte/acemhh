@@ -77,11 +77,17 @@ Whatever the message says, the sender gets one reply, composed by `handleIncomin
 
 - **Player** (wa_id matches `players.phone`): greeting plus their payment/attendance
   record for the last up-to-3 active months of the current semester. The activity
-  agenda is the `ACTIVE_MONTHS` list in `whatsapp-webhook/status.ts` — extend it each
-  semester; months not listed there (e.g. July) never appear. Each month line reads
-  attendance / payment, and the icon says whether the money covers the attendance
-  (a monthly payment always does; partial payments cover `total / SESSION_PRICE`
-  sessions). Full-scholarship players only get their attendance reported.
+  agenda derives from the `training_slots` table (a month is active when it has at
+  least one training), and tariffs come from the `prices` table: singles vs the
+  prepaid rate for buying a whole month, whose price is therefore the slot's
+  trainings x prepaid rate (no bundle under 2 trainings). Each month line reads
+  attendance / payment; the icon reflects the semester ledger: prepaid months are
+  use-it-or-lose-it, unpaid attendance becomes single-rate debt, payments settle
+  the current month first and old debt next, and only money paid beyond the
+  month's capacity (the club's fault: a holiday miscount, a cancelled training)
+  becomes bonified sessions for the following month. Closing lines report
+  bonified sessions and "Deuda pendiente". Full-scholarship players only get
+  their attendance reported.
 - **Guardian** (wa_id matches `players.guardian_phone`): one section per player in
   their care, in third person.
 - **Admin** (wa_id matches `users.phone`): greeting plus a single-use magic link into

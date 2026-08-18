@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
-import { categoriesForSlot, isGoalkeeperFriendlySlot } from "@/lib/schedule";
+import {
+  LEDGER_FROM,
+  ledgerStep,
+  MinBundleTrainings,
+  priceFor,
+  runLedger,
+  trainingsFor,
+  type MonthActivity,
+} from "@/lib/ledger";
 
 function toSpecificSlot(isoDate: string, hour: string): string {
   return `${isoDate} ${hour}hs`;
@@ -35,14 +43,27 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
 
     const specificSlot = toSpecificSlot(isoDate, hour);
     const genericSlot = toGenericSlot(isoDate, hour);
-    const cats = categoriesForSlot(isoDate, genericSlot);
     const selectedMonth = isoDate.substring(0, 7);
 
-    if (cats.length === 0) {
+    const s = supabaseAdmin();
+
+    // The agenda lives in training_slots; a date/hour without a row (e.g. a
+    // holiday) is not a valid session.
+    const { data: slot, error: slotError } = await s
+      .from("training_slots")
+      .select("categories,goalies")
+      .eq("date", isoDate)
+      .eq("hour", Number(hour))
+      .maybeSingle();
+
+    if (slotError) {
+      console.error(slotError);
+      return new NextResponse("Error fetching slot", { status: 500 });
+    }
+    if (!slot) {
       return new NextResponse("Invalid slot", { status: 400 });
     }
-
-    const s = supabaseAdmin();
+    const cats = slot.categories;
 
     // Fetch A: all players that belong to any of the slot's categories and train.
     // A player appears in the sessions of every category they belong to.
@@ -147,7 +168,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
 
     // On goalkeeper-friendly slots, every goalkeeper shows up in the arqueros
     // section regardless of their category.
-    if (isGoalkeeperFriendlySlot(genericSlot)) {
+    if (slot.goalies) {
       const { data: allGoalkeepers, error: gkError } = await s
         .from("players")
         .select("*")
@@ -211,7 +232,128 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
       }
     }
 
-    return NextResponse.json({ players: result });
+    // Ledger enrichment (lib/ledger.ts): each player's debt, bonified
+    // sessions and this month's payment presets, from their history since
+    // LEDGER_FROM. Sessions older than that keep the legacy threshold logic
+    // client-side.
+    const semStart = Number(parts[1]) <= 6 ? `${parts[0]}-01` : `${parts[0]}-07`;
+    const carryFrom = semStart > LEDGER_FROM ? semStart : LEDGER_FROM;
+    const extras = new Map<string, Record<string, unknown>>();
+
+    if (selectedMonth >= LEDGER_FROM && result.length > 0) {
+      const ids = Array.from(knownIds);
+      const [pricesRes, slotsRes, payRes, attRes] = await Promise.all([
+        s.from("prices")
+          .select("valid_from,session_price,prepaid_session_price")
+          .order("valid_from"),
+        s.from("training_slots")
+          .select("date,categories,goalies")
+          .gte("date", `${carryFrom}-01`)
+          .lte("date", `${selectedMonth}-31`),
+        s.from("payments")
+          .select("player_id,month,concept,amount")
+          .in("player_id", ids)
+          .gte("month", carryFrom)
+          .lte("month", selectedMonth)
+          .in("concept", ["monthly", "session"]),
+        s.from("attendances")
+          .select("player_id,session")
+          .in("player_id", ids)
+          .eq("attended", true)
+          .gte("session", `${carryFrom}-01`),
+      ]);
+
+      const ledgerError = pricesRes.error ?? slotsRes.error ?? payRes.error ?? attRes.error;
+      if (ledgerError || (pricesRes.data ?? []).length === 0) {
+        // The roster is useful without the ledger; log and move on.
+        console.error("Ledger lookup failed:", ledgerError);
+      } else {
+        const prices = (pricesRes.data ?? []).map((p) => ({
+          valid_from: String(p.valid_from),
+          session_price: Number(p.session_price),
+          prepaid_session_price: Number(p.prepaid_session_price),
+        }));
+        const slotDays = (slotsRes.data ?? []).map((r) => ({
+          date: String(r.date),
+          categories: (r.categories ?? []) as string[],
+          goalies: Boolean(r.goalies),
+        }));
+
+        const byPlayer = new Map<string, Map<string, MonthActivity>>();
+        const activityOf = (playerId: string, month: string): MonthActivity => {
+          if (!byPlayer.has(playerId)) byPlayer.set(playerId, new Map());
+          const months = byPlayer.get(playerId)!;
+          if (!months.has(month)) {
+            months.set(month, { attended: 0, paidMonthly: false, totalPaid: 0 });
+          }
+          return months.get(month)!;
+        };
+
+        for (const p of payRes.data ?? []) {
+          const a = activityOf(p.player_id, p.month);
+          a.totalPaid += Number(p.amount);
+          if (p.concept === "monthly") a.paidMonthly = true;
+        }
+        for (const a of attRes.data ?? []) {
+          const month = String(a.session).slice(0, 7);
+          if (month <= selectedMonth) activityOf(a.player_id, month).attended += 1;
+        }
+
+        for (const player of result) {
+          const playerId = player.id as string;
+          const scholarship = Number(player.scholarship) || 0;
+          const trainings = trainingsFor(
+            slotDays,
+            (player.categories ?? []) as string[],
+            player.player_type === "goalkeeper",
+          );
+          const byMonth = byPlayer.get(playerId) ?? new Map<string, MonthActivity>();
+          const historyMonths = [...new Set([...trainings.keys(), ...byMonth.keys()])]
+            .filter((m) => m >= carryFrom && m < selectedMonth)
+            .sort();
+
+          const { state, rows } = runLedger(historyMonths, byMonth, trainings, prices, scholarship);
+
+          const price = priceFor(prices, selectedMonth);
+          const nMonth = trainings.get(selectedMonth) ?? 0;
+          const activityNow = byMonth.get(selectedMonth) ??
+            { attended: 0, paidMonthly: false, totalPaid: 0 };
+          const now = ledgerStep(state, activityNow, price, nMonth, scholarship);
+
+          const k = (100 - scholarship) / 100;
+          const prepaidUnit = Math.round(price.prepaid_session_price * k);
+          extras.set(playerId, {
+            carryover_sessions: state.carryoverIn,
+            debt: state.debt,
+            debt_months: rows
+              .filter((r) => r.charge > r.paid)
+              .map((r) => ({ month: r.month, charge: r.charge, paid: r.paid })),
+            month_preset: nMonth >= MinBundleTrainings
+              ? Math.max(0, nMonth - state.carryoverIn) * prepaidUnit
+              : null,
+            session_preset: Math.round(price.session_price * k),
+            owes_now: now.charge > activityNow.totalPaid,
+          });
+        }
+      }
+    }
+
+    const ledgerDefaults = {
+      carryover_sessions: 0,
+      debt: 0,
+      debt_months: [],
+      month_preset: null,
+      session_preset: null,
+      owes_now: null,
+    };
+
+    return NextResponse.json({
+      players: result.map((p) => ({
+        ...p,
+        ...(extras.get(p.id as string) ?? ledgerDefaults),
+      })),
+      slot: { categories: cats, goalies: slot.goalies },
+    });
   } catch (error) {
     console.error(error);
     return new NextResponse("Internal server error", { status: 500 });
