@@ -58,7 +58,7 @@ test.describe("Pixel 7 (Blink, como Android Chrome)", () => {
   });
   test.afterAll(cleanup);
 
-  test("long-press con jitter y drag al arco marca presente", async ({ page }) => {
+  test("deslizar la ruedita marca presente", async ({ page }) => {
     await page.request.post("/api/auth/dev");
     await page.goto(`/training-sessions-new/${SESSION}`);
     await expect(page.getByText("Presentes — total: 0")).toBeVisible();
@@ -66,42 +66,24 @@ test.describe("Pixel 7 (Blink, como Android Chrome)", () => {
     const row = page.locator(`[data-player-row="${ids.get("Androide03")}"]`);
     await row.scrollIntoViewIfNeeded();
     const box = (await row.boundingBox())!;
-    const startX = box.x + box.width / 2;
-    const startY = box.y + box.height / 2;
+    const startX = box.x + 20;
+    const y = box.y + box.height / 2;
+    const distance = box.width * 0.8;
 
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchStart",
-      touchPoints: [{ x: startX, y: startY }],
+      touchPoints: [{ x: startX, y }],
     });
-
-    // Finger jitter during the hold, like real skin contact.
-    for (const d of [2, -2, 1, -1, 2]) {
-      await page.waitForTimeout(180);
+    for (let i = 1; i <= 14; i++) {
       await cdp.send("Input.dispatchTouchEvent", {
         type: "touchMove",
-        touchPoints: [{ x: startX + d, y: startY + d }],
+        touchPoints: [{ x: startX + (distance * i) / 14, y }],
       });
+      await page.waitForTimeout(40);
     }
-    await page.waitForTimeout(400);
-
-    const goal = page.getByText(/Cambiar a PRESENTE/);
-    await expect(goal).toBeVisible();
-
-    const goalBox = (await goal.boundingBox())!;
-    const endX = goalBox.x + goalBox.width / 2;
-    const endY = goalBox.y + goalBox.height / 2;
-    for (let i = 1; i <= 15; i++) {
-      await cdp.send("Input.dispatchTouchEvent", {
-        type: "touchMove",
-        touchPoints: [{
-          x: startX + ((endX - startX) * i) / 15,
-          y: startY + ((endY - startY) * i) / 15,
-        }],
-      });
-      await page.waitForTimeout(16);
-    }
-    await expect(goal).toBeVisible(); // survived the whole move
+    await expect(page.getByTestId("attendance-wheel")).toBeVisible();
+    await page.waitForTimeout(250);
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
 
     await expect(page.getByText("Presentes — total: 1")).toBeVisible();
@@ -127,9 +109,8 @@ test.describe("Pixel 7 (Blink, como Android Chrome)", () => {
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
 
     // The permanent non-passive blocker must not kill normal scrolling: the
-    // page really moved, and no goal ever appeared.
+    // page really moved, and the wheel never woke up.
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(50);
-    await page.waitForTimeout(1200);
-    await expect(page.getByText(/Cambiar a/)).toHaveCount(0);
+    await expect(page.getByTestId("attendance-wheel")).toHaveCount(0);
   });
 });

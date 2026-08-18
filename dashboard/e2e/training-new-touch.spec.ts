@@ -1,7 +1,7 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-// Real-touch regression for the drag-to-goal gesture. Mouse events skip the
+// Real-touch regression for the attendance wheel. Mouse events skip the
 // browser's touch pipeline entirely (touch-action, scroll intent,
 // pointercancel), so this suite drives Chromium through CDP touch events —
 // the same path a finger takes on a phone.
@@ -20,117 +20,119 @@ function admin(): SupabaseClient {
   });
 }
 
-let targetId = "";
+const ids = new Map<string, string>();
 
 async function cleanup() {
   const s = admin();
   const { data } = await s.from("players").select("id").eq("last_name", LAST);
-  const ids = (data ?? []).map((p) => p.id);
-  if (ids.length === 0) return;
-  await s.from("attendances").delete().in("player_id", ids);
-  await s.from("players").delete().in("id", ids);
+  const found = (data ?? []).map((p) => p.id);
+  if (found.length === 0) return;
+  await s.from("attendances").delete().in("player_id", found);
+  await s.from("players").delete().in("id", found);
 }
 
-test.describe("gesto táctil real", () => {
+async function openPage(page: Page) {
+  await page.request.post("/api/auth/dev");
+  await page.goto(`/training-sessions-new/${SESSION}`);
+  await expect(page.getByText(/Presentes — total/)).toBeVisible();
+}
+
+test.describe("ruedita táctil real", () => {
   test.use({ hasTouch: true, viewport: { width: 390, height: 664 } });
+  test.describe.configure({ mode: "serial" });
 
   test.beforeAll(async () => {
     await cleanup();
     const s = admin();
-    const { data, error } = await s.from("players")
-      .insert([{
-        name: "Objetivo",
+    const { data: players, error } = await s.from("players")
+      .insert(["Lento", "Rapido", "Quieto"].map((name, i) => ({
+        name,
         last_name: LAST,
-        dni: "99000701",
+        dni: `9900070${i + 1}`,
         categories: ["cat-b"],
         player_type: "player",
         trains: false,
         invitee: false,
-      }])
-      .select("id")
-      .single();
+      })))
+      .select("id,name");
     if (error) throw new Error(JSON.stringify(error));
-    targetId = data.id;
+    for (const p of players!) ids.set(p.name, p.id);
 
-    const { error: attError } = await s.from("attendances").insert([
-      { player_id: targetId, session: PREV_SESSION_STR, attended: true },
-    ]);
+    const { error: attError } = await s.from("attendances").insert(
+      players!.map((p) => ({ player_id: p.id, session: PREV_SESSION_STR, attended: true })),
+    );
     if (attError) throw new Error(JSON.stringify(attError));
   });
   test.afterAll(cleanup);
 
-  test("long-press táctil y drag al arco marca presente", async ({ page }) => {
-    await page.request.post("/api/auth/dev");
-    await page.goto(`/training-sessions-new/${SESSION}`);
-    await expect(page.getByText("Presentes — total: 0")).toBeVisible();
+  test("swipe lento pasando la mitad marca presente", async ({ page }) => {
+    await openPage(page);
 
-    const row = page.locator(`[data-player-row="${targetId}"]`);
+    const row = page.locator(`[data-player-row="${ids.get("Lento")}"]`);
     const box = (await row.boundingBox())!;
-    const startX = box.x + box.width / 2;
-    const startY = box.y + box.height / 2;
+    const startX = box.x + 20;
+    const y = box.y + box.height / 2;
+    const distance = box.width * 0.8;
 
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchStart",
-      touchPoints: [{ x: startX, y: startY }],
+      touchPoints: [{ x: startX, y }],
     });
-
-    // A real finger jitters a few px during the hold. On iOS Safari, if these
-    // sub-slop touchmoves go unprevented the whole gesture gets committed to
-    // native scrolling and the later drag dies with a pointercancel — so the
-    // blocker must be preventing from the very first move.
-    const jitter = [2, -1, 3, -2, 1];
-    for (const d of jitter) {
-      await page.waitForTimeout(180);
+    for (let i = 1; i <= 14; i++) {
       await cdp.send("Input.dispatchTouchEvent", {
         type: "touchMove",
-        touchPoints: [{ x: startX + d, y: startY + d }],
+        touchPoints: [{ x: startX + (distance * i) / 14, y }],
       });
+      await page.waitForTimeout(40);
     }
-    await page.waitForTimeout(400);
-    const goal = page.getByText(/Cambiar a PRESENTE/);
-    await expect(goal).toBeVisible();
-
-    // Drag toward the goal in small steps, like a finger would.
-    const goalBox = (await goal.boundingBox())!;
-    const endX = goalBox.x + goalBox.width / 2;
-    const endY = goalBox.y + goalBox.height / 2;
-    const steps = 15;
-    for (let i = 1; i <= steps; i++) {
-      await cdp.send("Input.dispatchTouchEvent", {
-        type: "touchMove",
-        touchPoints: [{
-          x: startX + ((endX - startX) * i) / steps,
-          y: startY + ((endY - startY) * i) / steps,
-        }],
-      });
-      await page.waitForTimeout(16);
-    }
-
-    // The gesture must have survived the whole move (no pointercancel).
-    await expect(goal).toBeVisible();
-
+    await expect(page.getByTestId("attendance-wheel")).toBeVisible();
+    await page.waitForTimeout(250); // release with ~zero velocity
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
 
     await expect(page.getByText("Presentes — total: 1")).toBeVisible();
     await expect(
-      page.getByTestId("section-presentes").getByText(`${LAST}, Objetivo`),
+      page.getByTestId("section-presentes").getByText(`${LAST}, Lento`),
     ).toBeVisible();
   });
 
-  test("mover el dedo enseguida scrollea y no dispara el arco", async ({ page }) => {
-    await page.request.post("/api/auth/dev");
-    await page.goto(`/training-sessions-new/${SESSION}`);
-    await expect(page.getByText(/Presentes — total/)).toBeVisible();
+  test("flick corto y veloz encastra en el imán y marca presente", async ({ page }) => {
+    await openPage(page);
 
-    const row = page.locator(`[data-player-row="${targetId}"]`);
+    const row = page.locator(`[data-player-row="${ids.get("Rapido")}"]`);
+    const box = (await row.boundingBox())!;
+    const startX = box.x + 20;
+    const y = box.y + box.height / 2;
+
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x: startX, y }],
+    });
+    // ~110px in ~64ms: far short of half the row, but fast — the magnet
+    // must carry it into the PRESENTE detent.
+    for (let i = 1; i <= 4; i++) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x: startX + i * 28, y }],
+      });
+      await page.waitForTimeout(16);
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+
+    await expect(page.getByText("Presentes — total: 2")).toBeVisible();
+  });
+
+  test("swipe vertical scrollea sin despertar la ruedita", async ({ page }) => {
+    await openPage(page);
+
+    const row = page.locator(`[data-player-row="${ids.get("Quieto")}"]`);
     const box = (await row.boundingBox())!;
     const x = box.x + box.width / 2;
     let y = box.y + box.height / 2;
 
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
-    // Immediate vertical movement = scroll intent.
     for (let i = 0; i < 8; i++) {
       y -= 20;
       await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y }] });
@@ -138,7 +140,10 @@ test.describe("gesto táctil real", () => {
     }
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
 
-    await page.waitForTimeout(1300);
-    await expect(page.getByText(/Cambiar a/)).toHaveCount(0);
+    await expect(page.getByTestId("attendance-wheel")).toHaveCount(0);
+    // Quieto stays absent.
+    await expect(
+      page.getByTestId("section-ausentes").getByText(`${LAST}, Quieto`),
+    ).toBeVisible();
   });
 });

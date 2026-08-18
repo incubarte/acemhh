@@ -10,11 +10,13 @@ export default defineConfig({
   workers: 1,
   reporter: "list",
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: "http://localhost:3111",
   },
   webServer: {
-    command: "npm run dev",
-    url: "http://localhost:3000",
+    // A dedicated port: 3000 is often taken by another project's dev server,
+    // and reuseExistingServer would happily point the suite at the wrong app.
+    command: "npm run dev -- -p 3111",
+    url: "http://localhost:3111",
     reuseExistingServer: true,
     timeout: 120_000,
   },

@@ -146,22 +146,25 @@ function row(page: Page, name: string) {
   return page.locator(`[data-player-row="${ids.get(name)}"]`);
 }
 
-async function longPressAndDrag(page: Page, name: string, dropOnGoal: boolean) {
+/** Slides the attendance wheel: right by `fraction` of the row width, slow
+ * (release velocity ~0), so the majority-area rule decides. */
+async function slideWheel(page: Page, name: string, fraction: number) {
   const box = (await row(page, name).boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const startX = box.x + 20;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(startX, y);
   await page.mouse.down();
-  // The goal bar appears after the 1s long-press.
-  await page.waitForTimeout(1200);
-  await expect(page.getByText(/Cambiar a/)).toBeVisible();
-
-  const goal = (await page.getByText(/Cambiar a/).boundingBox())!;
-  if (dropOnGoal) {
-    await page.mouse.move(goal.x + goal.width / 2, goal.y + goal.height / 2, { steps: 5 });
-  } else {
-    // Anywhere clearly outside the goal bar.
-    await page.mouse.move(goal.x + goal.width / 2, goal.y - 150, { steps: 5 });
+  const distance = box.width * fraction;
+  for (let i = 1; i <= 10; i++) {
+    await page.mouse.move(startX + (distance * i) / 10, y);
+    await page.waitForTimeout(30);
   }
+  await expect(page.getByTestId("attendance-wheel")).toBeVisible();
+  // Pause so the release velocity is ~zero.
+  await page.waitForTimeout(250);
   await page.mouse.up();
+  // Wait for the spring to settle and the wheel to unmount.
+  await expect(page.getByTestId("attendance-wheel")).toHaveCount(0);
 }
 
 test.describe.configure({ mode: "serial" });
@@ -202,10 +205,10 @@ test("clasifica presentes por pago y ausentes por historial, ignorando trains", 
   await expect(ausentes.getByText(`${LAST}, Otracategoria`)).toHaveCount(0);
 });
 
-test("long-press y drag al arco marca presente", async ({ page }) => {
+test("deslizar la ruedita más de la mitad marca presente", async ({ page }) => {
   await openPage(page);
 
-  await longPressAndDrag(page, "Reciente", true);
+  await slideWheel(page, "Reciente", 0.8);
 
   await expect(page.getByText("Presentes — total: 4")).toBeVisible();
   await expect(
@@ -213,12 +216,12 @@ test("long-press y drag al arco marca presente", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("soltar fuera del arco no cambia nada", async ({ page }) => {
+test("un deslizamiento corto vuelve atrás sin cambiar nada", async ({ page }) => {
   await openPage(page);
 
-  await longPressAndDrag(page, "Mensual", false);
+  await slideWheel(page, "Mensual", 0.3);
 
-  // Still present: the drop landed outside the goal.
+  // Still present: the wheel snapped back to its detent.
   await expect(page.getByText("Presentes — total: 4")).toBeVisible();
   await expect(
     page.getByTestId("section-presentes").getByText(`${LAST}, Mensual`),

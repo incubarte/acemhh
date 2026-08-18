@@ -48,18 +48,24 @@ function formatArs(amount: number) {
   return new Intl.NumberFormat("es-AR").format(amount);
 }
 
-const LongPressMs = 1000;
-const FlashMs = 250;
 const rowBorder = "1px solid rgba(255,255,255,0.07)";
 
-type DragState = {
-  player: RosterPlayer;
-  toPresent: boolean;
-  goalAt: "top" | "bottom";
-  overGoal: boolean;
-  /** Current pointer position: the name chip follows it. */
-  pos: { x: number; y: number };
+// ---- Attendance wheel (horizontal thumb-wheel toggle) ----
+// x is the wheel travel in px: 0 = current state centered, width = the other
+// state centered (committing the toggle on release).
+type WheelState = {
+  playerId: string;
+  attended: boolean;
+  x: number;
+  width: number;
 };
+
+/** Horizontal movement needed before the wheel engages (vs a tap). */
+const WheelSlop = 10;
+/** Release velocity (px/ms) that flicks to the next detent regardless of position. */
+const FlickVelocity = 0.4;
+const PresentGreen = "#15803d";
+const AbsentRed = "#b91c1c";
 
 function TrainingSessionNewContent() {
   const params = useParams();
@@ -82,26 +88,32 @@ function TrainingSessionNewContent() {
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{ id: string; name: string; last_name: string }[]>([]);
 
-  // Long-press drag
-  const [drag, setDrag] = useState<DragState | null>(null);
-  const [flash, setFlash] = useState<"ok" | "fail" | null>(null);
-  const dragRef = useRef<DragState | null>(null);
-  dragRef.current = drag;
-  const goalRef = useRef<HTMLDivElement | null>(null);
-  const pressRef = useRef<{ timer: number; x: number; y: number } | null>(null);
+  // Attendance wheel
+  const [wheel, setWheel] = useState<WheelState | null>(null);
+  // Live gesture bookkeeping, mutated at pointer-event rate.
+  const gestureRef = useRef<{
+    playerId: string;
+    attended: boolean;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    width: number;
+    engaged: boolean;
+    x: number;
+    /** Recent [time, x] samples for release velocity. */
+    samples: [number, number][];
+  } | null>(null);
+  const animRef = useRef<number | null>(null);
 
-  // Scroll blocker for the drag: a PERMANENT non-passive touchmove listener,
-  // registered at mount and inert unless a row press is pending or a drag is
-  // active. It must pre-exist the touch: iOS Safari decides at touchstart
-  // whether touchmove is cancelable, so a listener added inside pointerdown
-  // (mid-touchstart) arrives too late and the same finger scrolls the page —
-  // while a second finger, whose touch starts after registration, can drag.
-  // Preventing sub-slop moves during the press is harmless (they are below
-  // the browser's own scroll threshold), and once early movement cancels the
-  // press the handler goes inert, so a real scroll swipe still wins.
+  // Scroll blocker while the wheel is engaged: a PERMANENT non-passive
+  // touchmove listener, registered at mount and inert otherwise. It must
+  // pre-exist the touch — iOS Safari decides at touchstart whether touchmove
+  // is cancelable, so a listener added mid-gesture never wins. Horizontal
+  // swipes on a touch-action:pan-y row are not the scroller's to take, but
+  // once engaged the finger may drift vertically and this keeps the page put.
   useEffect(() => {
     const fn = (e: TouchEvent) => {
-      if (pressRef.current || dragRef.current) e.preventDefault();
+      if (gestureRef.current?.engaged) e.preventDefault();
     };
     window.addEventListener("touchmove", fn, { passive: false });
     return () => window.removeEventListener("touchmove", fn);
@@ -134,94 +146,118 @@ function TrainingSessionNewContent() {
     return res.ok;
   };
 
-  // ---- Long-press + drag-to-goal ----
+  // ---- Attendance wheel gesture ----
 
-  const cancelPress = () => {
-    if (pressRef.current) {
-      window.clearTimeout(pressRef.current.timer);
-      pressRef.current = null;
+  const settleWheel = useCallback((releaseVx: number) => {
+    const g = gestureRef.current;
+    gestureRef.current = null;
+    if (!g || !g.engaged) {
+      setWheel(null);
+      return;
     }
-  };
 
-  const finishDrag = useCallback(async (clientX: number, clientY: number) => {
-    const current = dragRef.current;
-    setDrag(null);
-    if (!current) return;
+    // Magnetic detents: a flick snaps to the next section in its direction
+    // (it never spins past — there is no further detent); otherwise whichever
+    // section covers most of the row wins.
+    const target = releaseVx > FlickVelocity
+      ? g.width
+      : releaseVx < -FlickVelocity
+      ? 0
+      : (g.x > g.width / 2 ? g.width : 0);
 
-    const rect = goalRef.current?.getBoundingClientRect();
-    const overGoal = !!rect &&
-      clientX >= rect.left && clientX <= rect.right &&
-      clientY >= rect.top && clientY <= rect.bottom;
-
-    if (overGoal) {
-      await setAttendance(current.player.id, current.toPresent);
-      setFlash("ok");
-    } else {
-      setFlash("fail");
-    }
-    window.setTimeout(() => setFlash(null), FlashMs);
+    // Damped spring from the release position with the release velocity, so
+    // the wheel keeps its inertia and the magnet reels it into the detent.
+    let x = g.x;
+    let v = releaseVx;
+    let last = performance.now();
+    const k = 0.0004;
+    const c = 2 * Math.sqrt(k);
+    const step = (now: number) => {
+      const dt = Math.min(40, now - last);
+      last = now;
+      v += (target - x) * k * dt - c * v * dt;
+      x += v * dt;
+      if (Math.abs(target - x) < 1 && Math.abs(v) < 0.05) {
+        animRef.current = null;
+        setWheel(null);
+        if (target === g.width) setAttendance(g.playerId, !g.attended);
+        return;
+      }
+      setWheel({ playerId: g.playerId, attended: g.attended, x, width: g.width });
+      animRef.current = requestAnimationFrame(step);
+    };
+    animRef.current = requestAnimationFrame(step);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const activateDrag = (player: RosterPlayer, rowMidY: number, x: number, y: number) => {
-    pressRef.current = null;
-    const goalAt = rowMidY < window.innerHeight / 2 ? "bottom" : "top";
-    setDrag({ player, toPresent: !player.attended, goalAt, overGoal: false, pos: { x, y } });
-
-    const onMove = (e: PointerEvent) => {
-      const rect = goalRef.current?.getBoundingClientRect();
-      const over = !!rect &&
-        e.clientX >= rect.left && e.clientX <= rect.right &&
-        e.clientY >= rect.top && e.clientY <= rect.bottom;
-      setDrag((prev) =>
-        prev ? { ...prev, overGoal: over, pos: { x: e.clientX, y: e.clientY } } : prev
-      );
-    };
-    const detach = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onCancel);
-    };
-    const onUp = (e: PointerEvent) => {
-      detach();
-      finishDrag(e.clientX, e.clientY);
-    };
-    const onCancel = () => {
-      detach();
-      setDrag(null);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onCancel);
-  };
-
   const rowPressHandlers = (player: RosterPlayer) => ({
     onPointerDown: (e: React.PointerEvent) => {
-      if (dragRef.current) return;
-      cancelPress();
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const rowMidY = rect.top + rect.height / 2;
-      const { clientX, clientY } = e;
-      pressRef.current = {
-        x: clientX,
-        y: clientY,
-        timer: window.setTimeout(
-          () => activateDrag(player, rowMidY, clientX, clientY),
-          LongPressMs,
-        ),
+      if (animRef.current) {
+        cancelAnimationFrame(animRef.current);
+        animRef.current = null;
+        setWheel(null);
+      }
+      gestureRef.current = {
+        playerId: player.id,
+        attended: player.attended,
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        width: (e.currentTarget as HTMLElement).clientWidth,
+        engaged: false,
+        x: 0,
+        samples: [[performance.now(), 0]],
       };
     },
     onPointerMove: (e: React.PointerEvent) => {
-      const press = pressRef.current;
-      if (!press) return;
-      // Moving early means scrolling, not long-pressing. The slop stays under
-      // the browser's own scroll threshold (~10px) so releasing the blocker
-      // here still lets the native scroll take over the gesture.
-      if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > 8) cancelPress();
+      const g = gestureRef.current;
+      if (!g || g.pointerId !== e.pointerId) return;
+      const dx = e.clientX - g.startX;
+      const dy = e.clientY - g.startY;
+
+      if (!g.engaged) {
+        // Vertical intent: the scroller's gesture, not ours.
+        if (Math.abs(dy) > WheelSlop && Math.abs(dy) >= Math.abs(dx)) {
+          gestureRef.current = null;
+          return;
+        }
+        if (Math.abs(dx) > WheelSlop && Math.abs(dx) > Math.abs(dy)) {
+          g.engaged = true;
+          try {
+            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          } catch { /* capture is best-effort */ }
+        } else {
+          return;
+        }
+      }
+
+      // Rubber-band outside [0, width]: the wheel resists but hints.
+      const x = dx < 0 ? dx / 4 : dx > g.width ? g.width + (dx - g.width) / 4 : dx;
+      g.x = x;
+      const now = performance.now();
+      g.samples.push([now, x]);
+      while (g.samples.length > 2 && now - g.samples[0][0] > 90) g.samples.shift();
+      setWheel({ playerId: g.playerId, attended: g.attended, x, width: g.width });
     },
-    onPointerUp: () => cancelPress(),
-    onPointerLeave: () => cancelPress(),
-    onPointerCancel: () => cancelPress(),
+    onPointerUp: () => {
+      const g = gestureRef.current;
+      if (!g) return;
+      if (!g.engaged) {
+        gestureRef.current = null;
+        return;
+      }
+      const [t0, x0] = g.samples[0];
+      const [t1, x1] = g.samples[g.samples.length - 1];
+      // A finger that stopped before lifting releases with no inertia: stale
+      // samples must not flick the wheel.
+      const stale = performance.now() - t1 > 80;
+      settleWheel(!stale && t1 > t0 ? (x1 - x0) / (t1 - t0) : 0);
+    },
+    onPointerCancel: () => {
+      const engaged = gestureRef.current?.engaged;
+      gestureRef.current = null;
+      if (engaged) setWheel(null);
+    },
   });
 
   // ---- Payments ----
@@ -294,15 +330,29 @@ function TrainingSessionNewContent() {
       ? "rgba(220, 38, 38, 0.45)"
       : "transparent";
 
-    // No in-list drag styling: while dragging, the row sits under the dim
-    // backdrop and the floating row-clone in the overlay is the feedback.
+    const rowWheel = wheel && wheel.playerId === p.id ? wheel : null;
+    // The wheel strip is twice the row wide: the other state's cell on the
+    // left, the current one on the right. Sliding right (x: 0 → width)
+    // uncovers the other state; the gradient runs green at the center of
+    // PRESENTE, black at the seam, red at the center of AUSENTE.
+    const cellStyle: React.CSSProperties = {
+      width: "50%",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontWeight: 700,
+      fontSize: "0.85rem",
+      letterSpacing: "0.12em",
+      color: "#fff",
+    };
+
     return (
       <React.Fragment key={p.id}>
         <div
           data-player-row={p.id}
           {...rowPressHandlers(p)}
-          // The browser's own long-press UI (context menu, iOS callout) would
-          // steal the gesture before our timer fires.
+          // The browser's own long-press UI (context menu, iOS callout) must
+          // not interfere with the wheel gesture.
           onContextMenu={(e) => e.preventDefault()}
           style={{
             display: "flex",
@@ -314,8 +364,32 @@ function TrainingSessionNewContent() {
             userSelect: "none",
             WebkitUserSelect: "none",
             WebkitTouchCallout: "none",
+            position: "relative",
+            overflow: "hidden",
           }}
         >
+          {rowWheel && (
+            <div
+              data-testid="attendance-wheel"
+              style={{
+                position: "absolute",
+                top: 0,
+                bottom: 0,
+                left: 0,
+                width: "200%",
+                display: "flex",
+                zIndex: 5,
+                pointerEvents: "none",
+                transform: `translateX(${-rowWheel.width + rowWheel.x}px)`,
+                background: p.attended
+                  ? `linear-gradient(90deg, ${AbsentRed} 15%, #000 50%, ${PresentGreen} 85%)`
+                  : `linear-gradient(90deg, ${PresentGreen} 15%, #000 50%, ${AbsentRed} 85%)`,
+              }}
+            >
+              <div style={cellStyle}>{p.attended ? "AUSENTE" : "PRESENTE"}</div>
+              <div style={cellStyle}>{p.attended ? "PRESENTE" : "AUSENTE"}</div>
+            </div>
+          )}
           <span
             onClick={hasDebt ? () => setDebtModalPlayer(p) : undefined}
             style={{
@@ -486,81 +560,6 @@ function TrainingSessionNewContent() {
             </div>
           ))}
       </div>
-
-      {/* Drag overlay: dim backdrop, goal bar midway into the free half of
-          the screen, and a name chip following the finger. */}
-      {drag && (
-        <Overlay>
-        <div data-testid="drag-backdrop" style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 70,
-          background: "rgba(0,0,0,0.7)",
-        }} />
-        <div
-          ref={goalRef}
-          style={{
-            position: "fixed",
-            left: 10,
-            right: 10,
-            top: drag.goalAt === "top" ? "25%" : "75%",
-            transform: "translateY(-50%)",
-            height: 110,
-            zIndex: 75,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            borderRadius: 14,
-            border: drag.overGoal ? "3px solid #4ade80" : "2px dashed rgba(255,255,255,0.5)",
-            background: drag.overGoal ? "rgba(36, 179, 91, 0.45)" : "rgba(20, 30, 24, 0.95)",
-            fontSize: "1rem",
-            fontWeight: 700,
-            letterSpacing: "0.03em",
-          }}
-        >
-          🥅 Cambiar a {drag.toPresent ? "PRESENTE" : "AUSENTE"}
-        </div>
-        {/* Row clone following the finger: unmistakably "you are dragging
-            this row". Kept above the finger so it stays visible. */}
-        <div style={{
-          position: "fixed",
-          left: 12,
-          right: 12,
-          top: drag.pos.y - 54,
-          zIndex: 80,
-          pointerEvents: "none",
-          display: "flex",
-          alignItems: "center",
-          padding: "12px 14px",
-          borderRadius: 10,
-          border: "2px solid #4ade80",
-          background: "#14361f",
-          fontWeight: 600,
-          fontSize: "0.95rem",
-          boxShadow: "0 10px 28px rgba(0,0,0,0.65)",
-        }}>
-          {drag.player.last_name}, {drag.player.name}
-        </div>
-        </Overlay>
-      )}
-
-      {/* Full-screen feedback flash. */}
-      {flash && (
-        <Overlay>
-        <div style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 90,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: flash === "ok" ? "rgba(22, 101, 52, 0.85)" : "rgba(127, 29, 29, 0.85)",
-          fontSize: "min(40vw, 40vh)",
-        }}>
-          {flash === "ok" ? "✅" : "❌"}
-        </div>
-        </Overlay>
-      )}
 
       {/* Search popup: pick a player and mark them present. */}
       {searchOpen && (
