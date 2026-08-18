@@ -20,7 +20,7 @@ type RosterPlayer = {
   attended: boolean;
   payments: number;
   hasSessionPayment: boolean;
-  paidMonthlyThisMonth: boolean;
+  paidMonthlyForSlot: boolean;
   paidMembershipDues: boolean;
   qualifies: boolean;
   recent_attendance: boolean;
@@ -242,8 +242,11 @@ function TrainingSessionNewContent() {
   const pagoSesion = presentes.filter((p) => !p.bought_month && p.owes_now !== true);
 
   const ausentesTodos = jugadores.filter((p) => !p.attended);
+  // 2.1: a payment for this session, or the month bundle registered on this
+  // slot, links anyone here; 2.2: qualifying by category needs attendance in
+  // one of the slot's last 3 trainings.
   const ausentesBase = ausentesTodos.filter((p) =>
-    p.hasSessionPayment || p.bought_month || p.paidMonthlyThisMonth ||
+    p.hasSessionPayment || p.paidMonthlyForSlot ||
     (p.qualifies && p.recent_attendance)
   );
   const baseIds = new Set(ausentesBase.map((p) => p.id));

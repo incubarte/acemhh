@@ -54,6 +54,11 @@ async function seed() {
       mk("Deudor", "99000503"),
       mk("Reciente", "99000504"),
       mk("Fantasma", "99000505"),
+      // cat-c: does NOT qualify for this cat-a/cat-b slot.
+      { ...mk("Otracategoria", "99000506"), categories: ["cat-c"] },
+      { ...mk("Visitante", "99000507"), categories: ["cat-c"] },
+      // Qualifies, no attendance history, but bought this slot's bundle.
+      mk("Abonado", "99000508"),
     ])
     .select("id,name");
   if (error) throw new Error(JSON.stringify(error));
@@ -85,6 +90,41 @@ async function seed() {
     {
       id: crypto.randomUUID(),
       player_id: ids.get("Sesionista")!,
+      registered_by: "__test",
+      concept: "session",
+      session: SESSION_STR,
+      month: "2026-08",
+      amount: 30000,
+      is_cash: true,
+    },
+    // Otracategoria paid their OWN slot's month bundle: that belongs to
+    // their own slot's screen, not this one.
+    {
+      id: crypto.randomUUID(),
+      player_id: ids.get("Otracategoria")!,
+      registered_by: "__test",
+      concept: "monthly",
+      month: "2026-08",
+      slot: "jue 23hs",
+      amount: 75000,
+      is_cash: true,
+    },
+    // Abonado bought the bundle FOR this slot: a legit absentee even with no
+    // attendance history.
+    {
+      id: crypto.randomUUID(),
+      player_id: ids.get("Abonado")!,
+      registered_by: "__test",
+      concept: "monthly",
+      month: "2026-08",
+      slot: "jue 22hs",
+      amount: 75000,
+      is_cash: true,
+    },
+    // Visitante paid THIS session: must show even without qualifying.
+    {
+      id: crypto.randomUUID(),
+      player_id: ids.get("Visitante")!,
       registered_by: "__test",
       concept: "session",
       session: SESSION_STR,
@@ -148,8 +188,18 @@ test("clasifica presentes por pago y ausentes por historial, ignorando trains", 
   // until "Más jugadores...".
   await expect(ausentes.getByText(`${LAST}, Reciente`)).toBeVisible();
   await expect(ausentes.getByText(`${LAST}, Fantasma`)).toHaveCount(0);
+  // A player from another category who paid THIS session is a legit absentee,
+  // and so is one who bought the month bundle for this very slot...
+  await expect(ausentes.getByText(`${LAST}, Visitante`)).toBeVisible();
+  await expect(ausentes.getByText(`${LAST}, Abonado`)).toBeVisible();
+  // ...but one whose month bundle belongs to another slot is not linked to
+  // this one and must not appear at all.
+  await expect(ausentes.getByText(`${LAST}, Otracategoria`)).toHaveCount(0);
+
   await page.getByRole("button", { name: "Más jugadores..." }).click();
   await expect(ausentes.getByText(`${LAST}, Fantasma`)).toBeVisible();
+  // Not even in the expanded list: cat-c does not qualify for this slot.
+  await expect(ausentes.getByText(`${LAST}, Otracategoria`)).toHaveCount(0);
 });
 
 test("long-press y drag al arco marca presente", async ({ page }) => {

@@ -13,6 +13,15 @@ function toSpecificSlot(isoDate: string, hour: string): string {
   return `${isoDate} ${hour}hs`;
 }
 
+function toGenericSlot(isoDate: string, hour: string): string {
+  const date = new Date(`${isoDate}T${hour}:00`);
+  return date.toLocaleString("es-AR", {
+    weekday: "short",
+    hour: "numeric",
+    hour12: false,
+  }).replace(",", "") + "hs";
+}
+
 export const GET = withPermission('api', '/api/training-sessions', 'GET', async (sess, req) => {
   try {
     const url = new URL(req.url);
@@ -27,6 +36,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
     const isoDate = `${parts[0]}-${parts[1]}-${parts[2]}`;
     const hour = parts[3];
     const specificSlot = toSpecificSlot(isoDate, hour);
+    const genericSlot = toGenericSlot(isoDate, hour);
     const selectedMonth = isoDate.substring(0, 7);
     const sessionYear = parts[0];
 
@@ -62,11 +72,13 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
         ? s.from("players").select("*").eq("player_type", "goalkeeper")
         : Promise.resolve({ data: [], error: null }),
       s.from("attendances").select("player_id,attended").eq("session", specificSlot),
-      // The month's bundle is per player, whatever slot it was registered on.
+      // The month bundle FOR this slot: bundles registered on other slots
+      // belong to their own screen.
       s.from("payments")
         .select("player_id,amount")
         .eq("concept", "monthly")
-        .eq("month", selectedMonth),
+        .eq("month", selectedMonth)
+        .eq("slot", genericSlot),
       s.from("payments")
         .select("player_id,amount")
         .eq("concept", "session")
@@ -138,6 +150,9 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
     for (const p of categoryPlayersRes.data ?? []) byId.set(p.id, p);
     for (const p of goalkeepersRes.data ?? []) byId.set(p.id, p);
 
+    // Extras are players tied to THIS session: attendance, a payment for it,
+    // or the month's bundle registered on this very slot. Monthly payments on
+    // other slots never pull a player from another category in here.
     const extraIds = new Set<string>();
     for (const a of attendancesRes.data ?? []) {
       if (a.attended && !byId.has(a.player_id)) extraIds.add(a.player_id);
@@ -182,7 +197,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
           attended: attendanceMap.get(id) || false,
           payments: paymentMap.get(id) ?? 0,
           hasSessionPayment: hasSessionPaymentIds.has(id),
-          paidMonthlyThisMonth: monthlyPayerIds.has(id),
+          paidMonthlyForSlot: monthlyPayerIds.has(id),
           paidMembershipDues: paidDuesIds.has(id),
           qualifies: categories.some((c) => cats.includes(c)),
           recent_attendance: recentAttendees.has(id),
