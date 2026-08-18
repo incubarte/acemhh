@@ -90,15 +90,19 @@ function TrainingSessionNewContent() {
   const goalRef = useRef<HTMLDivElement | null>(null);
   const pressRef = useRef<{ timer: number; x: number; y: number } | null>(null);
 
-  // Scroll blocker for the drag. It must be registered at gesture start
-  // (pointerdown): browsers decide then whether touchmove will be cancelable,
-  // so a listener added when the long-press fires arrives too late and the
-  // native pan wins — the exact "it scrolls instead of dragging" failure.
+  // Scroll blocker for the drag. Registered at gesture start (pointerdown)
+  // and preventing from the FIRST touchmove: browsers — iOS Safari especially
+  // — commit a gesture to native scrolling as soon as any touchmove goes
+  // unprevented, and later preventDefaults are ignored (the drag then dies
+  // with a pointercancel). Preventing sub-slop moves is harmless: they are
+  // below the browser's own scroll threshold anyway, and if early movement
+  // exceeds our slop we cancel the press and stop preventing, so a real
+  // scroll swipe still wins.
   const blockerRef = useRef<((e: TouchEvent) => void) | null>(null);
   const addScrollBlocker = () => {
     if (blockerRef.current) return;
     const fn = (e: TouchEvent) => {
-      if (dragRef.current) e.preventDefault();
+      if (pressRef.current || dragRef.current) e.preventDefault();
     };
     blockerRef.current = fn;
     window.addEventListener("touchmove", fn, { passive: false });
@@ -221,8 +225,10 @@ function TrainingSessionNewContent() {
     onPointerMove: (e: React.PointerEvent) => {
       const press = pressRef.current;
       if (!press) return;
-      // Moving early means scrolling, not long-pressing.
-      if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > 12) cancelPress();
+      // Moving early means scrolling, not long-pressing. The slop stays under
+      // the browser's own scroll threshold (~10px) so releasing the blocker
+      // here still lets the native scroll take over the gesture.
+      if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > 8) cancelPress();
     },
     onPointerUp: () => cancelPress(),
     onPointerLeave: () => cancelPress(),
@@ -295,11 +301,12 @@ function TrainingSessionNewContent() {
 
   const renderRow = (p: RosterPlayer, opts: { payments?: boolean } = {}) => {
     const hasDebt = (p.debt ?? 0) > 0;
-    const dragging = drag?.player.id === p.id;
     const nameBg = hasDebt || (!p.invitee && !p.paidMembershipDues)
       ? "rgba(220, 38, 38, 0.45)"
       : "transparent";
 
+    // No in-list drag styling: while dragging, the row sits under the dim
+    // backdrop and the floating row-clone in the overlay is the feedback.
     return (
       <React.Fragment key={p.id}>
         <div
@@ -318,12 +325,6 @@ function TrainingSessionNewContent() {
             userSelect: "none",
             WebkitUserSelect: "none",
             WebkitTouchCallout: "none",
-            background: dragging ? "rgba(36, 179, 91, 0.25)" : undefined,
-            transform: dragging ? "scale(1.04)" : undefined,
-            boxShadow: dragging ? "0 6px 18px rgba(0,0,0,0.5)" : undefined,
-            transition: "transform 120ms ease, background 120ms ease",
-            position: dragging ? "relative" : undefined,
-            zIndex: dragging ? 60 : undefined,
           }}
         >
           <span
@@ -530,21 +531,24 @@ function TrainingSessionNewContent() {
         >
           🥅 Cambiar a {drag.toPresent ? "PRESENTE" : "AUSENTE"}
         </div>
+        {/* Row clone following the finger: unmistakably "you are dragging
+            this row". Kept above the finger so it stays visible. */}
         <div style={{
           position: "fixed",
-          left: drag.pos.x,
-          top: drag.pos.y,
-          transform: "translate(-50%, -140%)",
+          left: 12,
+          right: 12,
+          top: drag.pos.y - 54,
           zIndex: 80,
           pointerEvents: "none",
-          padding: "8px 14px",
-          borderRadius: 999,
-          background: "rgba(36, 179, 91, 0.95)",
-          color: "#0b1a10",
-          fontWeight: 700,
+          display: "flex",
+          alignItems: "center",
+          padding: "12px 14px",
+          borderRadius: 10,
+          border: "2px solid #4ade80",
+          background: "#14361f",
+          fontWeight: 600,
           fontSize: "0.95rem",
-          whiteSpace: "nowrap",
-          boxShadow: "0 8px 22px rgba(0,0,0,0.6)",
+          boxShadow: "0 10px 28px rgba(0,0,0,0.65)",
         }}>
           {drag.player.last_name}, {drag.player.name}
         </div>
