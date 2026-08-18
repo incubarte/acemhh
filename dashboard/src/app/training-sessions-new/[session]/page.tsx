@@ -53,9 +53,9 @@ const rowBorder = "1px solid rgba(255,255,255,0.07)";
 // ---- Attendance wheel (horizontal thumb-wheel toggle) ----
 // x is the wheel travel in px. Detents at -width, 0 and +width: 0 centers the
 // current state, either extreme centers the other one (committing the toggle
-// on release) — the wheel turns both ways.
-type WheelState = {
-  playerId: string;
+// on release) — the wheel turns both ways. One of these per row, keyed by
+// player id: pure visual state, decoupled from the gesture.
+type WheelVisual = {
   attended: boolean;
   x: number;
   width: number;
@@ -96,8 +96,27 @@ function TrainingSessionNewContent() {
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{ id: string; name: string; last_name: string }[]>([]);
 
-  // Attendance wheel
-  const [wheel, setWheel] = useState<WheelState | null>(null);
+  // Attendance wheels: per-row VISUAL state. The gesture itself lives only
+  // from pointerdown to pointerup (gestureRef, one finger); everything after
+  // the finger-up — the spring to a detent, the commit collapse — is feedback
+  // owned by its row, so several rows can animate while a new gesture runs.
+  const [wheels, setWheels] = useState<Map<string, WheelVisual>>(new Map());
+  const setRowWheel = (playerId: string, v: WheelVisual | null) =>
+    setWheels((prev) => {
+      const m = new Map(prev);
+      if (v) m.set(playerId, v);
+      else m.delete(playerId);
+      return m;
+    });
+  /** One rAF id per row animation, cancellable independently. */
+  const animsRef = useRef<Map<string, number>>(new Map());
+  const cancelRowAnim = (playerId: string) => {
+    const id = animsRef.current.get(playerId);
+    if (id !== undefined) {
+      cancelAnimationFrame(id);
+      animsRef.current.delete(playerId);
+    }
+  };
   // Live gesture bookkeeping, mutated at pointer-event rate.
   const gestureRef = useRef<{
     player: RosterPlayer;
@@ -106,6 +125,8 @@ function TrainingSessionNewContent() {
     pointerId: number;
     startX: number;
     startY: number;
+    /** Wheel travel already in place when the finger landed (regrab). */
+    baseX: number;
     width: number;
     height: number;
     engaged: boolean;
@@ -113,7 +134,6 @@ function TrainingSessionNewContent() {
     /** Recent [time, x] samples for release velocity. */
     samples: [number, number][];
   } | null>(null);
-  const animRef = useRef<number | null>(null);
 
   // ---- Transition period ----
   // Committed toggles don't re-render the roster immediately: the old row is
@@ -129,8 +149,6 @@ function TrainingSessionNewContent() {
   const reqSeqRef = useRef(0);
   const storedSeqRef = useRef(0);
   const lastTouchRef = useRef(0);
-  /** Finishes a commit collapse early if a new gesture starts meanwhile. */
-  const commitFlushRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const touch = () => {
@@ -197,7 +215,7 @@ function TrainingSessionNewContent() {
     const t = window.setInterval(() => {
       if (overridesRef.current.size === 0) return;
       if (performance.now() - lastTouchRef.current < 3000) return;
-      if (gestureRef.current || commitFlushRef.current) return;
+      if (gestureRef.current || animsRef.current.size > 0) return;
       if (inFlightRef.current > 0) return;
       const pending = pendingRosterRef.current;
       if (!pending) {
@@ -223,12 +241,14 @@ function TrainingSessionNewContent() {
   };
 
   // ---- Attendance wheel gesture ----
+  // The gesture ends at finger-up; settleWheel hands the row over to its own
+  // feedback animation and the gesture slot frees immediately.
 
   const settleWheel = useCallback((releaseVx: number) => {
     const g = gestureRef.current;
     gestureRef.current = null;
     if (!g || !g.engaged) {
-      setWheel(null);
+      if (g) setRowWheel(g.playerId, null);
       return;
     }
 
@@ -244,6 +264,7 @@ function TrainingSessionNewContent() {
 
     // Damped spring from the release position with the release velocity, so
     // the wheel keeps its inertia and the magnet reels it into the detent.
+    // The animation belongs to this row alone (animsRef keyed by player).
     let x = g.x;
     let v = releaseVx;
     let last = performance.now();
@@ -255,16 +276,16 @@ function TrainingSessionNewContent() {
       v += (target - x) * k * dt - c * v * dt;
       x += v * dt;
       if (Math.abs(target - x) < 1 && Math.abs(v) < 0.05) {
-        animRef.current = null;
+        animsRef.current.delete(g.playerId);
         if (target === 0) {
-          setWheel(null);
+          setRowWheel(g.playerId, null);
           return;
         }
 
         // Toggle landed. Goalies never change section: no collapse and no
         // reservation, just the write and its refresh.
         if (g.player.player_type === "goalkeeper") {
-          setWheel(null);
+          setRowWheel(g.playerId, null);
           setAttendance(g.playerId, !g.attended);
           return;
         }
@@ -280,30 +301,30 @@ function TrainingSessionNewContent() {
         );
         setAttendance(g.playerId, !g.attended);
 
-        // Keep the winning word on screen while the row shrinks away.
-        setWheel({
-          playerId: g.playerId,
+        // Keep the winning word on screen while the row shrinks away. This
+        // is feedback on an already-overridden row: nothing can interrupt it.
+        setRowWheel(g.playerId, {
           attended: g.attended,
           x: target,
           width: W,
           commit: { height: g.height, collapsed: false },
         });
         requestAnimationFrame(() =>
-          setWheel((w) => w?.commit ? { ...w, commit: { ...w.commit, collapsed: true } } : w)
+          setWheels((prev) => {
+            const w = prev.get(g.playerId);
+            if (!w?.commit) return prev;
+            const m = new Map(prev);
+            m.set(g.playerId, { ...w, commit: { ...w.commit, collapsed: true } });
+            return m;
+          })
         );
-        const finish = () => {
-          commitFlushRef.current = null;
-          window.clearTimeout(timer);
-          setWheel((w) => (w && w.playerId === g.playerId ? null : w));
-        };
-        const timer = window.setTimeout(finish, 240);
-        commitFlushRef.current = finish;
+        window.setTimeout(() => setRowWheel(g.playerId, null), 240);
         return;
       }
-      setWheel({ playerId: g.playerId, attended: g.attended, x, width: W });
-      animRef.current = requestAnimationFrame(step);
+      setRowWheel(g.playerId, { attended: g.attended, x, width: W });
+      animsRef.current.set(g.playerId, requestAnimationFrame(step));
     };
-    animRef.current = requestAnimationFrame(step);
+    animsRef.current.set(g.playerId, requestAnimationFrame(step));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -311,15 +332,13 @@ function TrainingSessionNewContent() {
     onPointerDown: (e: React.PointerEvent) => {
       // Payment controls keep their own tap semantics, wheel-free.
       if ((e.target as HTMLElement).closest("button,input,select")) return;
-      // A row still mid-collapse resolves instantly so states never overlap.
-      if (commitFlushRef.current) commitFlushRef.current();
       // Rows already toggled away (reserved elsewhere) take no new gestures.
       if (overridesRef.current.has(player.id)) return;
-      if (animRef.current) {
-        cancelAnimationFrame(animRef.current);
-        animRef.current = null;
-      }
+      // Regrabbing THIS row takes over from its own snap-back, resuming from
+      // wherever the wheel is; other rows' animations are untouched.
+      cancelRowAnim(player.id);
       const el = e.currentTarget as HTMLElement;
+      const baseX = wheels.get(player.id)?.x ?? 0;
       gestureRef.current = {
         player,
         playerId: player.id,
@@ -327,14 +346,15 @@ function TrainingSessionNewContent() {
         pointerId: e.pointerId,
         startX: e.clientX,
         startY: e.clientY,
+        baseX,
         width: el.clientWidth,
         height: el.getBoundingClientRect().height,
         engaged: false,
-        x: 0,
-        samples: [[performance.now(), 0]],
+        x: baseX,
+        samples: [[performance.now(), baseX]],
       };
       // The state word shows from the very finger-down.
-      setWheel({ playerId: player.id, attended: player.attended, x: 0, width: el.clientWidth });
+      setRowWheel(player.id, { attended: player.attended, x: baseX, width: el.clientWidth });
     },
     onPointerMove: (e: React.PointerEvent) => {
       const g = gestureRef.current;
@@ -346,7 +366,7 @@ function TrainingSessionNewContent() {
         // Vertical intent: the scroller's gesture, not ours.
         if (Math.abs(dy) > WheelSlop && Math.abs(dy) >= Math.abs(dx)) {
           gestureRef.current = null;
-          setWheel(null);
+          setRowWheel(g.playerId, null);
           return;
         }
         if (Math.abs(dx) > WheelSlop && Math.abs(dx) > Math.abs(dy)) {
@@ -361,19 +381,20 @@ function TrainingSessionNewContent() {
 
       // The wheel turns both ways; rubber-band beyond the detents at ±width.
       const W = g.width;
-      const x = dx > W ? W + (dx - W) / 4 : dx < -W ? -W + (dx + W) / 4 : dx;
+      const raw = g.baseX + dx;
+      const x = raw > W ? W + (raw - W) / 4 : raw < -W ? -W + (raw + W) / 4 : raw;
       g.x = x;
       const now = performance.now();
       g.samples.push([now, x]);
       while (g.samples.length > 2 && now - g.samples[0][0] > 90) g.samples.shift();
-      setWheel({ playerId: g.playerId, attended: g.attended, x, width: W });
+      setRowWheel(g.playerId, { attended: g.attended, x, width: W });
     },
     onPointerUp: () => {
       const g = gestureRef.current;
       if (!g) return;
       if (!g.engaged) {
         gestureRef.current = null;
-        setWheel(null);
+        setRowWheel(g.playerId, null);
         return;
       }
       const [t0, x0] = g.samples[0];
@@ -384,8 +405,9 @@ function TrainingSessionNewContent() {
       settleWheel(!stale && t1 > t0 ? (x1 - x0) / (t1 - t0) : 0);
     },
     onPointerCancel: () => {
+      const g = gestureRef.current;
       gestureRef.current = null;
-      setWheel((w) => (w?.commit ? w : null));
+      if (g) setRowWheel(g.playerId, null);
     },
   });
 
@@ -500,7 +522,7 @@ function TrainingSessionNewContent() {
 
   const renderRow = (p: RosterPlayer, opts: { payments?: boolean } = {}) => {
     const hasDebt = (p.debt ?? 0) > 0;
-    const rowWheel = wheel && wheel.playerId === p.id ? wheel : null;
+    const rowWheel = wheels.get(p.id) ?? null;
     const committing = rowWheel?.commit;
     // Already toggled away: the collapse ran, the reserved slot took over.
     if (overrides.has(p.id) && !rowWheel) return null;
