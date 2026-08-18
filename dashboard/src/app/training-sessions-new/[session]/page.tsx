@@ -371,15 +371,18 @@ function TrainingSessionNewContent() {
           {rowWheel && (
             <div
               data-testid="attendance-wheel"
+              // Inset to the name pill's height: the wheel reads as the row's
+              // content sliding, not a full-bleed band swallowing the padding.
               style={{
                 position: "absolute",
-                top: 0,
-                bottom: 0,
+                top: 9,
+                bottom: 10,
                 left: 0,
                 width: "200%",
                 display: "flex",
                 zIndex: 5,
                 pointerEvents: "none",
+                borderRadius: 6,
                 transform: `translateX(${-rowWheel.width + rowWheel.x}px)`,
                 background: p.attended
                   ? `linear-gradient(90deg, ${AbsentRed} 15%, #000 50%, ${PresentGreen} 85%)`
