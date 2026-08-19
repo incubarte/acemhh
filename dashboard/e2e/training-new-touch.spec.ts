@@ -33,7 +33,7 @@ async function cleanup() {
 
 async function openPage(page: Page) {
   await page.request.post("/api/auth/dev");
-  await page.goto(`/training-sessions-new/${SESSION}`);
+  await page.goto(`/training-sessions-beta/${SESSION}`);
   await expect(page.getByText(/Presentes — total/)).toBeVisible();
 }
 

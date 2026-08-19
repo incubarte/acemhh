@@ -60,7 +60,7 @@ test.describe("Pixel 7 (Blink, como Android Chrome)", () => {
 
   test("deslizar la ruedita marca presente", async ({ page }) => {
     await page.request.post("/api/auth/dev");
-    await page.goto(`/training-sessions-new/${SESSION}`);
+    await page.goto(`/training-sessions-beta/${SESSION}`);
     await expect(page.getByText("Presentes — total: 0")).toBeVisible();
 
     const row = page.locator(`[data-player-row="${ids.get("Androide03")}"]`);
@@ -91,7 +91,7 @@ test.describe("Pixel 7 (Blink, como Android Chrome)", () => {
 
   test("un swipe inmediato sobre una fila scrollea de verdad", async ({ page }) => {
     await page.request.post("/api/auth/dev");
-    await page.goto(`/training-sessions-new/${SESSION}`);
+    await page.goto(`/training-sessions-beta/${SESSION}`);
     await expect(page.getByText(/Presentes — total/)).toBeVisible();
 
     const row = page.locator(`[data-player-row="${ids.get("Androide05")}"]`);

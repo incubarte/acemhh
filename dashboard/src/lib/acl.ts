@@ -25,7 +25,7 @@ const wheelPermissions: Permission[] = [
   { type: 'page', resource: '/players/new' },
   { type: 'page', resource: '/training-sessions' },
   { type: 'page', resource: '/training-sessions/*' },
-  { type: 'page', resource: '/training-sessions-new/*' },
+  { type: 'page', resource: '/training-sessions-beta/*' },
   { type: 'page', resource: '/credencial' },
 ];
 

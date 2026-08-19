@@ -169,7 +169,7 @@ function TrainingSessionNewContent() {
     const seq = ++reqSeqRef.current;
     inFlightRef.current++;
     try {
-      const res = await fetch(`/api/training-sessions-new/${session}`);
+      const res = await fetch(`/api/training-sessions-beta/${session}`);
       if (!res.ok) {
         setErr(await res.text());
         setLoading(false);
@@ -861,7 +861,7 @@ function TrainingSessionNewContent() {
 export default function TrainingSessionNewPage() {
   const params = useParams();
   return (
-    <ProtectedPage requiredPage={`/training-sessions-new/${params.session}`}>
+    <ProtectedPage requiredPage={`/training-sessions-beta/${params.session}`}>
       <Suspense fallback={<div style={{ padding: 20, textAlign: "center" }}>Cargando...</div>}>
         <TrainingSessionNewContent />
       </Suspense>
