@@ -110,3 +110,15 @@ test("solo la cuota anual completa cuenta como al día", async ({ page }) => {
   expect(await rowOf("Parcial").locator("div").count()).toBeGreaterThan(0);
   expect(await rowOf("Completo").locator("div").count()).toBe(0);
 });
+
+test("la credencial del pagador parcial muestra sus cuotas y el saldo faltante", async ({ page }) => {
+  await page.goto("/credencial");
+  await page.getByPlaceholder("Nombre o apellido").fill("Parcial");
+  await page.getByRole("button", { name: `${LAST}, Parcial` }).click();
+
+  // The installment is listed — never "no payments registered" — and the
+  // remaining balance is spelled out.
+  await expect(page.getByText("Pagos registrados · $35.000 total")).toBeVisible();
+  await expect(page.getByText("Falta abonar $35.000 de la cuota social 2026")).toBeVisible();
+  await expect(page.getByText(/No se registran pagos/)).toHaveCount(0);
+});

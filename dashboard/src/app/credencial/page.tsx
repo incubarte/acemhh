@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, Suspense } from "react";
 import { usePageTitle } from "../components/PageTitleContext";
+import { ANNUAL_DUES } from "@/lib/dues";
 
 type Player = {
   id: string;
@@ -330,8 +331,9 @@ function CredencialContent() {
           }} />
         </div>
 
-        {/* Payment details below the card */}
-        {upToDate && payments.length > 0 && (
+        {/* Payment details below the card — also for partial payers, whose
+            installments must show even while they still owe the rest. */}
+        {payments.length > 0 && (
           <div style={{
             marginTop: 16,
             padding: "12px 16px",
@@ -372,7 +374,9 @@ function CredencialContent() {
             color: "var(--acemhh-orange)",
             textAlign: "center",
           }}>
-            No se registran pagos de cuota social para {year}
+            {payments.length > 0
+              ? `Falta abonar $${formatArs(ANNUAL_DUES - totalPaid)} de la cuota social ${year}`
+              : `No se registran pagos de cuota social para ${year}`}
           </div>
         )}
 
