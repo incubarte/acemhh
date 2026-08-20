@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
 import { LEDGER_DEFAULTS, ledgerExtrasFor } from "@/lib/rosterLedger";
+import { fullyPaidDuesIds } from "@/lib/dues";
 
 // Roster for the redesigned attendance & payments screen. Unlike the legacy
 // route it ignores the trains flag entirely, includes every player whose
@@ -84,7 +85,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
         .eq("concept", "session")
         .eq("session", specificSlot),
       s.from("payments")
-        .select("player_id")
+        .select("player_id, amount")
         .eq("concept", "membership dues")
         .gte("month", `${sessionYear}-01`)
         .lte("month", `${sessionYear}-12`),
@@ -142,7 +143,8 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
       paymentMap.set(p.player_id, (paymentMap.get(p.player_id) ?? 0) + Number(p.amount));
       hasSessionPaymentIds.add(p.player_id);
     }
-    const paidDuesIds = new Set((duesRes.data ?? []).map((d) => d.player_id));
+    // Up to date only when the year's dues payments SUM to the full amount.
+    const paidDuesIds = fullyPaidDuesIds(duesRes.data ?? []);
 
     // Assemble the roster: category players, goalies, plus anyone touching
     // this session through attendance or payments.

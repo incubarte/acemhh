@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
 import { LEDGER_DEFAULTS, ledgerExtrasFor } from "@/lib/rosterLedger";
+import { fullyPaidDuesIds } from "@/lib/dues";
 
 function toSpecificSlot(isoDate: string, hour: string): string {
   return `${isoDate} ${hour}hs`;
@@ -100,7 +101,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
         .eq("concept", "session")
         .eq("session", specificSlot),
       s.from("payments")
-        .select("player_id")
+        .select("player_id, amount")
         .eq("concept", "membership dues")
         .gte("month", `${sessionYear}-01`)
         .lte("month", `${sessionYear}-12`),
@@ -119,7 +120,8 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
       return new NextResponse("Error fetching dues payments", { status: 500 });
     }
 
-    const paidDuesIds = new Set((duesPayments || []).map(d => d.player_id));
+    // Up to date only when the year's dues payments SUM to the full amount.
+    const paidDuesIds = fullyPaidDuesIds(duesPayments || []);
 
     // Build attendance and payment maps
     const attendanceMap = new Map(

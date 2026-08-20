@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { ANNUAL_DUES } from "@/lib/dues";
 
 export async function GET(req: Request) {
   try {
@@ -44,7 +45,9 @@ export async function GET(req: Request) {
     }
 
     const totalPaid = (payments ?? []).reduce((sum, p) => sum + Number(p.amount), 0);
-    const upToDate = totalPaid > 0;
+    // Up to date only with the FULL annual dues — one payment or installments
+    // summing to it; a partial payment still shows as owing.
+    const upToDate = totalPaid >= ANNUAL_DUES;
 
     return NextResponse.json({
       player: {
