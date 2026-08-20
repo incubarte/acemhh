@@ -44,7 +44,7 @@ test.beforeAll(async () => {
     invitee: false,
   });
   const { data: players, error } = await s.from("players")
-    .insert([mk("Parcial", "99001001"), mk("Completo", "99001002")])
+    .insert([mk("Parcial", "99001001"), mk("Completo", "99001002"), mk("Nada", "99001003")])
     .select("id,name");
   if (error) throw new Error(JSON.stringify(error));
   for (const p of players!) ids.set(p.name, p.id);
@@ -101,14 +101,20 @@ test("solo la cuota anual completa cuenta como al día", async ({ page }) => {
     ).toBe(true);
   }
 
-  // And the beta screen paints the partial payer red (dues band) while the
-  // fully paid one stays clean.
+  // Three visual states on the beta screen: striped for the partial payer,
+  // solid for who paid nothing, nothing at all for the settled one.
   await page.goto(`/training-sessions-beta/${SESSION}`);
   await expect(page.getByText(/Presentes — total/)).toBeVisible();
   const rowOf = (name: string) => page.locator(`[data-player-row="${ids.get(name)}"]`);
-  await expect(rowOf("Parcial").locator("div").first()).toBeVisible(); // band present
-  expect(await rowOf("Parcial").locator("div").count()).toBeGreaterThan(0);
-  expect(await rowOf("Completo").locator("div").count()).toBe(0);
+
+  await expect(rowOf("Parcial").getByTestId("dues-band-striped")).toBeVisible();
+  await expect(rowOf("Parcial").getByTestId("dues-band-solid")).toHaveCount(0);
+
+  await expect(rowOf("Nada").getByTestId("dues-band-solid")).toBeVisible();
+  await expect(rowOf("Nada").getByTestId("dues-band-striped")).toHaveCount(0);
+
+  await expect(rowOf("Completo").getByTestId("dues-band-striped")).toHaveCount(0);
+  await expect(rowOf("Completo").getByTestId("dues-band-solid")).toHaveCount(0);
 });
 
 test("la credencial del pagador parcial muestra sus cuotas y el saldo faltante", async ({ page }) => {

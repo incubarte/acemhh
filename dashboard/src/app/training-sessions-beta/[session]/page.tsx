@@ -23,6 +23,7 @@ type RosterPlayer = {
   hasSessionPayment: boolean;
   paidMonthlyForSlot: boolean;
   paidMembershipDues: boolean;
+  dues_status: "full" | "partial" | "none";
   qualifies: boolean;
   recent_attendance: boolean;
   carryover_sessions: number;
@@ -74,6 +75,13 @@ const AbsentRed = "#b91c1c";
  * by the wheel cells and the resting row's highlight band. */
 const bandBg = (color: string) =>
   `linear-gradient(90deg, #000 0, ${color} 14px, ${color} calc(100% - 14px), #000 100%)`;
+
+/** Partial annual dues: vertical black/red stripes, so a player who paid
+ * something but still owes reads apart from one who paid nothing (solid) and
+ * one who is settled (no band at all). */
+const stripedBandBg =
+  `linear-gradient(90deg, #000 0, transparent 14px, transparent calc(100% - 14px), #000 100%),` +
+  ` repeating-linear-gradient(90deg, ${AbsentRed} 0 9px, #000 9px 18px)`;
 
 function TrainingSessionNewContent() {
   const params = useParams();
@@ -513,6 +521,13 @@ function TrainingSessionNewContent() {
 
   const renderRow = (p: RosterPlayer, opts: { payments?: boolean } = {}) => {
     const hasDebt = (p.debt ?? 0) > 0;
+    // Three dues states: settled (no band), partial (striped), none (solid).
+    // Training-ledger debt also paints the solid band.
+    const duesBand: "striped" | "solid" | null = p.invitee
+      ? (hasDebt ? "solid" : null)
+      : p.dues_status === "partial"
+      ? "striped"
+      : (p.dues_status === "none" || hasDebt) ? "solid" : null;
     const rowWheel = wheels.get(p.id) ?? null;
     const committing = rowWheel?.commit;
     // Already toggled away: the collapse ran, the reserved slot took over.
@@ -569,19 +584,25 @@ function TrainingSessionNewContent() {
               : {}),
           }}
         >
-          {/* Resting highlight (debt / unpaid dues): same colors and gradient
-              as the wheel cells, tinted by attendance so it never contradicts
-              the wheel (green among Presentes, red among Ausentes). */}
-          {!committing && (hasDebt || (!p.invitee && !p.paidMembershipDues)) ? (
-            <div style={{
-              position: "absolute",
-              top: 9,
-              bottom: 10,
-              left: 0,
-              right: 0,
-              borderRadius: 6,
-              background: bandBg(p.attended ? PresentGreen : AbsentRed),
-            }} />
+          {/* Resting highlight: money owed to the club. Striped when the
+              annual dues are half-way paid, solid otherwise — and tinted by
+              attendance so a solid band never contradicts the wheel (green
+              among Presentes, red among Ausentes). */}
+          {!committing && duesBand ? (
+            <div
+              data-testid={duesBand === "striped" ? "dues-band-striped" : "dues-band-solid"}
+              style={{
+                position: "absolute",
+                top: 9,
+                bottom: 10,
+                left: 0,
+                right: 0,
+                borderRadius: 6,
+                background: duesBand === "striped"
+                  ? stripedBandBg
+                  : bandBg(p.attended ? PresentGreen : AbsentRed),
+              }}
+            />
           ) : null}
           {rowWheel && (
             <div

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
 import { LEDGER_DEFAULTS, ledgerExtrasFor } from "@/lib/rosterLedger";
-import { fullyPaidDuesIds } from "@/lib/dues";
+import { duesStatusFor, duesTotalsByPlayer } from "@/lib/dues";
 
 // Roster for the redesigned attendance & payments screen. Unlike the legacy
 // route it ignores the trains flag entirely, includes every player whose
@@ -144,7 +144,8 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
       hasSessionPaymentIds.add(p.player_id);
     }
     // Up to date only when the year's dues payments SUM to the full amount.
-    const paidDuesIds = fullyPaidDuesIds(duesRes.data ?? []);
+    const duesTotals = duesTotalsByPlayer(duesRes.data ?? []);
+    const duesStatusOf = (id: string) => duesStatusFor(duesTotals.get(id) ?? 0);
 
     // Assemble the roster: category players, goalies, plus anyone touching
     // this session through attendance or payments.
@@ -200,7 +201,8 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
           payments: paymentMap.get(id) ?? 0,
           hasSessionPayment: hasSessionPaymentIds.has(id),
           paidMonthlyForSlot: monthlyPayerIds.has(id),
-          paidMembershipDues: paidDuesIds.has(id),
+          paidMembershipDues: duesStatusOf(id) === "full",
+          dues_status: duesStatusOf(id),
           qualifies: categories.some((c) => cats.includes(c)),
           recent_attendance: recentAttendees.has(id),
           ...(extras.get(id) ?? LEDGER_DEFAULTS),

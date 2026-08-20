@@ -19,6 +19,7 @@ type PlayerWithAttendance = Player & {
   payments: number;
   hasSessionPayment: boolean;
   paidMembershipDues: boolean;
+  dues_status: "full" | "partial" | "none";
   invitee: boolean;
   player_type: "player" | "goalkeeper";
   scholarship: number;
@@ -373,9 +374,15 @@ function TrainingSessionDetailContent() {
     const owes = playerOwes(player);
     const statusIcon = owes ? "💸" : player.scholarship > 0 ? "🏦" : "💰";
     const hasDebt = (player.debt ?? 0) > 0;
-    // The same red as unpaid membership dues: money owed to the club. The
-    // debt one opens a detail modal on tap.
-    const nameBgColor = hasDebt || (!player.invitee && !player.paidMembershipDues)
+    // Money owed to the club. Annual dues have three states: settled (no
+    // highlight), partially paid (black/red vertical stripes) and unpaid
+    // (solid red) — training-ledger debt also paints solid. The debt one
+    // opens a detail modal on tap.
+    const duesPartial = !player.invitee && player.dues_status === "partial";
+    const duesUnpaid = !player.invitee && player.dues_status === "none";
+    const nameBgColor = duesPartial
+      ? "repeating-linear-gradient(90deg, rgba(220,38,38,0.55) 0 9px, rgba(0,0,0,0.55) 9px 18px)"
+      : hasDebt || duesUnpaid
       ? "rgba(220, 38, 38, 0.45)"
       : bgColor;
     return (
@@ -836,6 +843,7 @@ function TrainingSessionDetailContent() {
               <span>😐 asistió</span><span>💸 adeuda</span>
               <span><span style={{ opacity: AbsentOpacity }}>😐</span> no asistió</span><span>💰 al día</span>
               <span><span style={{ background: "rgba(220, 38, 38, 0.45)", padding: "0 6px", borderRadius: 3 }}>nombre</span></span><span>cuota anual impaga</span>
+              <span><span style={{ background: "repeating-linear-gradient(90deg, rgba(220,38,38,0.55) 0 9px, rgba(0,0,0,0.55) 9px 18px)", padding: "0 6px", borderRadius: 3 }}>nombre</span></span><span>cuota anual a medio pagar</span>
               <span></span><span>🏦 beca (parcial o completa)</span>
             </div>
           </div>

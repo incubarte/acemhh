@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
 import { LEDGER_DEFAULTS, ledgerExtrasFor } from "@/lib/rosterLedger";
-import { fullyPaidDuesIds } from "@/lib/dues";
+import { duesStatusFor, duesTotalsByPlayer } from "@/lib/dues";
 
 function toSpecificSlot(isoDate: string, hour: string): string {
   return `${isoDate} ${hour}hs`;
@@ -121,7 +121,8 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
     }
 
     // Up to date only when the year's dues payments SUM to the full amount.
-    const paidDuesIds = fullyPaidDuesIds(duesPayments || []);
+    const duesTotals = duesTotalsByPlayer(duesPayments || []);
+    const duesStatusOf = (id: string) => duesStatusFor(duesTotals.get(id) ?? 0);
 
     // Build attendance and payment maps
     const attendanceMap = new Map(
@@ -155,7 +156,8 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
         attended: attendanceMap.get(player.id) || false,
         payments: paymentMap.get(player.id) || 0,
         hasSessionPayment: hasPaymentMap.get(player.id) || false,
-        paidMembershipDues: paidDuesIds.has(player.id),
+        paidMembershipDues: duesStatusOf(player.id) === "full",
+          dues_status: duesStatusOf(player.id),
         section,
       });
     }
@@ -183,7 +185,8 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
           attended: attendanceMap.get(player.id) || false,
           payments: paymentMap.get(player.id) || 0,
           hasSessionPayment: hasPaymentMap.get(player.id) || false,
-          paidMembershipDues: paidDuesIds.has(player.id),
+          paidMembershipDues: duesStatusOf(player.id) === "full",
+          dues_status: duesStatusOf(player.id),
           section: "arqueros",
         });
       }
@@ -220,7 +223,8 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
           attended: attendanceMap.get(player.id) || false,
           payments: paymentMap.get(player.id) || 0,
           hasSessionPayment: hasPaymentMap.get(player.id) || false,
-          paidMembershipDues: paidDuesIds.has(player.id),
+          paidMembershipDues: duesStatusOf(player.id) === "full",
+          dues_status: duesStatusOf(player.id),
           section,
         });
       }
