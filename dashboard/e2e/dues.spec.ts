@@ -101,19 +101,19 @@ test("solo la cuota anual completa cuenta como al día", async ({ page }) => {
     ).toBe(true);
   }
 
-  // Three visual states on the beta screen: striped for the partial payer,
-  // solid for who paid nothing, nothing at all for the settled one.
+  // Three visual states on the beta screen: the darker red for the partial
+  // payer, the brighter one for who paid nothing, no band for the settled.
   await page.goto(`/training-sessions-beta/${SESSION}`);
   await expect(page.getByText(/Presentes — total/)).toBeVisible();
   const rowOf = (name: string) => page.locator(`[data-player-row="${ids.get(name)}"]`);
 
-  await expect(rowOf("Parcial").getByTestId("dues-band-striped")).toBeVisible();
+  await expect(rowOf("Parcial").getByTestId("dues-band-partial")).toBeVisible();
   await expect(rowOf("Parcial").getByTestId("dues-band-solid")).toHaveCount(0);
 
   await expect(rowOf("Nada").getByTestId("dues-band-solid")).toBeVisible();
-  await expect(rowOf("Nada").getByTestId("dues-band-striped")).toHaveCount(0);
+  await expect(rowOf("Nada").getByTestId("dues-band-partial")).toHaveCount(0);
 
-  await expect(rowOf("Completo").getByTestId("dues-band-striped")).toHaveCount(0);
+  await expect(rowOf("Completo").getByTestId("dues-band-partial")).toHaveCount(0);
   await expect(rowOf("Completo").getByTestId("dues-band-solid")).toHaveCount(0);
 });
 

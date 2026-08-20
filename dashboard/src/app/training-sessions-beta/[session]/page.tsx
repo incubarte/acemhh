@@ -76,12 +76,10 @@ const AbsentRed = "#b91c1c";
 const bandBg = (color: string) =>
   `linear-gradient(90deg, #000 0, ${color} 14px, ${color} calc(100% - 14px), #000 100%)`;
 
-/** Partial annual dues: vertical black/red stripes, so a player who paid
- * something but still owes reads apart from one who paid nothing (solid) and
- * one who is settled (no band at all). */
-const stripedBandBg =
-  `linear-gradient(90deg, #000 0, transparent 14px, transparent calc(100% - 14px), #000 100%),` +
-  ` repeating-linear-gradient(90deg, ${AbsentRed} 0 9px, #000 9px 18px)`;
+/** Annual dues owed, in two shades: the brighter red for who paid nothing,
+ * a darker one for who paid part of it. Settled players get no band. */
+const DuesUnpaidRed = "#b91c1c";
+const DuesPartialRed = "#6d1616";
 
 function TrainingSessionNewContent() {
   const params = useParams();
@@ -523,10 +521,10 @@ function TrainingSessionNewContent() {
     const hasDebt = (p.debt ?? 0) > 0;
     // Three dues states: settled (no band), partial (striped), none (solid).
     // Training-ledger debt also paints the solid band.
-    const duesBand: "striped" | "solid" | null = p.invitee
+    const duesBand: "partial" | "solid" | null = p.invitee
       ? (hasDebt ? "solid" : null)
       : p.dues_status === "partial"
-      ? "striped"
+      ? "partial"
       : (p.dues_status === "none" || hasDebt) ? "solid" : null;
     const rowWheel = wheels.get(p.id) ?? null;
     const committing = rowWheel?.commit;
@@ -584,13 +582,13 @@ function TrainingSessionNewContent() {
               : {}),
           }}
         >
-          {/* Resting highlight: money owed to the club. Striped when the
-              annual dues are half-way paid, solid otherwise — and tinted by
-              attendance so a solid band never contradicts the wheel (green
-              among Presentes, red among Ausentes). */}
+          {/* Resting highlight: money owed to the club, on a red scale —
+              darker when part of the annual dues is already paid. Attendance
+              is carried by the section the row sits in, so the band is free
+              to mean one thing only. */}
           {!committing && duesBand ? (
             <div
-              data-testid={duesBand === "striped" ? "dues-band-striped" : "dues-band-solid"}
+              data-testid={duesBand === "partial" ? "dues-band-partial" : "dues-band-solid"}
               style={{
                 position: "absolute",
                 top: 9,
@@ -598,9 +596,7 @@ function TrainingSessionNewContent() {
                 left: 0,
                 right: 0,
                 borderRadius: 6,
-                background: duesBand === "striped"
-                  ? stripedBandBg
-                  : bandBg(p.attended ? PresentGreen : AbsentRed),
+                background: bandBg(duesBand === "partial" ? DuesPartialRed : DuesUnpaidRed),
               }}
             />
           ) : null}
