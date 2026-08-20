@@ -101,8 +101,8 @@ test("solo la cuota anual completa cuenta como al día", async ({ page }) => {
     ).toBe(true);
   }
 
-  // Three visual states on the beta screen: the darker red for the partial
-  // payer, the brighter one for who paid nothing, no band for the settled.
+  // Three visual states on the beta screen: amber for the partial payer,
+  // red for who paid nothing, no band at all for the settled one.
   await page.goto(`/training-sessions-beta/${SESSION}`);
   await expect(page.getByText(/Presentes — total/)).toBeVisible();
   const rowOf = (name: string) => page.locator(`[data-player-row="${ids.get(name)}"]`);

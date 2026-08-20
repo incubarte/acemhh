@@ -374,14 +374,13 @@ function TrainingSessionDetailContent() {
     const owes = playerOwes(player);
     const statusIcon = owes ? "💸" : player.scholarship > 0 ? "🏦" : "💰";
     const hasDebt = (player.debt ?? 0) > 0;
-    // Money owed to the club. Annual dues on a red scale: settled (no
-    // highlight), partially paid (darker red) and unpaid (brighter red) —
-    // training-ledger debt also paints the brighter one. The debt one opens
-    // a detail modal on tap.
+    // Money owed to the club. Annual dues: settled (no highlight), partially
+    // paid (dark amber) and unpaid (red) — training-ledger debt also paints
+    // red. The debt one opens a detail modal on tap.
     const duesPartial = !player.invitee && player.dues_status === "partial";
     const duesUnpaid = !player.invitee && player.dues_status === "none";
     const nameBgColor = duesPartial
-      ? "rgba(109, 22, 22, 0.75)"
+      ? "rgba(133, 77, 14, 0.8)"
       : hasDebt || duesUnpaid
       ? "rgba(220, 38, 38, 0.45)"
       : bgColor;
@@ -843,7 +842,7 @@ function TrainingSessionDetailContent() {
               <span>😐 asistió</span><span>💸 adeuda</span>
               <span><span style={{ opacity: AbsentOpacity }}>😐</span> no asistió</span><span>💰 al día</span>
               <span><span style={{ background: "rgba(220, 38, 38, 0.45)", padding: "0 6px", borderRadius: 3 }}>nombre</span></span><span>cuota anual impaga</span>
-              <span><span style={{ background: "rgba(109, 22, 22, 0.75)", padding: "0 6px", borderRadius: 3 }}>nombre</span></span><span>cuota anual a medio pagar</span>
+              <span><span style={{ background: "rgba(133, 77, 14, 0.8)", padding: "0 6px", borderRadius: 3 }}>nombre</span></span><span>cuota anual a medio pagar</span>
               <span></span><span>🏦 beca (parcial o completa)</span>
             </div>
           </div>

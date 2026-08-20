@@ -76,10 +76,10 @@ const AbsentRed = "#b91c1c";
 const bandBg = (color: string) =>
   `linear-gradient(90deg, #000 0, ${color} 14px, ${color} calc(100% - 14px), #000 100%)`;
 
-/** Annual dues owed, in two shades: the brighter red for who paid nothing,
- * a darker one for who paid part of it. Settled players get no band. */
+/** Annual dues owed: red for who paid nothing, dark amber for who paid part
+ * of it. Settled players get no band. */
 const DuesUnpaidRed = "#b91c1c";
-const DuesPartialRed = "#6d1616";
+const DuesPartialAmber = "#854d0e";
 
 function TrainingSessionNewContent() {
   const params = useParams();
@@ -582,10 +582,10 @@ function TrainingSessionNewContent() {
               : {}),
           }}
         >
-          {/* Resting highlight: money owed to the club, on a red scale —
-              darker when part of the annual dues is already paid. Attendance
-              is carried by the section the row sits in, so the band is free
-              to mean one thing only. */}
+          {/* Resting highlight: money owed to the club — amber when part of
+              the annual dues is already paid, red when none is. Attendance is
+              carried by the section the row sits in, so the band is free to
+              mean one thing only. */}
           {!committing && duesBand ? (
             <div
               data-testid={duesBand === "partial" ? "dues-band-partial" : "dues-band-solid"}
@@ -596,7 +596,7 @@ function TrainingSessionNewContent() {
                 left: 0,
                 right: 0,
                 borderRadius: 6,
-                background: bandBg(duesBand === "partial" ? DuesPartialRed : DuesUnpaidRed),
+                background: bandBg(duesBand === "partial" ? DuesPartialAmber : DuesUnpaidRed),
               }}
             />
           ) : null}
