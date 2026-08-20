@@ -26,6 +26,12 @@ export type FlowEntry =
 
 const HistoryLimit = 100;
 
+// Movements before the caja existed are noise: those payments were collected
+// and long since spent, but the matching expenses and handoffs were never
+// recorded. The list starts where the record is meaningful; BALANCES still
+// count everything, and an opening-adjustment expense reconciles them.
+const HistoryFrom = "2026-08-01";
+
 // Balances are derived, never stored:
 //   caja(admin) = cash payments they registered
 //               - cash expenses they paid
@@ -71,13 +77,15 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess) => {
     if (h.accepted_at) {
       add(h.from_user, -Number(h.amount));
       add(h.to_user, Number(h.amount));
-      history.push({
-        kind: "handoff",
-        at: h.created_at,
-        from_name: nameOf.get(h.from_user) ?? "?",
-        to_name: nameOf.get(h.to_user) ?? "?",
-        amount: Number(h.amount),
-      });
+      if (h.created_at >= HistoryFrom) {
+        history.push({
+          kind: "handoff",
+          at: h.created_at,
+          from_name: nameOf.get(h.from_user) ?? "?",
+          to_name: nameOf.get(h.to_user) ?? "?",
+          amount: Number(h.amount),
+        });
+      }
       continue;
     }
     pending.push({
@@ -92,11 +100,15 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess) => {
   }
 
   // Income entries: one per collector per 5-hour collection window.
-  const incomeWindows = groupIncomeWindows((paymentsRes.data ?? []).map((p) => ({
-    user_id: p.registered_by_user_id!,
-    amount: Number(p.amount),
-    created_at: p.created_at,
-  })));
+  const incomeWindows = groupIncomeWindows(
+    (paymentsRes.data ?? [])
+      .filter((p) => p.created_at >= HistoryFrom)
+      .map((p) => ({
+        user_id: p.registered_by_user_id!,
+        amount: Number(p.amount),
+        created_at: p.created_at,
+      })),
+  );
   for (const w of incomeWindows) {
     history.push({
       kind: "income",
@@ -107,7 +119,7 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess) => {
     });
   }
 
-  for (const e of expensesRes.data ?? []) {
+  for (const e of (expensesRes.data ?? []).filter((e) => e.created_at >= HistoryFrom)) {
     history.push({
       kind: "expense",
       at: e.created_at,

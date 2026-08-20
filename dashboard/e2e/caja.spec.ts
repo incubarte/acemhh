@@ -132,3 +132,50 @@ test("el egreso con concepto 'otros' exige notas", async ({ page }) => {
 
   await expect(page.getByText(/contá en las notas/)).toBeVisible();
 });
+
+test("los movimientos arrancan en agosto, pero el saldo cuenta todo", async ({ page }) => {
+  const receiverId = await createReceiver();
+  const s = admin();
+
+  // A player to hang the payments on.
+  await s.from("players").delete().eq("dni", "99001101");
+  const { data: player } = await s.from("players").insert({
+    name: "__test-caja", last_name: RECEIVER_NAME, dni: "99001101",
+    categories: ["cat-b"], player_type: "player", trains: true, invitee: false,
+  }).select("id").single();
+
+  const pay = (createdAt: string, amount: number) => ({
+    id: crypto.randomUUID(),
+    player_id: player!.id,
+    registered_by: "__test",
+    registered_by_user_id: receiverId,
+    concept: "session",
+    session: "2026-05-07 22hs",
+    month: createdAt.slice(0, 7),
+    amount,
+    is_cash: true,
+    created_at: createdAt,
+  });
+  // One pre-caja collection and one after the cutoff.
+  const { error } = await s.from("payments").insert([
+    pay("2026-05-07T23:10:00Z", 500000),
+    pay("2026-08-13T23:10:00Z", 30000),
+  ]);
+  if (error) throw new Error(JSON.stringify(error));
+
+  await page.request.post("/api/auth/dev");
+  const caja = await (await page.request.get("/api/caja")).json();
+
+  // The balance counts both payments...
+  const balance = caja.users.find((u: { id: string }) => u.id === receiverId).balance;
+  expect(balance).toBe(530000);
+
+  // ...but only the August one shows among the movements.
+  const incomes = caja.history.filter((h: { kind: string }) => h.kind === "income");
+  expect(incomes).toHaveLength(1);
+  expect(incomes[0].amount).toBe(30000);
+  expect(incomes[0].at >= "2026-08-01").toBe(true);
+
+  await s.from("payments").delete().eq("player_id", player!.id);
+  await s.from("players").delete().eq("id", player!.id);
+});
