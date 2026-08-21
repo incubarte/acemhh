@@ -1,6 +1,7 @@
 "use client";
 
 import Overlay from "../components/Overlay";
+import { BuenosAires } from "@/lib/cashflow";
 
 // Shared building blocks for the caja screens: bordered section cards that
 // keep each block visually delimited, currency formatting, and the low-amount
@@ -10,9 +11,11 @@ export function formatArs(amount: number) {
   return `$${amount.toLocaleString("es-AR")}`;
 }
 
+/** Timestamps are stored in UTC; the club reads them in Buenos Aires time,
+ * whatever timezone the device happens to be in. */
 export function formatWhen(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleString("es-AR", {
+  return new Date(iso).toLocaleString("es-AR", {
+    timeZone: BuenosAires,
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",

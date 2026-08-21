@@ -179,3 +179,70 @@ test("los movimientos arrancan en agosto, pero el saldo cuenta todo", async ({ p
   await s.from("payments").delete().eq("player_id", player!.id);
   await s.from("players").delete().eq("id", player!.id);
 });
+
+test("saldo inicial, balance corrido y filtro por persona", async ({ page }) => {
+  const receiverId = await createReceiver();
+  const s = admin();
+
+  await s.from("players").delete().eq("dni", "99001102");
+  const { data: player } = await s.from("players").insert({
+    name: "__test-ledger", last_name: RECEIVER_NAME, dni: "99001102",
+    categories: ["cat-b"], player_type: "player", trains: true, invitee: false,
+  }).select("id").single();
+
+  const pay = (createdAt: string, amount: number) => ({
+    id: crypto.randomUUID(),
+    player_id: player!.id,
+    registered_by: "__test",
+    registered_by_user_id: receiverId,
+    concept: "session",
+    session: "2026-05-07 22hs",
+    month: createdAt.slice(0, 7),
+    amount,
+    is_cash: true,
+    created_at: createdAt,
+  });
+  const { error } = await s.from("payments").insert([
+    // Pre-August: folded into the opening balance.
+    pay("2026-05-07T23:10:00Z", 100000),
+    // One training night, split across midnight BA: a single entry of 50k.
+    pay("2026-08-14T00:10:00Z", 30000),
+    pay("2026-08-14T03:40:00Z", 20000),
+  ]);
+  if (error) throw new Error(JSON.stringify(error));
+
+  const { error: expError } = await s.from("expenses").insert({
+    amount: 20000, concept: "hora de pista", paid_by: receiverId, is_cash: true,
+    created_at: "2026-08-15T14:00:00Z",
+  });
+  if (expError) throw new Error(JSON.stringify(expError));
+
+  await page.request.post("/api/auth/dev");
+  const caja = await (await page.request.get(`/api/caja?user=${receiverId}`)).json();
+
+  // Opening carries the pre-cutoff collection; the ledger runs from there.
+  expect(caja.opening).toBe(100000);
+  expect(caja.history).toHaveLength(2);
+
+  const [income, expense] = caja.history;
+  expect(income.kind).toBe("income");
+  expect(income.count).toBe(2); // both payments of that night, one entry
+  expect(income.delta).toBe(50000);
+  expect(income.balanceAfter).toBe(150000);
+
+  expect(expense.kind).toBe("expense");
+  expect(expense.delta).toBe(-20000);
+  expect(expense.balanceAfter).toBe(130000);
+
+  // The running balance lands exactly on the admin's caja.
+  const balance = caja.users.find((u: { id: string }) => u.id === receiverId).balance;
+  expect(balance).toBe(130000);
+
+  // Another admin's caja shows none of it.
+  const meScoped = await (await page.request.get(`/api/caja?user=${caja.me}`)).json();
+  expect(meScoped.history.every((h: { name?: string }) => h.name !== RECEIVER_NAME)).toBe(true);
+
+  await s.from("expenses").delete().eq("paid_by", receiverId);
+  await s.from("payments").delete().eq("player_id", player!.id);
+  await s.from("players").delete().eq("id", player!.id);
+});

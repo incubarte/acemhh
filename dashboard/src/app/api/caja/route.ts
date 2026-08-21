@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
-import { groupIncomeWindows } from "@/lib/cashflow";
+import { groupIncomeByDay } from "@/lib/cashflow";
 
 export type CajaUser = {
   id: string;
@@ -19,26 +19,38 @@ export type PendingHandoff = {
   created_at: string;
 };
 
-export type FlowEntry =
-  | { kind: "income"; at: string; name: string; amount: number; count: number }
-  | { kind: "expense"; at: string; name: string; amount: number; concept: string; notes: string | null; is_cash: boolean }
-  | { kind: "handoff"; at: string; from_name: string; to_name: string; amount: number };
+type FlowKind =
+  | { kind: "income"; name: string; amount: number; count: number }
+  | { kind: "expense"; name: string; amount: number; concept: string; notes: string | null; is_cash: boolean }
+  | { kind: "handoff"; from_name: string; to_name: string; amount: number };
+
+/** A movement before the running balance is known. */
+type Movement = FlowKind & {
+  at: string;
+  /** How this movement changed the caja being viewed. */
+  delta: number;
+};
+
+/** The caja right after the movement. */
+export type FlowEntry = Movement & { balanceAfter: number };
 
 const HistoryLimit = 100;
 
-// Movements before the caja existed are noise: those payments were collected
-// and long since spent, but the matching expenses and handoffs were never
-// recorded. The list starts where the record is meaningful; BALANCES still
-// count everything, and an opening-adjustment expense reconciles them.
+// Movements before the caja existed are folded into the opening balance: those
+// payments were collected and long since spent, but the matching expenses and
+// handoffs were never recorded, so listing them is noise. The running balance
+// still starts from them, so every figure on screen adds up.
 const HistoryFrom = "2026-08-01";
 
 // Balances are derived, never stored:
 //   caja(admin) = cash payments they registered
 //               - cash expenses they paid
 //               - handoffs given + handoffs received (accepted only)
-// Legacy payments rows without registered_by_user_id stay out until backfilled.
-export const GET = withPermission('api', '/api/caja', 'GET', async (sess) => {
+export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) => {
   const s = supabaseAdmin();
+  // ?user=<uuid> narrows every figure to that admin's caja; without it the
+  // view is the club's, where handoffs are internal and move nothing.
+  const scope = new URL(req.url).searchParams.get("user");
 
   const [usersRes, paymentsRes, expensesRes, handoffsRes] = await Promise.all([
     s.from("users").select("id,first_name,last_name,groups"),
@@ -71,58 +83,66 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess) => {
   }
 
   const pending: PendingHandoff[] = [];
-  const history: FlowEntry[] = [];
+  // Movements with the delta they apply to the caja in scope. Entries that do
+  // not touch it at all are left out.
+  const movements: Movement[] = [];
 
   for (const h of handoffsRes.data ?? []) {
-    if (h.accepted_at) {
-      add(h.from_user, -Number(h.amount));
-      add(h.to_user, Number(h.amount));
-      if (h.created_at >= HistoryFrom) {
-        history.push({
-          kind: "handoff",
-          at: h.created_at,
-          from_name: nameOf.get(h.from_user) ?? "?",
-          to_name: nameOf.get(h.to_user) ?? "?",
-          amount: Number(h.amount),
-        });
-      }
+    if (!h.accepted_at) {
+      pending.push({
+        id: h.id,
+        amount: Number(h.amount),
+        from_user: h.from_user,
+        to_user: h.to_user,
+        from_name: nameOf.get(h.from_user) ?? "?",
+        to_name: nameOf.get(h.to_user) ?? "?",
+        created_at: h.created_at,
+      });
       continue;
     }
-    pending.push({
-      id: h.id,
-      amount: Number(h.amount),
-      from_user: h.from_user,
-      to_user: h.to_user,
+
+    const amount = Number(h.amount);
+    add(h.from_user, -amount);
+    add(h.to_user, amount);
+
+    // For the club as a whole a handoff is internal: it moves nothing.
+    const delta = !scope ? 0 : h.from_user === scope ? -amount : h.to_user === scope ? amount : null;
+    if (delta === null) continue;
+    movements.push({
+      kind: "handoff",
+      at: h.created_at,
+      delta,
       from_name: nameOf.get(h.from_user) ?? "?",
       to_name: nameOf.get(h.to_user) ?? "?",
-      created_at: h.created_at,
+      amount,
     });
   }
 
-  // Income entries: one per collector per 5-hour collection window.
-  const incomeWindows = groupIncomeWindows(
-    (paymentsRes.data ?? [])
-      .filter((p) => p.created_at >= HistoryFrom)
-      .map((p) => ({
-        user_id: p.registered_by_user_id!,
-        amount: Number(p.amount),
-        created_at: p.created_at,
-      })),
-  );
-  for (const w of incomeWindows) {
-    history.push({
+  // Income entries: one per collector per collection day (5am → 5am, BA).
+  const incomeGroups = groupIncomeByDay((paymentsRes.data ?? []).map((p) => ({
+    user_id: p.registered_by_user_id!,
+    amount: Number(p.amount),
+    created_at: p.created_at,
+  })));
+  for (const g of incomeGroups) {
+    if (scope && g.user_id !== scope) continue;
+    movements.push({
       kind: "income",
-      at: w.start,
-      name: nameOf.get(w.user_id) ?? "?",
-      amount: w.amount,
-      count: w.count,
+      at: g.start,
+      delta: g.amount,
+      name: nameOf.get(g.user_id) ?? "?",
+      amount: g.amount,
+      count: g.count,
     });
   }
 
-  for (const e of (expensesRes.data ?? []).filter((e) => e.created_at >= HistoryFrom)) {
-    history.push({
+  for (const e of expensesRes.data ?? []) {
+    if (scope && e.paid_by !== scope) continue;
+    movements.push({
       kind: "expense",
       at: e.created_at,
+      // A bank-paid expense is club money leaving, but never out of a caja.
+      delta: e.is_cash ? -Number(e.amount) : 0,
       name: nameOf.get(e.paid_by) ?? "?",
       amount: Number(e.amount),
       concept: e.concept,
@@ -131,7 +151,27 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess) => {
     });
   }
 
-  history.sort((a, b) => b.at.localeCompare(a.at));
+  // Oldest first, so the running balance reads as a ledger.
+  movements.sort((a, b) => a.at.localeCompare(b.at));
+
+  // Everything before the cutoff — plus any overflow past the display limit —
+  // becomes the opening balance, so the first listed movement starts from a
+  // figure that already accounts for it.
+  const shown = movements.filter((m) => m.at >= HistoryFrom);
+  const foldedCount = movements.length - shown.length +
+    Math.max(0, shown.length - HistoryLimit);
+  const displayed = shown.slice(-HistoryLimit);
+  const firstShownAt = displayed[0]?.at;
+  let opening = 0;
+  for (const m of movements) {
+    if (firstShownAt === undefined || m.at < firstShownAt) opening += m.delta;
+  }
+
+  let running = opening;
+  const history: FlowEntry[] = displayed.map((m) => {
+    running += m.delta;
+    return { ...m, balanceAfter: running };
+  });
 
   const users: CajaUser[] = admins
     .map((u) => ({ id: u.id, name: nameOf.get(u.id)!, balance: balances.get(u.id)! }))
@@ -139,8 +179,12 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess) => {
 
   return NextResponse.json({
     me: sess.id,
+    scope,
     users,
     pending,
-    history: history.slice(0, HistoryLimit),
+    opening,
+    /** How many older movements the opening balance stands for. */
+    openingCount: foldedCount,
+    history,
   });
 });
