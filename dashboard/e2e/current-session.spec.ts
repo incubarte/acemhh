@@ -36,8 +36,10 @@ const today = todayBA();
 const yesterday = shiftDays(today, -1);
 const future = shiftDays(today, 21);
 
+const probeDates = [today, yesterday, future];
+
 async function clearProbeSlots() {
-  await admin().from("training_slots").delete().in("date", [today, yesterday, future]);
+  await admin().from("training_slots").delete().in("date", probeDates);
 }
 
 async function addSlot(date: string) {
@@ -48,8 +50,25 @@ async function addSlot(date: string) {
 }
 
 test.describe.configure({ mode: "serial" });
+
+// These tests need full control over what exists on today/yesterday, but the
+// seeded agenda may well have a real training there (and other specs depend
+// on it). Take those rows out for the duration and put them back after.
+let savedSlots: Record<string, unknown>[] = [];
+
+test.beforeAll(async () => {
+  const { data } = await admin().from("training_slots").select("*").in("date", probeDates);
+  savedSlots = data ?? [];
+  await clearProbeSlots();
+});
 test.beforeEach(clearProbeSlots);
-test.afterAll(clearProbeSlots);
+test.afterAll(async () => {
+  await clearProbeSlots();
+  if (savedSlots.length > 0) {
+    const { error } = await admin().from("training_slots").insert(savedSlots);
+    if (error) throw new Error("Failed to restore slots: " + JSON.stringify(error));
+  }
+});
 
 test("con entrenamiento hoy, abre el de hoy", async ({ page }) => {
   await addSlot(today);
