@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePageHeader } from "./PageTitleContext";
@@ -97,22 +98,37 @@ export default function Header() {
             </h1>
           )}
         </div>
-        <div style={{
-          width: logoSize,
-          height: logoSize,
-          position: "relative",
-          display: "flex",
-          alignItems: "center",
-          flexShrink: 0,
-          transition: "width 150ms ease, height 150ms ease",
-        }}>
-          <Image
-            src="/acemhh-logo.png"
-            alt="ACEMHH Logo"
-            fill
-            style={{ objectFit: "contain", objectPosition: "center" }}
-          />
-        </div>
+        {/* The logo is the way home from anywhere — and it keeps a thumb-sized
+            target even once the header has shrunk it. */}
+        <Link
+          href="/"
+          data-testid="header-home"
+          aria-label="Ir al inicio"
+          style={{
+            width: Math.max(44, logoSize),
+            height: Math.max(44, logoSize),
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+            WebkitTapHighlightColor: "transparent",
+          }}
+        >
+          <span style={{
+            width: logoSize,
+            height: logoSize,
+            position: "relative",
+            display: "block",
+            transition: "width 150ms ease, height 150ms ease",
+          }}>
+            <Image
+              src="/acemhh-logo.png"
+              alt="ACEMHH Logo"
+              fill
+              style={{ objectFit: "contain", objectPosition: "center" }}
+            />
+          </span>
+        </Link>
       </div>
     </header>
   );

@@ -186,3 +186,22 @@ test("el ledger funciona en meses de 30 días", async ({ page }) => {
     expect(body.players.some((p: { session_preset: number | null }) => p.session_preset)).toBe(true);
   }
 });
+
+test("el logo del header lleva al inicio, también con el header achicado", async ({ page }) => {
+  await addSlot(today);
+  await page.request.post("/api/auth/dev");
+  await page.setViewportSize({ width: 390, height: 640 });
+
+  await page.goto(`/training-sessions-beta/${today}-22`);
+  const logo = page.getByTestId("header-home");
+
+  // Thumb-sized even once the header has shrunk the logo itself.
+  await page.mouse.wheel(0, 1200);
+  await expect(page.getByTestId("app-header")).toHaveAttribute("data-compact", "true");
+  const box = (await logo.boundingBox())!;
+  expect(box.height).toBeGreaterThanOrEqual(40);
+  expect(box.width).toBeGreaterThanOrEqual(40);
+
+  await logo.click();
+  await page.waitForURL("/");
+});
