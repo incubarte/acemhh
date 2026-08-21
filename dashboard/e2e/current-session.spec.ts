@@ -125,6 +125,36 @@ test("el cartel avisa cuando la sesión abierta no es la actual", async ({ page 
   await page.waitForURL(`**/training-sessions?date=${today}`);
 });
 
+test("el cartel queda fijo arriba y a todo el ancho", async ({ page }) => {
+  await addSlot(today);
+  await addSlot(future);
+  await page.request.post("/api/auth/dev");
+  await page.setViewportSize({ width: 390, height: 640 });
+
+  for (const base of ["training-sessions", "training-sessions-beta"]) {
+    await page.goto(`/${base}/${future}-22`);
+    const warning = page.getByTestId("session-date-warning");
+    await expect(warning).toBeVisible();
+
+    const box = (await warning.boundingBox())!;
+    expect(box.x).toBe(0);
+    expect(box.width).toBe(390); // edge to edge, not inside the shell
+    expect(box.y).toBe(0);
+
+    // It must not cover the app header: the page is pushed down by its height.
+    const header = page.getByRole("heading", { name: "Asistencia y Pagos" });
+    const headerBox = (await header.boundingBox())!;
+    expect(headerBox.y).toBeGreaterThanOrEqual(box.height);
+
+    // And it stays put while scrolling.
+    await page.mouse.wheel(0, 1200);
+    await page.waitForTimeout(150);
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(100);
+    await expect(warning).toBeInViewport({ ratio: 0.95 });
+    expect((await warning.boundingBox())!.y).toBe(0);
+  }
+});
+
 test("el ledger funciona en meses de 30 días", async ({ page }) => {
   // Regression: the roster query bounded training_slots with `${month}-31`,
   // which Postgres rejects outright in 30-day months, silently dropping every
