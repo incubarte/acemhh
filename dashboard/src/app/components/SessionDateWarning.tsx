@@ -24,6 +24,8 @@ export default function SessionDateWarning({
       month: "short",
     });
 
+  // Solid light amber with dark type: on a screen that is otherwise dark, an
+  // inverted block is what actually stops the eye.
   return (
     <div
       data-testid="session-date-warning"
@@ -31,9 +33,9 @@ export default function SessionDateWarning({
         marginTop: 12,
         padding: "12px 14px",
         borderRadius: 10,
-        border: "2px solid #facc15",
-        background: "rgba(250, 204, 21, 0.18)",
-        color: "#fde68a",
+        border: "2px solid #b45309",
+        background: "#fde68a",
+        color: "#1c1508",
         display: "flex",
         alignItems: "center",
         gap: 10,
@@ -41,13 +43,15 @@ export default function SessionDateWarning({
     >
       <span style={{ fontSize: "1.4rem", lineHeight: 1 }}>⚠️</span>
       <span style={{ flex: 1, fontSize: "0.9rem", lineHeight: 1.4 }}>
-        <strong style={{ display: "block", fontSize: "1rem" }}>
+        {/* The global `strong` rule paints light-on-dark; this block is the
+            other way round, so the color is set explicitly. */}
+        <strong style={{ display: "block", fontSize: "1rem", color: "#1c1508" }}>
           Estás en una sesión {when}
         </strong>
         {format(sessionDate)} — la sesión actual es la del {format(currentDate)}.{" "}
         <Link
           href={`/training-sessions?date=${currentDate}`}
-          style={{ color: "#fde68a", textDecoration: "underline" }}
+          style={{ color: "#7c2d12", fontWeight: 700, textDecoration: "underline" }}
         >
           Ir a la actual
         </Link>
