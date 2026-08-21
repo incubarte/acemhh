@@ -37,6 +37,7 @@ type RosterPlayer = {
   bought_month: boolean;
   owes_if_present: boolean;
   owes_if_absent: boolean;
+  owed_now: number;
 };
 
 const MONTH_NAMES_ES = [
@@ -139,6 +140,31 @@ function Section({
  * or attended sessions of this month left unpaid. */
 function isDebtor(p: RosterPlayer) {
   return (p.debt ?? 0) > 0 || p.owes_now === true;
+}
+
+/**
+ * The row as it stands the moment a payment is registered, before any
+ * refresh: the amount joins the parentheses and the flags it settles follow.
+ * Classification mirrors the API — up to one session's price is a session,
+ * more than that is the month.
+ */
+function withPayment(p: RosterPlayer, amount: number): RosterPlayer {
+  const isSession = p.session_preset !== null && amount <= p.session_preset;
+  const buysMonth = p.month_preset !== null && amount >= p.month_preset;
+  return {
+    ...p,
+    payments: p.payments + amount,
+    payment_amounts: [...p.payment_amounts, amount],
+    // Anything registered from here lands on this session (a session
+    // payment) or on this slot's month, so either way it counts as paid here.
+    hasSessionPayment: true,
+    paidMonthlyForSlot: p.paidMonthlyForSlot || !isSession,
+    bought_month: p.bought_month || buysMonth,
+    // Whatever is left owing decides whether the row stays under Deben. A
+    // payment that buys the month clears it outright.
+    owed_now: buysMonth ? 0 : Math.max(0, p.owed_now - amount),
+    owes_now: buysMonth ? false : Math.max(0, p.owed_now - amount) > 0,
+  };
 }
 
 // ---- Row ----
@@ -728,7 +754,9 @@ function TrainingSessionBetaContent() {
       return;
     }
     setPayModalPlayer(null);
-    await reload();
+    // Show it right away — the refresh that follows only confirms it.
+    setPlayers((prev) => prev.map((p) => p.id === playerId ? withPayment(p, amount) : p));
+    reload();
   }, [session, reload]);
 
   const openDebt = useCallback((p: RosterPlayer) => setDebtModalPlayer(p), []);
@@ -1028,6 +1056,7 @@ function sameRoster(a: RosterPlayer, b: RosterPlayer): boolean {
     a.owes_now === b.owes_now &&
     a.owes_if_present === b.owes_if_present &&
     a.owes_if_absent === b.owes_if_absent &&
+    a.owed_now === b.owed_now &&
     a.bought_month === b.bought_month &&
     a.carryover_sessions === b.carryover_sessions &&
     a.month_preset === b.month_preset &&

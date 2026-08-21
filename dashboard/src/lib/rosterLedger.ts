@@ -27,6 +27,9 @@ export type LedgerExtras = {
    * between sections — and in or out of Deudores — without a round trip. */
   owes_if_present: boolean;
   owes_if_absent: boolean;
+  /** Pesos still owed for this month right now — what a fresh payment has to
+   * cover for the row to stop counting as a debtor. */
+  owed_now: number;
 };
 
 /** First day of the month after `month` (YYYY-MM), as YYYY-MM-DD. */
@@ -47,6 +50,7 @@ export const LEDGER_DEFAULTS: LedgerExtras = {
   bought_month: false,
   owes_if_present: false,
   owes_if_absent: false,
+  owed_now: 0,
 };
 
 type RosterPlayer = {
@@ -181,6 +185,7 @@ export async function ledgerExtrasFor(
       bought_month: now.bought,
       owes_if_present: owesIfPresent,
       owes_if_absent: owesIfAbsent,
+      owed_now: Math.max(0, now.charge - activityNow.totalPaid),
     });
   }
 

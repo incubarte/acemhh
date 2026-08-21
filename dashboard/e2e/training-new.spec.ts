@@ -327,3 +327,30 @@ test("el modal de cobro ofrece sesión, mes y otro, y confirma con el detalle", 
   // The payment shows next to the name, and settles them.
   await expect(row.getByText(/\(30k\)/)).toBeVisible();
 });
+
+test("el pago aparece entre paréntesis sin esperar el refresh", async ({ page }) => {
+  await openPage(page);
+  const row = page.getByTestId("section-presentes")
+    .locator(`[data-player-row="${ids.get("Fantasma")}"]`);
+
+  // Hold the refresh back, so anything that shows up is optimistic.
+  let releaseRefresh: () => void = () => {};
+  const held = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+  await page.route("**/api/training-sessions-beta/**", async (route) => {
+    await held;
+    await route.continue();
+  });
+
+  await row.getByRole("button", { name: "+" }).click();
+  const modal = page.getByTestId("payment-modal");
+  await modal.getByText(/Sesión individual/).click();
+  await modal.getByRole("button", { name: "Confirmar" }).click();
+
+  // Registered in the previous test plus this one: both amounts are listed
+  // while the refresh is still blocked.
+  await expect(row.getByText(/\(30k, 30k\)/)).toBeVisible();
+
+  // Letting the refresh through confirms rather than contradicts it.
+  releaseRefresh();
+  await expect(row.getByText(/\(30k, 30k\)/)).toBeVisible();
+});
