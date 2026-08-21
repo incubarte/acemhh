@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import ProtectedPage from "../../components/ProtectedPage";
 import Overlay from "../../components/Overlay";
 import SessionDateWarning from "../../components/SessionDateWarning";
+import ExperienceToggle from "../../components/ExperienceToggle";
 import { usePageTitle } from "../../components/PageTitleContext";
 
 // Redesigned attendance & payments screen. Presence is expressed by the
@@ -961,6 +962,7 @@ function TrainingSessionBetaContent() {
 
   return (
     <div style={{ paddingBottom: 60 }}>
+      <ExperienceToggle session={session} current="nueva" />
       <SessionDateWarning sessionDate={sessionDate} currentDate={currentDate} />
 
       {deudores.length > 0 && (

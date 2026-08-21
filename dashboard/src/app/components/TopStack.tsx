@@ -3,12 +3,17 @@
 import { useEffect, useRef } from "react";
 import Header from "./Header";
 
+/** Portal target sitting directly under the header, above everything else a
+ * page pins (the experience switch). */
+export const TopStackTopSlotId = "top-stack-top-slot";
+
 /** Portal target for bars that must sit under the header, above the page. */
 export const TopStackSlotId = "top-stack-slot";
 
 /**
  * The fixed bar at the top of every screen: the app header first, then
- * whatever a page pins below it (the wrong-session warning). It lives outside
+ * whatever a page pins below it (the experience switch, then the
+ * wrong-session warning). It lives outside
  * the app shell — whose backdrop-filter would trap a fixed child, and whose
  * max-width would keep it from spanning the screen — and pushes the page down
  * by its own measured height, so nothing ever hides underneath.
@@ -38,6 +43,7 @@ export default function TopStack() {
       style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 70 }}
     >
       <Header />
+      <div id={TopStackTopSlotId} />
       <div id={TopStackSlotId} />
     </div>
   );

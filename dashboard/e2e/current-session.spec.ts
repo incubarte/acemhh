@@ -137,14 +137,17 @@ test("header y cartel quedan fijos arriba, a todo el ancho y en orden", async ({
     const warning = page.getByTestId("session-date-warning");
     await expect(warning).toBeVisible();
 
-    // Header first, warning right below it, both edge to edge.
+    // Header first, then the experience switch, then the warning — stacked
+    // with no gaps, all edge to edge.
     const headerBox = (await header.boundingBox())!;
+    const switchBox = (await page.getByTestId("experience-toggle").boundingBox())!;
     const warnBox = (await warning.boundingBox())!;
     expect(headerBox.y).toBe(0);
     expect(headerBox.width).toBe(390);
     expect(warnBox.x).toBe(0);
     expect(warnBox.width).toBe(390);
-    expect(Math.round(warnBox.y)).toBe(Math.round(headerBox.y + headerBox.height));
+    expect(Math.round(switchBox.y)).toBe(Math.round(headerBox.y + headerBox.height));
+    expect(Math.round(warnBox.y)).toBe(Math.round(switchBox.y + switchBox.height));
 
     // Page content starts below the whole stack.
     const firstContent = page.locator(".appShell");

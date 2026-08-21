@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import ProtectedPage from "../../components/ProtectedPage";
 import Overlay from "../../components/Overlay";
 import SessionDateWarning from "../../components/SessionDateWarning";
+import ExperienceToggle from "../../components/ExperienceToggle";
 import { usePageTitle } from "../../components/PageTitleContext";
 import { paymentThresholdOverride } from "@/lib/thresholds";
 
@@ -845,6 +846,7 @@ function TrainingSessionDetailContent() {
     <ProtectedPage requiredPage={currentPath}>
       <div>
         <div style={{ padding: "0 20px" }}>
+          <ExperienceToggle session={`${dateStr}-${hour}`} current="vieja" />
           <SessionDateWarning sessionDate={dateStr} currentDate={currentDate} />
           <div className="card" style={{ marginTop: 12, marginLeft: -15, marginRight: -15, borderRadius: "8px" }}>
             <div><strong>Fecha:</strong> {formatDate(date)}</div>
