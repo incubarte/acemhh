@@ -38,6 +38,11 @@ type RosterPlayer = {
   owes_if_present: boolean;
   owes_if_absent: boolean;
   owed_now: number;
+  prev_owed: number;
+  prev_attended: number;
+  prev_paid: number;
+  cur_attended: number;
+  cur_paid: number;
 };
 
 const MONTH_NAMES_ES = [
@@ -68,6 +73,11 @@ type WheelVisual = {
 };
 
 /** Horizontal movement needed before the wheel engages (vs a tap). */
+/** How long a finger must stay on a row before the PRESENTE/AUSENTE word
+ * appears. Long enough that a scroll starting on a row never flashes it,
+ * short enough that a deliberate press feels immediate. */
+const WheelRevealDelay = 180;
+
 const WheelSlop = 10;
 /** Release velocity (px/ms) that flicks to the next detent regardless of position. */
 const FlickVelocity = 0.4;
@@ -81,14 +91,21 @@ const bandBg = (color: string) =>
 
 /** Annual dues owed: red for who paid nothing, dark amber for who paid part
  * of it. Settled players get no band. */
-const DuesUnpaidRed = "#b91c1c";
-const DuesPartialAmber = "#854d0e";
+const DuesUnpaidRed = "#f87171";
+const DuesPartialAmber = "#fbbf24";
 
-/** One palette per section, so where a row sits is readable at a glance. */
+/** The + button's width, mirrored as a left spacer so centred names land on
+ * the row's true middle. */
+const ActionWidth = 28;
+
+/** One palette per section: a strong header (CR) over a muted body of the
+ * same hue (CO). Rows add no colour of their own, so the section a row sits
+ * in is the only thing its background says. Debtors get the deepest red so
+ * they do not read as just another absent row. */
 const SectionColors = {
-  debt: { header: "#7f1d1d", body: "rgba(185, 28, 28, 0.10)" },
-  present: { header: "#14532d", body: "rgba(21, 128, 61, 0.10)" },
-  absent: { header: "#141414", body: "rgba(255, 255, 255, 0.02)" },
+  debt: { header: "#5f1414", body: "rgba(95, 20, 20, 0.55)" },
+  present: { header: "#14532d", body: "rgba(20, 83, 45, 0.45)" },
+  absent: { header: "#52525b", body: "rgba(82, 82, 91, 0.30)" },
 } as const;
 
 type SectionTone = keyof typeof SectionColors;
@@ -136,10 +153,19 @@ function Section({
   );
 }
 
-/** Whether the player owes anything at all: money carried from earlier months,
- * or attended sessions of this month left unpaid. */
+/** Attended sessions of this month left unpaid, or what last month left
+ * unpaid. Older debt is not what this screen chases. */
 function isDebtor(p: RosterPlayer) {
-  return (p.debt ?? 0) > 0 || p.owes_now === true;
+  return p.owes_now === true || p.prev_owed > 0;
+}
+
+/** "A/PA C/PC": last month's attendance and payments, then this month's.
+ * A month that owes nothing is not worth spelling out — the previous one
+ * drops off entirely, the current one collapses to a dash. */
+function debtorStats(p: RosterPlayer): string {
+  const prev = p.prev_owed > 0 ? `${p.prev_attended}/${formatArs(p.prev_paid)}` : "";
+  const cur = p.owes_now ? `${p.cur_attended}/${formatArs(p.cur_paid)}` : "-";
+  return `${prev} ${cur}`.trim();
 }
 
 /**
@@ -164,6 +190,8 @@ function withPayment(p: RosterPlayer, amount: number): RosterPlayer {
     // payment that buys the month clears it outright.
     owed_now: buysMonth ? 0 : Math.max(0, p.owed_now - amount),
     owes_now: buysMonth ? false : Math.max(0, p.owed_now - amount) > 0,
+    // Keeps the figures the debtors list shows in step with the payment.
+    cur_paid: p.cur_paid + amount,
   };
 }
 
@@ -183,6 +211,7 @@ const PlayerRow = React.memo(function PlayerRow({
   onOpenDebt,
   onOpenPayment,
   showPayments,
+  tone,
 }: {
   player: RosterPlayer;
   wheel: WheelVisual | undefined;
@@ -190,16 +219,27 @@ const PlayerRow = React.memo(function PlayerRow({
   onOpenDebt: (p: RosterPlayer) => void;
   onOpenPayment: (p: RosterPlayer) => void;
   showPayments: boolean;
+  tone: SectionTone;
 }) {
   const p = player;
   const hasDebt = (p.debt ?? 0) > 0;
-  // Three dues states: settled (no band), partial (amber), none (red).
-  // Training-ledger debt also paints the red band.
-  const duesBand: "partial" | "solid" | null = p.invitee
-    ? (hasDebt ? "solid" : null)
+  // Annual dues still owed. It no longer paints the row — the row's colour
+  // belongs to its section — so it is a marker beside the name instead.
+  const duesDot: string | null = p.invitee
+    ? null
     : p.dues_status === "partial"
-    ? "partial"
-    : (p.dues_status === "none" || hasDebt) ? "solid" : null;
+    ? DuesPartialAmber
+    : p.dues_status === "none" ? DuesUnpaidRed : null;
+
+  // Everywhere but the debtors list the name is centred, to sit under the
+  // PRESENTE/AUSENTE the wheel puts in the same place. Debtors keep their
+  // names left-aligned, with the figures that explain the debt on the right.
+  const centred = tone !== "debt";
+
+  // The debtors list is a bill, not a roster: it takes no wheel gesture, and
+  // every row in it reads the same red whether the player showed up or not.
+  // Attendance is toggled where the player actually sits.
+  const inert = tone === "debt";
 
   // Three cells — [other][current][other] — so the wheel turns both ways.
   const currentWord = p.attended ? "PRESENTE" : "AUSENTE";
@@ -222,20 +262,20 @@ const PlayerRow = React.memo(function PlayerRow({
   return (
     <div
       data-player-row={p.id}
-      onPointerDown={(e) => gesture.down(e, p)}
-      onPointerMove={gesture.move}
-      onPointerUp={gesture.up}
-      onPointerCancel={gesture.cancel}
+      onPointerDown={inert ? undefined : (e) => gesture.down(e, p)}
+      onPointerMove={inert ? undefined : gesture.move}
+      onPointerUp={inert ? undefined : gesture.up}
+      onPointerCancel={inert ? undefined : gesture.cancel}
       // The browser's own long-press UI (context menu, iOS callout) must not
       // interfere with the wheel gesture.
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={inert ? undefined : (e) => e.preventDefault()}
       style={{
         display: "flex",
         alignItems: "center",
         gap: 8,
         padding: "10px 8px",
         borderBottom: rowBorder,
-        touchAction: "pan-y",
+        touchAction: inert ? "auto" : "pan-y",
         userSelect: "none",
         WebkitUserSelect: "none",
         WebkitTouchCallout: "none",
@@ -243,24 +283,7 @@ const PlayerRow = React.memo(function PlayerRow({
         overflow: "hidden",
       }}
     >
-      {/* Resting highlight: money owed to the club — amber when part of the
-          annual dues is already paid, red when none is. */}
-      {duesBand ? (
-        <div
-          data-testid={duesBand === "partial" ? "dues-band-partial" : "dues-band-solid"}
-          style={{
-            position: "absolute",
-            top: 9,
-            bottom: 10,
-            left: 0,
-            right: 0,
-            borderRadius: 6,
-            background: bandBg(duesBand === "partial" ? DuesPartialAmber : DuesUnpaidRed),
-          }}
-        />
-      ) : null}
-
-      {wheel && (
+      {wheel && !inert && (
         <div
           data-testid="attendance-wheel"
           // Inset to the name pill's height: the wheel reads as the row's
@@ -283,7 +306,12 @@ const PlayerRow = React.memo(function PlayerRow({
         </div>
       )}
 
+      {/* Balances the + button so the centred name sits on the row's real
+          middle, where the wheel puts its word. */}
+      {centred && showPayments && <span style={{ width: ActionWidth, flexShrink: 0 }} />}
+
       <span
+        data-testid="player-name"
         onClick={hasDebt ? () => onOpenDebt(p) : undefined}
         style={{
           flex: 1,
@@ -292,10 +320,23 @@ const PlayerRow = React.memo(function PlayerRow({
           whiteSpace: "nowrap",
           fontSize: "0.9rem",
           padding: "2px 6px",
+          textAlign: centred ? "center" : "left",
           cursor: hasDebt ? "pointer" : undefined,
           position: "relative",
         }}
       >
+        {duesDot && (
+          <span
+            data-testid="dues-dot"
+            data-dues={p.dues_status}
+            title={p.dues_status === "partial"
+              ? "Cuota anual paga en parte"
+              : "Cuota anual impaga"}
+            style={{ color: duesDot, marginRight: 5 }}
+          >
+            ●
+          </span>
+        )}
         {p.last_name}, {p.name}
         {p.payment_amounts.length > 0 && (
           <span style={{ opacity: 0.85 }}>
@@ -313,11 +354,30 @@ const PlayerRow = React.memo(function PlayerRow({
         )}
       </span>
 
+      {tone === "debt" && (
+        // Attendance and payments behind the debt: last month, then this one.
+        <span
+          data-testid="debtor-stats"
+          style={{
+            fontSize: "0.75rem",
+            fontVariantNumeric: "tabular-nums",
+            whiteSpace: "nowrap",
+            opacity: 0.9,
+            flexShrink: 0,
+            position: "relative",
+          }}
+        >
+          {debtorStats(p)}
+        </span>
+      )}
+
       {showPayments && (
         <button
           onClick={() => onOpenPayment(p)}
           style={{
-            padding: "2px 8px",
+            width: ActionWidth,
+            flexShrink: 0,
+            padding: "2px 0",
             borderRadius: 4,
             border: "1px solid rgba(255,255,255,0.2)",
             background: "rgba(255,255,255,0.15)",
@@ -532,6 +592,9 @@ function TrainingSessionBetaContent() {
     baseX: number;
     width: number;
     engaged: boolean;
+    /** Whether the word is on screen yet — see WheelRevealDelay. */
+    revealed: boolean;
+    revealTimer: ReturnType<typeof setTimeout> | null;
     x: number;
     samples: [number, number][];
   } | null>(null);
@@ -594,6 +657,10 @@ function TrainingSessionBetaContent() {
           // Presence changes what this month owes, which decides whether the
           // player shows up under Deudores; both outcomes came precomputed.
           owes_now: attended ? p.owes_if_present : p.owes_if_absent,
+          // Keeps the figures the debtors list shows in step with the toggle.
+          cur_attended: p.attended === attended
+            ? p.cur_attended
+            : Math.max(0, p.cur_attended + (attended ? 1 : -1)),
         }
         : p
     ));
@@ -607,7 +674,12 @@ function TrainingSessionBetaContent() {
       // Put it back: the write never happened.
       setPlayers((prev) => prev.map((p) =>
         p.id === playerId
-          ? { ...p, attended: !attended, owes_now: attended ? p.owes_if_absent : p.owes_if_present }
+          ? {
+            ...p,
+            attended: !attended,
+            owes_now: attended ? p.owes_if_absent : p.owes_if_present,
+            cur_attended: Math.max(0, p.cur_attended + (attended ? -1 : 1)),
+          }
           : p
       ));
       return;
@@ -659,6 +731,16 @@ function TrainingSessionBetaContent() {
     animsRef.current.set(playerId, requestAnimationFrame(step));
   }, [setRowWheel, setAttendance]);
 
+  /** Drops a gesture that never became a wheel turn, taking the pending
+   * reveal with it. Only a revealed row is cleared, so a plain tap costs no
+   * render at all. */
+  const endGesture = useCallback((g: { player: RosterPlayer; revealed: boolean; revealTimer: ReturnType<typeof setTimeout> | null }) => {
+    if (g.revealTimer !== null) clearTimeout(g.revealTimer);
+    g.revealTimer = null;
+    gestureRef.current = null;
+    if (g.revealed) setRowWheel(g.player.id, null);
+  }, [setRowWheel]);
+
   // Stable across renders so memoized rows are not invalidated by it.
   const gesture: GestureApi = useMemo(() => ({
     down: (e, player) => {
@@ -670,7 +752,7 @@ function TrainingSessionBetaContent() {
       }
       const el = e.currentTarget as HTMLElement;
       const baseX = wheelsRef.current.get(player.id)?.x ?? 0;
-      gestureRef.current = {
+      const g = {
         player,
         pointerId: e.pointerId,
         startX: e.clientX,
@@ -678,11 +760,22 @@ function TrainingSessionBetaContent() {
         baseX,
         width: el.clientWidth,
         engaged: false,
+        revealed: false,
+        revealTimer: null as ReturnType<typeof setTimeout> | null,
         x: baseX,
-        samples: [[performance.now(), baseX]],
+        samples: [[performance.now(), baseX]] as [number, number][],
       };
-      // The state word shows from the very finger-down.
-      setRowWheel(player.id, { attended: player.attended, x: baseX, width: el.clientWidth });
+      gestureRef.current = g;
+      // Showing the word on finger-down flickers it on every scroll that
+      // happens to start on a row. So it waits: a finger still on the row
+      // after this long meant to be there. A sideways move reveals it at
+      // once (below), a vertical one never does.
+      g.revealTimer = setTimeout(() => {
+        g.revealTimer = null;
+        if (gestureRef.current !== g) return;
+        g.revealed = true;
+        setRowWheel(player.id, { attended: player.attended, x: g.x, width: g.width });
+      }, WheelRevealDelay);
     },
     move: (e) => {
       const g = gestureRef.current;
@@ -693,12 +786,15 @@ function TrainingSessionBetaContent() {
       if (!g.engaged) {
         // Vertical intent: the scroller's gesture, not ours.
         if (Math.abs(dy) > WheelSlop && Math.abs(dy) >= Math.abs(dx)) {
-          gestureRef.current = null;
-          setRowWheel(g.player.id, null);
+          endGesture(g);
           return;
         }
         if (Math.abs(dx) > WheelSlop && Math.abs(dx) > Math.abs(dy)) {
           g.engaged = true;
+          // Sideways is unambiguous, so the word does not wait out the dwell.
+          if (g.revealTimer !== null) clearTimeout(g.revealTimer);
+          g.revealTimer = null;
+          g.revealed = true;
           try {
             (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
           } catch { /* capture is best-effort */ }
@@ -721,10 +817,10 @@ function TrainingSessionBetaContent() {
       const g = gestureRef.current;
       if (!g) return;
       if (!g.engaged) {
-        gestureRef.current = null;
-        setRowWheel(g.player.id, null);
+        endGesture(g);
         return;
       }
+      if (g.revealTimer !== null) clearTimeout(g.revealTimer);
       const [t0, x0] = g.samples[0];
       const [t1, x1] = g.samples[g.samples.length - 1];
       // A finger that stopped before lifting releases with no inertia.
@@ -733,10 +829,9 @@ function TrainingSessionBetaContent() {
     },
     cancel: () => {
       const g = gestureRef.current;
-      gestureRef.current = null;
-      if (g) setRowWheel(g.player.id, null);
+      if (g) endGesture(g);
     },
-  }), [setRowWheel, settleWheel]);
+  }), [setRowWheel, settleWheel, endGesture]);
 
   const registerPayment = useCallback(async (playerId: string, amount: number) => {
     setBusy(true);
@@ -791,13 +886,14 @@ function TrainingSessionBetaContent() {
   }, [sessionDate, sessionHour]);
   const monthLabel = `Mes de ${monthNameEs(sessionMonth)}`;
 
-  const renderRows = (list: RosterPlayer[], emptyText: string) =>
+  const renderRows = (list: RosterPlayer[], tone: SectionTone, emptyText: string) =>
     list.length === 0
       ? <p style={{ margin: 0, padding: "10px", fontSize: "0.85rem", opacity: 0.5 }}>{emptyText}</p>
       : list.map((p) => (
         <PlayerRow
           key={p.id}
           player={p}
+          tone={tone}
           wheel={wheels.get(p.id)}
           gesture={gesture}
           onOpenDebt={openDebt}
@@ -817,7 +913,7 @@ function TrainingSessionBetaContent() {
 
       {deudores.length > 0 && (
         <Section title="Deben" tone="debt" count={deudores.length} testId="section-deudores">
-          {renderRows(deudores, "")}
+          {renderRows(deudores, "debt", "")}
         </Section>
       )}
 
@@ -827,7 +923,7 @@ function TrainingSessionBetaContent() {
         count={jugadoresPresentes.length}
         testId="section-presentes"
       >
-        {renderRows(jugadoresPresentes, "Nadie")}
+        {renderRows(jugadoresPresentes, "present", "Nadie")}
       </Section>
 
       <Section
@@ -836,11 +932,12 @@ function TrainingSessionBetaContent() {
         count={ausentesBase.length + (expandedAbsent ? ausentesExtra.length : 0)}
         testId="section-ausentes"
       >
-        {renderRows(ausentesBase, "Nadie")}
+        {renderRows(ausentesBase, "absent", "Nadie")}
         {expandedAbsent && ausentesExtra.map((p) => (
           <PlayerRow
             key={p.id}
             player={p}
+            tone="absent"
             wheel={wheels.get(p.id)}
             gesture={gesture}
             onOpenDebt={openDebt}
@@ -885,7 +982,7 @@ function TrainingSessionBetaContent() {
         count={arquerosPresentes.length}
         testId="section-arqueros-presentes"
       >
-        {renderRows(arquerosPresentes, "Nadie")}
+        {renderRows(arquerosPresentes, "present", "Nadie")}
       </Section>
 
       <Section
@@ -894,7 +991,7 @@ function TrainingSessionBetaContent() {
         count={arquerosAusentes.length}
         testId="section-arqueros-ausentes"
       >
-        {renderRows(arquerosAusentes, "Sin arqueros")}
+        {renderRows(arquerosAusentes, "absent", "Sin arqueros")}
       </Section>
 
       {payModalPlayer && (
@@ -1057,6 +1154,11 @@ function sameRoster(a: RosterPlayer, b: RosterPlayer): boolean {
     a.owes_if_present === b.owes_if_present &&
     a.owes_if_absent === b.owes_if_absent &&
     a.owed_now === b.owed_now &&
+    a.prev_owed === b.prev_owed &&
+    a.prev_attended === b.prev_attended &&
+    a.prev_paid === b.prev_paid &&
+    a.cur_attended === b.cur_attended &&
+    a.cur_paid === b.cur_paid &&
     a.bought_month === b.bought_month &&
     a.carryover_sessions === b.carryover_sessions &&
     a.month_preset === b.month_preset &&

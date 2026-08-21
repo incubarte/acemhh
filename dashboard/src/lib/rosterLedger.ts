@@ -30,7 +30,22 @@ export type LedgerExtras = {
   /** Pesos still owed for this month right now — what a fresh payment has to
    * cover for the row to stop counting as a debtor. */
   owed_now: number;
+  /** Last month only: what was left unpaid, plus the attendance and payments
+   * behind it. Debt older than that is not what this screen is chasing. */
+  prev_owed: number;
+  prev_attended: number;
+  prev_paid: number;
+  cur_attended: number;
+  cur_paid: number;
 };
+
+/** The month before `month` (YYYY-MM). */
+function monthBefore(month: string): string {
+  const [year, m] = month.split("-").map(Number);
+  return m === 1
+    ? `${year - 1}-12`
+    : `${year}-${String(m - 1).padStart(2, "0")}`;
+}
 
 /** First day of the month after `month` (YYYY-MM), as YYYY-MM-DD. */
 function monthAfter(month: string): string {
@@ -51,6 +66,11 @@ export const LEDGER_DEFAULTS: LedgerExtras = {
   owes_if_present: false,
   owes_if_absent: false,
   owed_now: 0,
+  prev_owed: 0,
+  prev_attended: 0,
+  prev_paid: 0,
+  cur_attended: 0,
+  cur_paid: 0,
 };
 
 type RosterPlayer = {
@@ -169,6 +189,11 @@ export async function ledgerExtrasFor(
     const owesIfPresent = owesWith(activityNow.attended - here + 1);
     const owesIfAbsent = owesWith(Math.max(0, activityNow.attended - here));
 
+    const prevMonth = monthBefore(selectedMonth);
+    const prevRow = rows.find((r) => r.month === prevMonth);
+    const prevActivity = byMonth.get(prevMonth) ??
+      { attended: 0, paidMonthly: false, totalPaid: 0 };
+
     const k = (100 - scholarship) / 100;
     const prepaidUnit = Math.round(price.prepaid_session_price * k);
     extras.set(player.id, {
@@ -186,6 +211,11 @@ export async function ledgerExtrasFor(
       owes_if_present: owesIfPresent,
       owes_if_absent: owesIfAbsent,
       owed_now: Math.max(0, now.charge - activityNow.totalPaid),
+      prev_owed: prevRow ? Math.max(0, prevRow.charge - prevRow.paid) : 0,
+      prev_attended: prevActivity.attended,
+      prev_paid: prevActivity.totalPaid,
+      cur_attended: activityNow.attended,
+      cur_paid: activityNow.totalPaid,
     });
   }
 

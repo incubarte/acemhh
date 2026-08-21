@@ -101,22 +101,19 @@ test("solo la cuota anual completa cuenta como al día", async ({ page }) => {
     ).toBe(true);
   }
 
-  // Three visual states on the beta screen: amber for the partial payer,
-  // red for who paid nothing, no band at all for the settled one.
+  // Three visual states on the beta screen: an amber dot for the partial
+  // payer, red for who paid nothing, nothing at all for the settled one. The
+  // row itself carries no colour — that belongs to its section.
   await page.goto(`/training-sessions-beta/${SESSION}`);
   await expect(page.getByTestId("section-presentes")).toBeVisible();
   // A debtor renders twice (Deudores plus their own section); either copy
-  // carries the same band.
-  const rowOf = (name: string) => page.locator(`[data-player-row="${ids.get(name)}"]`).first();
+  // carries the same marker.
+  const dotOf = (name: string) =>
+    page.locator(`[data-player-row="${ids.get(name)}"]`).first().getByTestId("dues-dot");
 
-  await expect(rowOf("Parcial").getByTestId("dues-band-partial").first()).toBeVisible();
-  await expect(rowOf("Parcial").getByTestId("dues-band-solid")).toHaveCount(0);
-
-  await expect(rowOf("Nada").getByTestId("dues-band-solid").first()).toBeVisible();
-  await expect(rowOf("Nada").getByTestId("dues-band-partial")).toHaveCount(0);
-
-  await expect(rowOf("Completo").getByTestId("dues-band-partial")).toHaveCount(0);
-  await expect(rowOf("Completo").getByTestId("dues-band-solid")).toHaveCount(0);
+  await expect(dotOf("Parcial")).toHaveAttribute("data-dues", "partial");
+  await expect(dotOf("Nada")).toHaveAttribute("data-dues", "none");
+  await expect(dotOf("Completo")).toHaveCount(0);
 });
 
 test("la credencial del pagador parcial muestra sus cuotas y el saldo faltante", async ({ page }) => {

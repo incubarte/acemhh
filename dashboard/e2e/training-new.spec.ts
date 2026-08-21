@@ -143,10 +143,12 @@ async function openPage(page: Page) {
   await expect(page.getByTestId("section-presentes")).toBeVisible();
 }
 
-/** A player can appear twice (Deudores plus their own section); either copy
- * carries the same wheel, so the first is as good as the other. */
+/** A player can appear twice (Deudores plus their own section). Only the copy
+ * in their own section takes the wheel — the debtors list is inert. */
 function row(page: Page, name: string) {
-  return page.locator(`[data-player-row="${ids.get(name)}"]`).first();
+  // Deudores renders first, so the last copy is always the one in the
+  // player's own section.
+  return page.locator(`[data-player-row="${ids.get(name)}"]`).last();
 }
 
 /** Slides the attendance wheel by `fraction` of the row width — negative
@@ -162,19 +164,24 @@ async function slideWheel(page: Page, name: string, fraction: number) {
     ? page.waitForResponse((r) =>
       r.url().includes("/attendance") && r.request().method() === "POST")
     : null;
+  // Centred, and settled: near the bottom-left corner the dev-tools badge
+  // swallows the click, and the header's compaction shifts the row after a
+  // scroll — either one makes a measured box wrong.
+  await row(page, name).evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await page.waitForTimeout(400);
   const box = (await row(page, name).boundingBox())!;
   // Clear of the + button on the right, which the wheel gesture ignores.
   const startX = fraction >= 0 ? box.x + 20 : box.x + box.width - 70;
   const y = box.y + box.height / 2;
   await page.mouse.move(startX, y);
   await page.mouse.down();
-  // The state word shows from the finger-down, before any movement.
-  await expect(page.getByTestId("attendance-wheel").first()).toBeVisible();
   const distance = box.width * fraction;
   for (let i = 1; i <= 10; i++) {
     await page.mouse.move(startX + (distance * i) / 10, y);
     await page.waitForTimeout(30);
   }
+  // Moving sideways shows the state word without waiting out the dwell.
+  await expect(page.getByTestId("attendance-wheel").first()).toBeVisible();
   // Pause so the release velocity is ~zero.
   await page.waitForTimeout(250);
   await page.mouse.up();

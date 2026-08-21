@@ -68,7 +68,14 @@ test.describe("ruedita táctil real", () => {
   test("swipe lento pasando la mitad marca presente", async ({ page }) => {
     await openPage(page);
 
-    const row = page.locator(`[data-player-row="${ids.get("Lento")}"]`).first();
+    // Deudores renders first, so the last copy is the one in the player's own
+    // section — the copy in Deben takes no gesture at all.
+    const row = page.locator(`[data-player-row="${ids.get("Lento")}"]`).last();
+    // Centred, and settled: near the bottom-left corner the dev-tools badge
+    // swallows the touch, and the header's compaction shifts the row after a
+    // scroll — either one makes a measured box wrong.
+    await row.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await page.waitForTimeout(400);
     const box = (await row.boundingBox())!;
     const startX = box.x + 20;
     const y = box.y + box.height / 2;
@@ -104,7 +111,14 @@ test.describe("ruedita táctil real", () => {
   test("flick corto y veloz encastra en el imán y marca presente", async ({ page }) => {
     await openPage(page);
 
-    const row = page.locator(`[data-player-row="${ids.get("Rapido")}"]`).first();
+    // Deudores renders first, so the last copy is the one in the player's own
+    // section — the copy in Deben takes no gesture at all.
+    const row = page.locator(`[data-player-row="${ids.get("Rapido")}"]`).last();
+    // Centred, and settled: near the bottom-left corner the dev-tools badge
+    // swallows the touch, and the header's compaction shifts the row after a
+    // scroll — either one makes a measured box wrong.
+    await row.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await page.waitForTimeout(400);
     const box = (await row.boundingBox())!;
     const startX = box.x + 20;
     const y = box.y + box.height / 2;
@@ -136,7 +150,14 @@ test.describe("ruedita táctil real", () => {
   test("swipe vertical scrollea sin despertar la ruedita", async ({ page }) => {
     await openPage(page);
 
-    const row = page.locator(`[data-player-row="${ids.get("Quieto")}"]`).first();
+    // Deudores renders first, so the last copy is the one in the player's own
+    // section — the copy in Deben takes no gesture at all.
+    const row = page.locator(`[data-player-row="${ids.get("Quieto")}"]`).last();
+    // Centred, and settled: near the bottom-left corner the dev-tools badge
+    // swallows the touch, and the header's compaction shifts the row after a
+    // scroll — either one makes a measured box wrong.
+    await row.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await page.waitForTimeout(400);
     const box = (await row.boundingBox())!;
     const x = box.x + box.width / 2;
     let y = box.y + box.height / 2;

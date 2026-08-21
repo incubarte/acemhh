@@ -63,8 +63,14 @@ test.describe("Pixel 7 (Blink, como Android Chrome)", () => {
     await page.goto(`/training-sessions-beta/${SESSION}`);
     await expect(page.getByTestId("section-presentes")).toBeVisible();
 
-    const row = page.locator(`[data-player-row="${ids.get("Androide03")}"]`).first();
-    await row.scrollIntoViewIfNeeded();
+    // Deudores renders first, so the last copy is the one in the player's own
+    // section — the copy in Deben takes no gesture at all.
+    const row = page.locator(`[data-player-row="${ids.get("Androide03")}"]`).last();
+    // Centred, and settled: near the bottom-left corner the dev-tools badge
+    // swallows the touch, and the header's compaction shifts the row after a
+    // scroll — either one makes a measured box wrong.
+    await row.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await page.waitForTimeout(400);
     const box = (await row.boundingBox())!;
     const startX = box.x + 20;
     const y = box.y + box.height / 2;
@@ -99,7 +105,14 @@ test.describe("Pixel 7 (Blink, como Android Chrome)", () => {
     await page.goto(`/training-sessions-beta/${SESSION}`);
     await expect(page.getByTestId("section-presentes")).toBeVisible();
 
-    const row = page.locator(`[data-player-row="${ids.get("Androide05")}"]`).first();
+    // Deudores renders first, so the last copy is the one in the player's own
+    // section — the copy in Deben takes no gesture at all.
+    const row = page.locator(`[data-player-row="${ids.get("Androide05")}"]`).last();
+    // Centred, and settled: near the bottom-left corner the dev-tools badge
+    // swallows the touch, and the header's compaction shifts the row after a
+    // scroll — either one makes a measured box wrong.
+    await row.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await page.waitForTimeout(400);
     const box = (await row.boundingBox())!;
     const x = box.x + box.width / 2;
     let y = box.y + box.height / 2;
