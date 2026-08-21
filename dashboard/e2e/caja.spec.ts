@@ -246,3 +246,70 @@ test("saldo inicial, balance corrido y filtro por persona", async ({ page }) => 
   await s.from("payments").delete().eq("player_id", player!.id);
   await s.from("players").delete().eq("id", player!.id);
 });
+
+test("los cobros se discriminan por slot, y la entrega dice cuánto fue", async ({ page }) => {
+  const receiverId = await createReceiver();
+  const s = admin();
+
+  await s.from("players").delete().eq("dni", "99001103");
+  const { data: player } = await s.from("players").insert({
+    name: "__test-slots", last_name: RECEIVER_NAME, dni: "99001103",
+    categories: ["cat-b"], player_type: "player", trains: true, invitee: false,
+  }).select("id").single();
+
+  const pay = (createdAt: string, amount: number, slot: string) => ({
+    id: crypto.randomUUID(),
+    player_id: player!.id,
+    registered_by: "__test",
+    registered_by_user_id: receiverId,
+    concept: "session",
+    session: "2026-08-13 22hs",
+    month: "2026-08",
+    slot,
+    amount,
+    is_cash: true,
+    created_at: createdAt,
+  });
+  // One night, two trainings: the 21hs takings must not be lumped in with
+  // the 22hs ones just because the same person collected both.
+  const { error } = await s.from("payments").insert([
+    pay("2026-08-14T00:10:00Z", 30000, "jue 21hs"),
+    pay("2026-08-14T01:10:00Z", 30000, "jue 22hs"),
+    pay("2026-08-14T01:20:00Z", 45000, "jue 22hs"),
+  ]);
+  if (error) throw new Error(JSON.stringify(error));
+
+  await page.request.post("/api/auth/dev");
+  const me = (await (await page.request.get("/api/caja")).json()).me;
+
+  // An accepted handoff, so it lands among the movements instead of pending.
+  const { error: handoffError } = await s.from("cash_handoffs").insert({
+    from_user: me,
+    to_user: receiverId,
+    amount: 12345,
+    created_at: "2026-08-14T02:00:00Z",
+    accepted_at: "2026-08-14T02:05:00Z",
+  });
+  if (handoffError) throw new Error(JSON.stringify(handoffError));
+
+  await page.goto("/caja");
+  await expect(page.getByText("Cajas del club")).toBeVisible();
+
+  // One income entry per slot, each with its own takings.
+  await expect(page.getByText(/cobró 1 pago en jue 21hs/)).toBeVisible();
+  await expect(page.getByText(/cobró 2 pagos en jue 22hs/)).toBeVisible();
+
+  const caja = await (await page.request.get("/api/caja")).json();
+  const incomes = caja.history.filter((h: { kind: string }) => h.kind === "income");
+  expect(incomes.map((i: { slot: string; amount: number }) => [i.slot, i.amount]))
+    .toEqual([["jue 21hs", 30000], ["jue 22hs", 75000]]);
+
+  // Seen from the club's caja a handoff moves nothing, so the delta column
+  // reads "—": the amount has to be in the text or it is nowhere.
+  const handoff = page.getByText(/le entregó \$12\.345 a/);
+  await expect(handoff).toBeVisible();
+  expect(caja.history.find((h: { kind: string }) => h.kind === "handoff").delta).toBe(0);
+
+  await s.from("payments").delete().eq("player_id", player!.id);
+  await s.from("players").delete().eq("id", player!.id);
+});

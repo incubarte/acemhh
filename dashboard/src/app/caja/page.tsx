@@ -52,7 +52,10 @@ function FlowLine({ entry }: { entry: FlowEntry }) {
   if (entry.kind === "income") {
     return row(
       "💵",
-      <>{entry.name} cobró {entry.count === 1 ? "1 pago" : `${entry.count} pagos`}</>,
+      <>
+        {entry.name} cobró {entry.count === 1 ? "1 pago" : `${entry.count} pagos`}
+        {" "}en <strong>{entry.slot}</strong>
+      </>,
     );
   }
   if (entry.kind === "expense") {
@@ -65,9 +68,14 @@ function FlowLine({ entry }: { entry: FlowEntry }) {
       </>,
     );
   }
+  // The amount is spelled out because the delta column cannot show it: seen
+  // from the club's caja a handoff moves nothing, so that column reads "—".
   return row(
     "🔁",
-    <>{entry.from_name} le entregó caja a {entry.to_name}</>,
+    <>
+      {entry.from_name} le entregó <strong>{formatArs(entry.amount)}</strong>
+      {" "}a {entry.to_name}
+    </>,
   );
 }
 

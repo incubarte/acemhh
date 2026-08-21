@@ -26,25 +26,35 @@ export type IncomePayment = {
   user_id: string;
   amount: number;
   created_at: string;
+  /** The training the money was collected for ("jue 22hs"). Older rows,
+   * booked before the column existed, have none. */
+  slot: string | null;
 };
+
+/** What a group without a slot is called on screen. */
+export const NoSlotLabel = "sin slot";
 
 export type IncomeGroup = {
   user_id: string;
-  /** created_at of the first payment of the day; the entry sorts by it. */
+  /** created_at of the first payment of the group; the entry sorts by it. */
   start: string;
   /** The collection day (YYYY-MM-DD, 5am-anchored) this group belongs to. */
   day: string;
+  slot: string;
   amount: number;
   count: number;
 };
 
-/** One entry per collector per collection day. */
+/** One entry per collector per collection day per slot. A single night runs
+ * three trainings back to back, and one collector takes money at all of them,
+ * so the day alone lumps together takings that belong to different groups. */
 export function groupIncomeByDay(payments: IncomePayment[]): IncomeGroup[] {
   const groups = new Map<string, IncomeGroup>();
 
   for (const p of [...payments].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
     const day = collectionDay(p.created_at);
-    const key = `${p.user_id}|${day}`;
+    const slot = p.slot ?? NoSlotLabel;
+    const key = `${p.user_id}|${day}|${slot}`;
     const existing = groups.get(key);
     if (existing) {
       existing.amount += p.amount;
@@ -54,6 +64,7 @@ export function groupIncomeByDay(payments: IncomePayment[]): IncomeGroup[] {
         user_id: p.user_id,
         start: p.created_at,
         day,
+        slot,
         amount: p.amount,
         count: 1,
       });

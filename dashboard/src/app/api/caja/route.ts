@@ -20,7 +20,7 @@ export type PendingHandoff = {
 };
 
 type FlowKind =
-  | { kind: "income"; name: string; amount: number; count: number }
+  | { kind: "income"; name: string; amount: number; count: number; slot: string }
   | { kind: "expense"; name: string; amount: number; concept: string; notes: string | null; is_cash: boolean }
   | { kind: "handoff"; from_name: string; to_name: string; amount: number };
 
@@ -55,7 +55,7 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
   const [usersRes, paymentsRes, expensesRes, handoffsRes] = await Promise.all([
     s.from("users").select("id,first_name,last_name,groups"),
     s.from("payments")
-      .select("registered_by_user_id,amount,created_at")
+      .select("registered_by_user_id,amount,created_at,slot")
       .eq("is_cash", true)
       .not("registered_by_user_id", "is", null),
     s.from("expenses").select("paid_by,amount,concept,notes,is_cash,created_at"),
@@ -118,11 +118,13 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
     });
   }
 
-  // Income entries: one per collector per collection day (5am → 5am, BA).
+  // Income entries: one per collector per slot per collection day
+  // (5am → 5am, BA).
   const incomeGroups = groupIncomeByDay((paymentsRes.data ?? []).map((p) => ({
     user_id: p.registered_by_user_id!,
     amount: Number(p.amount),
     created_at: p.created_at,
+    slot: p.slot,
   })));
   for (const g of incomeGroups) {
     if (scope && g.user_id !== scope) continue;
@@ -133,6 +135,7 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
       name: nameOf.get(g.user_id) ?? "?",
       amount: g.amount,
       count: g.count,
+      slot: g.slot,
     });
   }
 
