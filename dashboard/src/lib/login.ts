@@ -8,13 +8,25 @@ import type { SessionUser, TelegramWebAppUser } from "@/lib/telegramAuth";
 export async function sessionFromTelegramIdentity(
   tg: TelegramWebAppUser,
 ): Promise<SessionUser | null> {
-  const { data, error } = await supabaseAdmin()
+  const sb = supabaseAdmin();
+
+  // Telegram fills in a name we do not have; it never replaces one we do.
+  // Whoever wrote the name in users knew something a Telegram profile does
+  // not, and a profile with no surname would otherwise blank it on every
+  // login. Only the gaps get filled.
+  const { data: existing } = await sb
+    .from("users")
+    .select("first_name,last_name")
+    .eq("tg_id", tg.id)
+    .maybeSingle();
+
+  const { data, error } = await sb
     .from("users")
     .upsert({
       tg_id: tg.id,
       tg_username: tg.username || null,
-      first_name: tg.first_name,
-      last_name: tg.last_name || null,
+      first_name: existing?.first_name ?? tg.first_name,
+      last_name: existing?.last_name ?? tg.last_name ?? null,
       last_login_at: new Date().toISOString(),
     }, { onConflict: "tg_id" })
     .select("id,first_name,last_name,tg_username,groups")
