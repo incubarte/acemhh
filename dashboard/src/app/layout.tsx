@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import Script from "next/script";
 
 import "./globals.css";
-import Header from "./components/Header";
+import TopStack from "./components/TopStack";
 import { PageTitleProvider } from "./components/PageTitleContext";
 
 export const metadata = {
@@ -15,9 +15,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body>
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
         <PageTitleProvider>
+          <TopStack />
           <div className="container">
             <div className="appShell">
-              <Header />
               {children}
             </div>
           </div>

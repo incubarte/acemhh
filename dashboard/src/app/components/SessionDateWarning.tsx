@@ -1,19 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Overlay from "./Overlay";
+import { TopStackSlotId } from "./TopStack";
 
 /**
  * Working on the wrong session is easy to do and hard to notice: the screen
- * looks identical whichever date is open. This pins a warning bar to the top
- * of the viewport for as long as that session stays open.
+ * looks identical whichever date is open. This pins a warning bar directly
+ * under the app header, staying put for as long as that session is open.
  *
- * It renders through a portal because the app shell has backdrop-filter —
- * which makes it the containing block for position:fixed descendants — and
- * because the shell's max-width and padding would keep a bar inside it from
- * spanning the screen. Body padding is pushed down by the bar's height so it
- * never covers the app header.
+ * It portals into the fixed top stack, which owns the pinning and pushes the
+ * page down by the whole bar's height — so the warning always sits below the
+ * header and never covers it.
  */
 export default function SessionDateWarning({
   sessionDate,
@@ -22,30 +20,7 @@ export default function SessionDateWarning({
   sessionDate: string;
   currentDate: string | null;
 }) {
-  const barRef = useRef<HTMLDivElement | null>(null);
-  const [height, setHeight] = useState(0);
-  const show = Boolean(currentDate && sessionDate && sessionDate !== currentDate);
-
-  useEffect(() => {
-    const el = barRef.current;
-    if (!show || !el) return;
-    const measure = () => setHeight(el.getBoundingClientRect().height);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [show, sessionDate, currentDate]);
-
-  useEffect(() => {
-    if (!show || height === 0) return;
-    const previous = document.body.style.paddingTop;
-    document.body.style.paddingTop = `${height}px`;
-    return () => {
-      document.body.style.paddingTop = previous;
-    };
-  }, [show, height]);
-
-  if (!show || !currentDate) return null;
+  if (!currentDate || !sessionDate || sessionDate === currentDate) return null;
 
   const when = sessionDate < currentDate ? "pasada" : "futura";
   const format = (d: string) =>
@@ -58,16 +33,10 @@ export default function SessionDateWarning({
   // Solid light amber with dark type: on a screen that is otherwise dark, an
   // inverted bar is what actually stops the eye.
   return (
-    <Overlay>
+    <Overlay targetId={TopStackSlotId}>
       <div
-        ref={barRef}
         data-testid="session-date-warning"
         style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          zIndex: 60,
           padding: "10px 14px",
           borderBottom: "3px solid #b45309",
           background: "#fde68a",

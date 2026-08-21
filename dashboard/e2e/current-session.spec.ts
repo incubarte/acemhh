@@ -125,7 +125,7 @@ test("el cartel avisa cuando la sesión abierta no es la actual", async ({ page 
   await page.waitForURL(`**/training-sessions?date=${today}`);
 });
 
-test("el cartel queda fijo arriba y a todo el ancho", async ({ page }) => {
+test("header y cartel quedan fijos arriba, a todo el ancho y en orden", async ({ page }) => {
   await addSlot(today);
   await addSlot(future);
   await page.request.post("/api/auth/dev");
@@ -133,25 +133,41 @@ test("el cartel queda fijo arriba y a todo el ancho", async ({ page }) => {
 
   for (const base of ["training-sessions", "training-sessions-beta"]) {
     await page.goto(`/${base}/${future}-22`);
+    const header = page.getByTestId("app-header");
     const warning = page.getByTestId("session-date-warning");
     await expect(warning).toBeVisible();
 
-    const box = (await warning.boundingBox())!;
-    expect(box.x).toBe(0);
-    expect(box.width).toBe(390); // edge to edge, not inside the shell
-    expect(box.y).toBe(0);
-
-    // It must not cover the app header: the page is pushed down by its height.
-    const header = page.getByRole("heading", { name: "Asistencia y Pagos" });
+    // Header first, warning right below it, both edge to edge.
     const headerBox = (await header.boundingBox())!;
-    expect(headerBox.y).toBeGreaterThanOrEqual(box.height);
+    const warnBox = (await warning.boundingBox())!;
+    expect(headerBox.y).toBe(0);
+    expect(headerBox.width).toBe(390);
+    expect(warnBox.x).toBe(0);
+    expect(warnBox.width).toBe(390);
+    expect(Math.round(warnBox.y)).toBe(Math.round(headerBox.y + headerBox.height));
 
-    // And it stays put while scrolling.
+    // Page content starts below the whole stack.
+    const firstContent = page.locator(".appShell");
+    expect((await firstContent.boundingBox())!.y)
+      .toBeGreaterThanOrEqual(warnBox.y + warnBox.height);
+
+    // Both stay put while scrolling, and the header shrinks.
     await page.mouse.wheel(0, 1200);
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(400);
     expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(100);
+    await expect(header).toHaveAttribute("data-compact", "true");
     await expect(warning).toBeInViewport({ ratio: 0.95 });
-    expect((await warning.boundingBox())!.y).toBe(0);
+
+    const scrolledHeader = (await header.boundingBox())!;
+    expect(scrolledHeader.y).toBe(0);
+    expect(scrolledHeader.height).toBeLessThan(headerBox.height);
+
+    // The back arrow survives the shrink and keeps a thumb-sized hit area.
+    const back = page.getByRole("button", { name: "Volver" });
+    await expect(back).toBeVisible();
+    const backBox = (await back.boundingBox())!;
+    expect(backBox.height).toBeGreaterThanOrEqual(40);
+    expect(backBox.width).toBeGreaterThanOrEqual(40);
   }
 });
 
