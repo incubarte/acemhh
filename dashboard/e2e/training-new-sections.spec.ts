@@ -207,3 +207,127 @@ test("la fila de Deben no toma el gesto: ni desliza ni cambia de color", async (
   const bg = await debtRow.evaluate((el) => getComputedStyle(el).backgroundColor);
   expect(bg).toBe("rgba(0, 0, 0, 0)");
 });
+
+test("el refresh no reordena las filas mientras el dedo sigue marcando", async ({ page }) => {
+  await openPage(page);
+  const presentes = page.getByTestId("section-presentes");
+  const ausentes = page.getByTestId("section-ausentes");
+  const row = (name: string) => `[data-player-row="${ids.get(name)}"]`;
+
+  // The server is told Alcorriente is absent, but its answer is held at the
+  // route until we let it through — so the moment it lands is ours to pick.
+  let releaseRefresh: () => void = () => {};
+  let served = 0;
+  await page.route("**/api/training-sessions-beta/**", async (route) => {
+    served += 1;
+    await new Promise<void>((resolve) => { releaseRefresh = resolve; });
+    await route.continue();
+  });
+
+  await admin().from("attendances")
+    .update({ attended: false })
+    .eq("player_id", ids.get("Alcorriente")!)
+    .eq("session", SESSION_STR);
+
+  /** Turns the wheel by `fraction` of the row width and lets go. */
+  const slide = async (name: string, fraction: number) => {
+    const target = rowIn(page, "section-presentes", name);
+    await target.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await page.waitForTimeout(400);
+    const box = (await target.boundingBox())!;
+    const from = box.x + box.width - 70;
+    const y = box.y + box.height / 2;
+    await page.mouse.move(from, y);
+    await page.mouse.down();
+    for (let i = 1; i <= 10; i++) {
+      await page.mouse.move(from + (box.width * fraction * i) / 10, y);
+      await page.waitForTimeout(30);
+    }
+    await page.waitForTimeout(250); // release with ~zero velocity
+    await page.mouse.up();
+  };
+
+  // Marking Moroso absent fires its refresh, which the route now holds.
+  await slide("Moroso", -0.8);
+  await expect(presentes.locator(row("Moroso"))).toHaveCount(0);
+  await expect.poll(() => served).toBeGreaterThan(0);
+
+  // Now put a finger down on another row and keep it there. Only once it is
+  // down do we let the answer through, so it necessarily lands mid-gesture.
+  const box = (await rowIn(page, "section-presentes", "Alcorriente").boundingBox())!;
+  const from = box.x + box.width - 70;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(from, y);
+  await page.mouse.down();
+  await page.mouse.move(from - 40, y);
+  await expect(page.getByTestId("attendance-wheel").first()).toBeVisible();
+
+  releaseRefresh();
+  await page.waitForTimeout(600);
+
+  // Held: the row under the thumb has not been pulled out from under it.
+  await expect(presentes.locator(row("Alcorriente"))).toBeVisible();
+  await expect(ausentes.locator(row("Alcorriente"))).toHaveCount(0);
+
+  // Let go — snapping back, so nothing is toggled — and the quiet window
+  // finally lets the answer land.
+  await page.mouse.move(from, y);
+  await page.mouse.up();
+  await expect(ausentes.locator(row("Alcorriente"))).toBeVisible({ timeout: 4000 });
+  await expect(presentes.locator(row("Alcorriente"))).toHaveCount(0);
+
+  await admin().from("attendances")
+    .update({ attended: true })
+    .eq("player_id", ids.get("Alcorriente")!)
+    .eq("session", SESSION_STR);
+});
+
+test("una respuesta vieja no pisa un cambio que ya está en pantalla", async ({ page }) => {
+  // Moroso is left absent by the previous test; this one needs them present.
+  await admin().from("attendances")
+    .update({ attended: true })
+    .eq("player_id", ids.get("Moroso")!)
+    .eq("session", SESSION_STR);
+  await openPage(page);
+
+  // Each refresh reaches the server — so its body is a real snapshot of that
+  // moment — but the answer is parked until we let it through, in order.
+  const gates: Array<() => void> = [];
+  await page.route("**/api/training-sessions-beta/**", async (route) => {
+    const response = await route.fetch();
+    const body = await response.text();
+    await new Promise<void>((resolve) => gates.push(resolve));
+    await route.fulfill({ status: response.status(), headers: response.headers(), body });
+  });
+
+  const pay = async (name: string) => {
+    await rowIn(page, "section-presentes", name).getByRole("button", { name: "+" }).click();
+    const modal = page.getByTestId("payment-modal");
+    await modal.getByText(/Sesión individual/).click();
+    await modal.getByRole("button", { name: "Confirmar" }).click();
+    await expect(modal).toHaveCount(0);
+  };
+
+  // Alcorriente first: its refresh snapshots a server that knows nothing of
+  // the payment Moroso is about to make.
+  await pay("Alcorriente");
+  await expect(rowIn(page, "section-presentes", "Alcorriente").getByText(/\(30k, 30k\)/))
+    .toBeVisible();
+
+  await pay("Moroso");
+  const moroso = rowIn(page, "section-presentes", "Moroso");
+  await expect(moroso.getByText(/\(30k\)/)).toBeVisible();
+
+  await expect.poll(() => gates.length).toBe(2);
+
+  // Letting the FIRST one through: it is a snapshot from before Moroso paid,
+  // and a later refresh is already in flight, so it must be thrown away
+  // rather than applied — otherwise the payment vanishes from the row.
+  gates[0]();
+  await page.waitForTimeout(600);
+  await expect(moroso.getByText(/\(30k\)/)).toBeVisible();
+
+  // The up-to-date one only confirms what is already on screen.
+  gates[1]();
+  await expect(moroso.getByText(/\(30k\)/)).toBeVisible();
+});

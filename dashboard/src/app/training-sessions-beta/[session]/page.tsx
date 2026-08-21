@@ -78,6 +78,11 @@ type WheelVisual = {
  * short enough that a deliberate press feels immediate. */
 const WheelRevealDelay = 180;
 
+/** How long the wheel must sit still before a refresh is allowed to reshuffle
+ * the rows. Long enough to cover a run of quick toggles, short enough that a
+ * pause reads as "done". */
+const QuietAfterGesture = 1000;
+
 const WheelSlop = 10;
 /** Release velocity (px/ms) that flicks to the next detent regardless of position. */
 const FlickVelocity = 0.4;
@@ -194,6 +199,11 @@ function withPayment(p: RosterPlayer, amount: number): RosterPlayer {
     cur_paid: p.cur_paid + amount,
   };
 }
+
+type RosterResponse = {
+  current_date?: string | null;
+  players?: RosterPlayer[];
+};
 
 // ---- Row ----
 
@@ -611,11 +621,44 @@ function TrainingSessionBetaContent() {
     return () => window.removeEventListener("touchmove", fn);
   }, []);
 
-  // Only the newest refresh counts: any response older than the last one
-  // applied is dropped, so overlapping requests can never resurrect stale
-  // rows over an optimistic change.
+  // Only the newest refresh counts. A response is worth anything only while
+  // no later request has been issued: since every optimistic change fires its
+  // own refresh once its write landed, an outstanding later request is proof
+  // this response predates something already on screen. Applying it would
+  // revert that change, so it is dropped outright rather than held.
   const reqSeqRef = useRef(0);
-  const appliedSeqRef = useRef(0);
+
+  /** A refresh that arrived while the admin was still working, waiting for a
+   * gap to be applied. Superseded wholesale by any newer response. */
+  const pendingRef = useRef<RosterResponse | null>(null);
+  /** performance.now() of the last gesture that ended; -Infinity before the
+   * first one, so an untouched screen never holds anything back. */
+  const lastGestureEndRef = useRef(-Infinity);
+  const applyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const applyRoster = useCallback((data: RosterResponse) => {
+    pendingRef.current = null;
+    setCurrentDate(data.current_date ?? null);
+    // Reuse the existing object for players whose data did not change, so
+    // React skips re-rendering their (memoized) rows entirely.
+    setPlayers((prev) => {
+      const byId = new Map(prev.map((p) => [p.id, p]));
+      return (data.players ?? []).map((incoming) => {
+        const existing = byId.get(incoming.id);
+        return existing && sameRoster(existing, incoming) ? existing : incoming;
+      });
+    });
+    setErr(null);
+    setLoading(false);
+  }, []);
+
+  /** Rows must not reshuffle under a thumb that is still marking attendance:
+   * a refresh lands only once the wheel has been still for QuietAfterGesture.
+   * Returns how long is left to wait, or 0 when the coast is clear. */
+  const quietIn = useCallback(() => {
+    if (gestureRef.current) return QuietAfterGesture;
+    return Math.max(0, QuietAfterGesture - (performance.now() - lastGestureEndRef.current));
+  }, []);
 
   const reload = useCallback(async () => {
     const seq = ++reqSeqRef.current;
@@ -625,26 +668,33 @@ function TrainingSessionBetaContent() {
       setLoading(false);
       return;
     }
-    const data = await res.json();
-    if (seq <= appliedSeqRef.current) return;
-    appliedSeqRef.current = seq;
-    setCurrentDate(data.current_date ?? null);
-    // Reuse the existing object for players whose data did not change, so
-    // React skips re-rendering their (memoized) rows entirely.
-    setPlayers((prev) => {
-      const byId = new Map(prev.map((p) => [p.id, p]));
-      return (data.players ?? []).map((incoming: RosterPlayer) => {
-        const existing = byId.get(incoming.id);
-        return existing && sameRoster(existing, incoming) ? existing : incoming;
-      });
-    });
-    setErr(null);
-    setLoading(false);
-  }, [session]);
+    const data = (await res.json()) as RosterResponse;
+    if (seq < reqSeqRef.current) return;
+
+    if (quietIn() > 0) pendingRef.current = data;
+    else applyRoster(data);
+  }, [session, quietIn, applyRoster]);
 
   useEffect(() => {
     reload();
   }, [reload]);
+
+  useEffect(() => () => {
+    if (applyTimerRef.current !== null) clearTimeout(applyTimerRef.current);
+  }, []);
+
+  /** Called when a gesture ends — every gesture, including one that snapped
+   * back without toggling: what buys the quiet window is the thumb being
+   * busy, not the change. Restarts the wait, so a run of quick toggles keeps
+   * the screen still until the admin actually stops. */
+  const noteGestureEnd = useCallback(() => {
+    lastGestureEndRef.current = performance.now();
+    if (applyTimerRef.current !== null) clearTimeout(applyTimerRef.current);
+    applyTimerRef.current = setTimeout(() => {
+      applyTimerRef.current = null;
+      if (pendingRef.current) applyRoster(pendingRef.current);
+    }, QuietAfterGesture);
+  }, [applyRoster]);
 
   /** Marks attendance right away and refreshes in the background: the row
    * moves on the spot, and whichever refresh lands last wins. */
@@ -739,7 +789,8 @@ function TrainingSessionBetaContent() {
     g.revealTimer = null;
     gestureRef.current = null;
     if (g.revealed) setRowWheel(g.player.id, null);
-  }, [setRowWheel]);
+    noteGestureEnd();
+  }, [setRowWheel, noteGestureEnd]);
 
   // Stable across renders so memoized rows are not invalidated by it.
   const gesture: GestureApi = useMemo(() => ({
@@ -821,6 +872,7 @@ function TrainingSessionBetaContent() {
         return;
       }
       if (g.revealTimer !== null) clearTimeout(g.revealTimer);
+      noteGestureEnd();
       const [t0, x0] = g.samples[0];
       const [t1, x1] = g.samples[g.samples.length - 1];
       // A finger that stopped before lifting releases with no inertia.
@@ -831,7 +883,7 @@ function TrainingSessionBetaContent() {
       const g = gestureRef.current;
       if (g) endGesture(g);
     },
-  }), [setRowWheel, settleWheel, endGesture]);
+  }), [setRowWheel, settleWheel, endGesture, noteGestureEnd]);
 
   const registerPayment = useCallback(async (playerId: string, amount: number) => {
     setBusy(true);
