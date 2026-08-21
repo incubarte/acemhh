@@ -4,6 +4,7 @@ import React, { Suspense, useCallback, useEffect, useRef, useState } from "react
 import { useParams } from "next/navigation";
 import ProtectedPage from "../../components/ProtectedPage";
 import Overlay from "../../components/Overlay";
+import SessionDateWarning from "../../components/SessionDateWarning";
 import { usePageTitle } from "../../components/PageTitleContext";
 
 // Redesigned attendance & payments screen. Presence is expressed by the
@@ -86,6 +87,8 @@ function TrainingSessionNewContent() {
   const session = params.session as string; // YYYY-MM-DD-HH
 
   const [players, setPlayers] = useState<RosterPlayer[]>([]);
+  /** The date the club is working on, to flag browsing a different session. */
+  const [currentDate, setCurrentDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [expandedAbsent, setExpandedAbsent] = useState(false);
@@ -183,6 +186,7 @@ function TrainingSessionNewContent() {
       }
       const data = await res.json();
       const roster = (data.players ?? []) as RosterPlayer[];
+      setCurrentDate(data.current_date ?? null);
       if (seq <= storedSeqRef.current) return; // an older response arriving late
       storedSeqRef.current = seq;
       if (overridesRef.current.size > 0) {
@@ -743,6 +747,8 @@ function TrainingSessionNewContent() {
 
   return (
     <div style={{ paddingBottom: 60 }}>
+
+      <SessionDateWarning sessionDate={session.slice(0, 10)} currentDate={currentDate} />
 
       {sectionTitle(`Presentes — total: ${presentes.length}`)}
       <div data-testid="section-presentes" style={{ border: rowBorder, borderRadius: 10, overflow: "hidden" }}>

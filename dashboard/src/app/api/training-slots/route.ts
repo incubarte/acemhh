@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
+import { currentTrainingDate } from "@/lib/trainingDay";
 
 export type DaySlot = {
   hour: number;
@@ -14,6 +15,8 @@ export type TrainingDay = {
   /** Nearest earlier/later dates that have slots — holidays are skipped for free. */
   prev: string | null;
   next: string | null;
+  /** The date the app considers current, to tell apart browsing from working. */
+  current: string | null;
 };
 
 // ?date=YYYY-MM-DD returns that day (possibly with no slots) and its
@@ -28,27 +31,13 @@ export const GET = withPermission('api', '/api/training-slots', 'GET', async (se
 
   const s = supabaseAdmin();
 
+  // Opening the screen lands on the session being worked on — today's, or
+  // yesterday's when today has none — rather than the next one on the agenda.
+  const current = await currentTrainingDate(s);
   let date = requested;
   if (!date) {
-    const today = new Date().toISOString().slice(0, 10);
-    const { data: upcoming, error } = await s.from("training_slots")
-      .select("date")
-      .gte("date", today)
-      .order("date")
-      .limit(1);
-    if (error) return new NextResponse(error.message, { status: 500 });
-
-    if (upcoming?.length) {
-      date = upcoming[0].date;
-    } else {
-      const { data: last, error: lastError } = await s.from("training_slots")
-        .select("date")
-        .order("date", { ascending: false })
-        .limit(1);
-      if (lastError) return new NextResponse(lastError.message, { status: 500 });
-      if (!last?.length) return NextResponse.json({ day: null });
-      date = last[0].date;
-    }
+    if (!current) return NextResponse.json({ day: null });
+    date = current;
   }
 
   const [slotsRes, prevRes, nextRes] = await Promise.all([
@@ -80,6 +69,7 @@ export const GET = withPermission('api', '/api/training-slots', 'GET', async (se
     })),
     prev: prevRes.data?.[0]?.date ?? null,
     next: nextRes.data?.[0]?.date ?? null,
+    current,
   };
 
   return NextResponse.json({ day });

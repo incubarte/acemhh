@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
 import { LEDGER_DEFAULTS, ledgerExtrasFor } from "@/lib/rosterLedger";
 import { duesStatusFor, duesTotalsByPlayer } from "@/lib/dues";
+import { currentTrainingDate } from "@/lib/trainingDay";
 
 function toSpecificSlot(isoDate: string, hour: string): string {
   return `${isoDate} ${hour}hs`;
@@ -250,6 +251,8 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
         ...(extras.get(p.id as string) ?? LEDGER_DEFAULTS),
       })),
       slot: { categories: cats, goalies: slot.goalies },
+      // Lets the screen warn when a past or future session is open.
+      current_date: await currentTrainingDate(s),
     });
   } catch (error) {
     console.error(error);

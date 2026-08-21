@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
 import { LEDGER_DEFAULTS, ledgerExtrasFor } from "@/lib/rosterLedger";
 import { duesStatusFor, duesTotalsByPlayer } from "@/lib/dues";
+import { currentTrainingDate } from "@/lib/trainingDay";
 
 // Roster for the redesigned attendance & payments screen. Unlike the legacy
 // route it ignores the trains flag entirely, includes every player whose
@@ -209,6 +210,8 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
         };
       }),
       slot: { categories: cats, goalies: slot.goalies },
+      // Lets the screen warn when a past or future session is open.
+      current_date: await currentTrainingDate(s),
     });
   } catch (error) {
     console.error(error);

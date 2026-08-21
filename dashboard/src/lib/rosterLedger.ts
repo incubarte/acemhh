@@ -24,6 +24,14 @@ export type LedgerExtras = {
   bought_month: boolean;
 };
 
+/** First day of the month after `month` (YYYY-MM), as YYYY-MM-DD. */
+function monthAfter(month: string): string {
+  const [year, m] = month.split("-").map(Number);
+  return m === 12
+    ? `${year + 1}-01-01`
+    : `${year}-${String(m + 1).padStart(2, "0")}-01`;
+}
+
 export const LEDGER_DEFAULTS: LedgerExtras = {
   carryover_sessions: 0,
   debt: 0,
@@ -64,7 +72,9 @@ export async function ledgerExtrasFor(
     s.from("training_slots")
       .select("date,categories,goalies")
       .gte("date", `${carryFrom}-01`)
-      .lte("date", `${selectedMonth}-31`),
+      // Bounded by the first of the NEXT month: "YYYY-09-31" is not a date,
+      // and Postgres rejects the whole query rather than clamping it.
+      .lt("date", monthAfter(selectedMonth)),
     s.from("payments")
       .select("player_id,month,concept,amount")
       .in("player_id", ids)

@@ -4,6 +4,7 @@ import React, { Suspense, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import ProtectedPage from "../../components/ProtectedPage";
 import Overlay from "../../components/Overlay";
+import SessionDateWarning from "../../components/SessionDateWarning";
 import { usePageTitle } from "../../components/PageTitleContext";
 import { paymentThresholdOverride } from "@/lib/thresholds";
 
@@ -84,6 +85,8 @@ function TrainingSessionDetailContent() {
   // The slot definition (categories, goalie-friendliness) comes from the
   // roster API, which reads it from the database.
   const [slotInfo, setSlotInfo] = useState<{ categories: string[]; goalies: boolean } | null>(null);
+  /** The date the club is working on, to flag browsing a different session. */
+  const [currentDate, setCurrentDate] = useState<string | null>(null);
   const [debtModalPlayer, setDebtModalPlayer] = useState<PlayerWithAttendance | null>(null);
 
   // Parse session string
@@ -128,6 +131,7 @@ function TrainingSessionDetailContent() {
         const data = await res.json();
         setPlayers(data.players || []);
         if (data.slot) setSlotInfo(data.slot);
+        setCurrentDate(data.current_date ?? null);
         setLoading(false);
       } catch {
         setErr("Error al cargar jugadores");
@@ -212,6 +216,7 @@ function TrainingSessionDetailContent() {
         const data = await playersRes.json();
         setPlayers(data.players || []);
         if (data.slot) setSlotInfo(data.slot);
+        setCurrentDate(data.current_date ?? null);
       }
 
       setPaymentProcessing(false);
@@ -282,6 +287,7 @@ function TrainingSessionDetailContent() {
         const data = await res.json();
         setPlayers(data.players || []);
         if (data.slot) setSlotInfo(data.slot);
+        setCurrentDate(data.current_date ?? null);
       }
     } catch {
       alert("Error al agregar invitado");
@@ -321,6 +327,7 @@ function TrainingSessionDetailContent() {
         const data = await res.json();
         setPlayers(data.players || []);
         if (data.slot) setSlotInfo(data.slot);
+        setCurrentDate(data.current_date ?? null);
       }
     } catch {
       alert("Error al agregar arquero");
@@ -835,6 +842,7 @@ function TrainingSessionDetailContent() {
     <ProtectedPage requiredPage={currentPath}>
       <div>
         <div style={{ padding: "0 20px" }}>
+          <SessionDateWarning sessionDate={dateStr} currentDate={currentDate} />
           <div className="card" style={{ marginTop: 12, marginLeft: -15, marginRight: -15, borderRadius: "8px" }}>
             <div><strong>Fecha:</strong> {formatDate(date)}</div>
             <div><strong>Horario:</strong> {hour}:00hs</div>
