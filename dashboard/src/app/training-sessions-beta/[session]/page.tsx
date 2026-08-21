@@ -325,6 +325,7 @@ const PlayerRow = React.memo(function PlayerRow({
           position: "relative",
         }}
       >
+        {p.last_name}, {p.name}
         {duesDot && (
           <span
             data-testid="dues-dot"
@@ -332,12 +333,11 @@ const PlayerRow = React.memo(function PlayerRow({
             title={p.dues_status === "partial"
               ? "Cuota anual paga en parte"
               : "Cuota anual impaga"}
-            style={{ color: duesDot, marginRight: 5 }}
+            style={{ color: duesDot, marginLeft: 5 }}
           >
             ●
           </span>
         )}
-        {p.last_name}, {p.name}
         {p.payment_amounts.length > 0 && (
           <span style={{ opacity: 0.85 }}>
             {" "}({p.payment_amounts.map(formatArs).join(", ")})
