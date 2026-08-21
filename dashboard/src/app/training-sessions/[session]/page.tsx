@@ -34,8 +34,6 @@ type PlayerWithAttendance = Player & {
   session_preset: number | null;
   /** Whether this month's charge is currently unpaid; null on pre-ledger sessions. */
   owes_now: boolean | null;
-  attended_this_month: number;
-  paid_this_month: number;
   section: "jugadores" | "invitados" | "arqueros";
 };
 
@@ -369,12 +367,12 @@ function TrainingSessionDetailContent() {
   const playerOwes = (p: PlayerWithAttendance) =>
     p.owes_now ?? (p.payments < PAYMENT_THRESHOLD * (100 - p.scholarship) / 100);
 
-  // The bottom group is "came this month and owes nothing". A player with no
-  // attendance and no payment is not settled — they simply have not shown up
-  // yet — so they belong up top with those who owe, not among the finished.
-  const playerSettled = (p: PlayerWithAttendance) =>
-    !playerOwes(p) &&
-    ((p.attended_this_month ?? 0) > 0 || (p.paid_this_month ?? 0) > 0);
+  // Only one thing sends a player to the bottom group: having paid this
+  // month's bundle or this very session. Attendance does not enter into it,
+  // and neither does a payment for an earlier session of the month —
+  // hasSessionPayment is already exactly that (bundle for this slot, or a
+  // payment against this session).
+  const playerSettled = (p: PlayerWithAttendance) => p.hasSessionPayment;
 
   const jugadores = players
     .filter(p => p.section === "jugadores")

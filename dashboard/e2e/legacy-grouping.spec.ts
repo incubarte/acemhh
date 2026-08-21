@@ -2,9 +2,9 @@ import { test, expect } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 // The legacy attendance screen splits Jugadores in two, separated by an
-// orange rule. The bottom group is "came this month and owes nothing" —
-// a player who never showed up and never paid is NOT settled and belongs
-// up top, next to those who owe.
+// orange rule. Only one thing sends a player to the bottom group: having
+// paid this month's bundle or this very session. Attendance never does, and
+// neither does a payment for an earlier session of the month.
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? "http://127.0.0.1:54321";
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ??
@@ -13,6 +13,7 @@ const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ??
 const SESSION = "2026-08-20-22";
 const SESSION_STR = "2026-08-20 22hs";
 const PREV_STR = "2026-08-06 22hs";
+const SLOT = "jue 22hs";
 const LAST = "Grouptest";
 
 function admin(): SupabaseClient {
@@ -22,6 +23,18 @@ function admin(): SupabaseClient {
 }
 
 const ids = new Map<string, string>();
+
+/** The seven cases, in the order the user enumerated them. Names are
+ * prefixed so alphabetical order cannot accidentally satisfy the assertion. */
+const CASES = [
+  { name: "Cnovinonopago", top: true, attended: null, pay: null },
+  { name: "Avinoantesnopago", top: true, attended: PREV_STR, pay: null },
+  { name: "Bvinoantespagoesa", top: true, attended: PREV_STR, pay: "prev-session" },
+  { name: "Dvinoactualnopago", top: true, attended: SESSION_STR, pay: null },
+  { name: "Anovinopagomes", top: false, attended: null, pay: "month" },
+  { name: "Bvinopagomes", top: false, attended: PREV_STR, pay: "month" },
+  { name: "Cvinoactualpagosesion", top: false, attended: SESSION_STR, pay: "session" },
+] as const;
 
 async function cleanup() {
   const s = admin();
@@ -36,66 +49,71 @@ async function cleanup() {
 test.beforeAll(async () => {
   await cleanup();
   const s = admin();
-  const mk = (name: string, dni: string) => ({
-    name,
-    last_name: LAST,
-    dni,
-    categories: ["cat-b"],
-    player_type: "player",
-    trains: true,
-    invitee: false,
-  });
+
   const { data: players, error } = await s.from("players")
-    .insert([
-      mk("Adeuda", "99001201"),   // attended, did not pay
-      mk("Alpedo", "99001202"),   // never came, never paid
-      mk("Zpagado", "99001203"),  // attended and paid
-    ])
+    .insert(CASES.map((c, i) => ({
+      name: c.name,
+      last_name: LAST,
+      dni: `9900130${i}`,
+      categories: ["cat-b"],
+      player_type: "player",
+      trains: true,
+      invitee: false,
+    })))
     .select("id,name");
   if (error) throw new Error(JSON.stringify(error));
   for (const p of players!) ids.set(p.name, p.id);
 
-  await s.from("attendances").insert([
-    { player_id: ids.get("Adeuda")!, session: PREV_STR, attended: true },
-    { player_id: ids.get("Zpagado")!, session: PREV_STR, attended: true },
-  ]);
-  const { error: payError } = await s.from("payments").insert([{
-    id: crypto.randomUUID(),
-    player_id: ids.get("Zpagado")!,
-    registered_by: "__test",
-    concept: "session",
-    session: PREV_STR,
-    month: "2026-08",
-    amount: 30000,
-    is_cash: true,
-  }]);
+  const attendances = CASES.filter((c) => c.attended).map((c) => ({
+    player_id: ids.get(c.name)!,
+    session: c.attended!,
+    attended: true,
+  }));
+  if (attendances.length) await s.from("attendances").insert(attendances);
+
+  const payment = (c: typeof CASES[number]) => {
+    const base = {
+      id: crypto.randomUUID(),
+      player_id: ids.get(c.name)!,
+      registered_by: "__test",
+      month: "2026-08",
+      is_cash: true,
+    };
+    if (c.pay === "month") {
+      return { ...base, concept: "monthly", slot: SLOT, amount: 100000 };
+    }
+    if (c.pay === "session") {
+      return { ...base, concept: "session", session: SESSION_STR, amount: 30000 };
+    }
+    // An earlier session of the same month: does NOT settle this one.
+    return { ...base, concept: "session", session: PREV_STR, amount: 30000 };
+  };
+
+  const payments = CASES.filter((c) => c.pay).map(payment);
+  const { error: payError } = await s.from("payments").insert(payments);
   if (payError) throw new Error(JSON.stringify(payError));
 });
 test.afterAll(cleanup);
 
-test("quien no vino ni pagó este mes va arriba, con los que deben", async ({ page }) => {
+test("abajo van sólo los que pagaron el mes o esta sesión", async ({ page }) => {
   await page.request.post("/api/auth/dev");
 
+  // The API flag the grouping rests on, case by case.
   const roster = await (await page.request.get(`/api/training-sessions/${SESSION}`)).json();
   const byId = new Map(roster.players.map((p: { id: string }) => [p.id, p]));
-  const of = (name: string) => byId.get(ids.get(name)!) as {
-    owes_now: boolean; attended_this_month: number; paid_this_month: number;
-  };
+  for (const c of CASES) {
+    const p = byId.get(ids.get(c.name)!) as { hasSessionPayment: boolean };
+    expect(p.hasSessionPayment, `${c.name} debería ir ${c.top ? "arriba" : "abajo"}`)
+      .toBe(!c.top);
+  }
 
-  // The player who never showed up owes nothing — that is exactly why the
-  // plain "owes" test used to sort them among the settled.
-  expect(of("Alpedo").owes_now).toBe(false);
-  expect(of("Alpedo").attended_this_month).toBe(0);
-  expect(of("Alpedo").paid_this_month).toBe(0);
-  expect(of("Zpagado").attended_this_month).toBeGreaterThan(0);
-
+  // And the order on screen: every pending player above every settled one.
   await page.goto(`/training-sessions/${SESSION}`);
-  const rows = page.locator('[style*="grid-template-columns"] >> text=/Grouptest,/');
-  await expect(rows.first()).toBeVisible();
+  await expect(page.getByText(`${LAST}, Cnovinonopago`)).toBeVisible();
 
-  // Order on screen: both pending ones first, the settled one last.
   const order = await page.locator(`text=/${LAST}, /`).allTextContents();
   const pos = (name: string) => order.findIndex((t) => t.includes(name));
-  expect(pos("Zpagado")).toBeGreaterThan(pos("Adeuda"));
-  expect(pos("Zpagado")).toBeGreaterThan(pos("Alpedo"));
+  const lastTop = Math.max(...CASES.filter((c) => c.top).map((c) => pos(c.name)));
+  const firstBottom = Math.min(...CASES.filter((c) => !c.top).map((c) => pos(c.name)));
+  expect(firstBottom).toBeGreaterThan(lastTop);
 });

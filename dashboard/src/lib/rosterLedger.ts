@@ -22,11 +22,6 @@ export type LedgerExtras = {
   owes_now: boolean | null;
   /** The player bought this month's bundle (fully). */
   bought_month: boolean;
-  /** Trainings attended in the session's month — a player with none has
-   * nothing settled, they simply have not shown up. */
-  attended_this_month: number;
-  /** Pesos paid for the session's month. */
-  paid_this_month: number;
 };
 
 /** First day of the month after `month` (YYYY-MM), as YYYY-MM-DD. */
@@ -45,8 +40,6 @@ export const LEDGER_DEFAULTS: LedgerExtras = {
   session_preset: null,
   owes_now: null,
   bought_month: false,
-  attended_this_month: 0,
-  paid_this_month: 0,
 };
 
 type RosterPlayer = {
@@ -167,8 +160,6 @@ export async function ledgerExtrasFor(
       session_preset: Math.round(price.session_price * k),
       owes_now: now.charge > activityNow.totalPaid,
       bought_month: now.bought,
-      attended_this_month: activityNow.attended,
-      paid_this_month: activityNow.totalPaid,
     });
   }
 
