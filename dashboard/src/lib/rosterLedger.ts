@@ -22,6 +22,11 @@ export type LedgerExtras = {
   owes_now: boolean | null;
   /** The player bought this month's bundle (fully). */
   bought_month: boolean;
+  /** Would this month be unpaid with the player marked present at this
+   * session? And absent? Both are precomputed so the screen can move a row
+   * between sections — and in or out of Deudores — without a round trip. */
+  owes_if_present: boolean;
+  owes_if_absent: boolean;
 };
 
 /** First day of the month after `month` (YYYY-MM), as YYYY-MM-DD. */
@@ -40,6 +45,8 @@ export const LEDGER_DEFAULTS: LedgerExtras = {
   session_preset: null,
   owes_now: null,
   bought_month: false,
+  owes_if_present: false,
+  owes_if_absent: false,
 };
 
 type RosterPlayer = {
@@ -47,6 +54,8 @@ type RosterPlayer = {
   categories?: string[] | null;
   player_type?: string | null;
   scholarship?: number | null;
+  /** Whether they are currently marked present at the session being viewed. */
+  attendedThisSession?: boolean;
 };
 
 /** Each roster player's ledger enrichment for a session month: debt, bonified
@@ -146,6 +155,16 @@ export async function ledgerExtrasFor(
       { attended: 0, paidMonthly: false, totalPaid: 0 };
     const now = ledgerStep(state, activityNow, price, nMonth, scholarship);
 
+    // The same month with this session's attendance forced on and off. The
+    // screen flips between them the instant a row is toggled.
+    const owesWith = (attended: number) => {
+      const step = ledgerStep(state, { ...activityNow, attended }, price, nMonth, scholarship);
+      return step.charge > activityNow.totalPaid;
+    };
+    const here = player.attendedThisSession ? 1 : 0;
+    const owesIfPresent = owesWith(activityNow.attended - here + 1);
+    const owesIfAbsent = owesWith(Math.max(0, activityNow.attended - here));
+
     const k = (100 - scholarship) / 100;
     const prepaidUnit = Math.round(price.prepaid_session_price * k);
     extras.set(player.id, {
@@ -160,6 +179,8 @@ export async function ledgerExtrasFor(
       session_preset: Math.round(price.session_price * k),
       owes_now: now.charge > activityNow.totalPaid,
       bought_month: now.bought,
+      owes_if_present: owesIfPresent,
+      owes_if_absent: owesIfAbsent,
     });
   }
 

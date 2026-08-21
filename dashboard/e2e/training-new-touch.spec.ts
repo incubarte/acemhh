@@ -34,7 +34,7 @@ async function cleanup() {
 async function openPage(page: Page) {
   await page.request.post("/api/auth/dev");
   await page.goto(`/training-sessions-beta/${SESSION}`);
-  await expect(page.getByText(/Presentes — total/)).toBeVisible();
+  await expect(page.getByTestId("section-presentes")).toBeVisible();
 }
 
 test.describe("ruedita táctil real", () => {
@@ -68,12 +68,16 @@ test.describe("ruedita táctil real", () => {
   test("swipe lento pasando la mitad marca presente", async ({ page }) => {
     await openPage(page);
 
-    const row = page.locator(`[data-player-row="${ids.get("Lento")}"]`);
+    const row = page.locator(`[data-player-row="${ids.get("Lento")}"]`).first();
     const box = (await row.boundingBox())!;
     const startX = box.x + 20;
     const y = box.y + box.height / 2;
     const distance = box.width * 0.8;
 
+    // The row moves optimistically; without waiting for the write the test
+    // would end and the closing context would cancel the request.
+    const written = page.waitForResponse((r) =>
+      r.url().includes("/attendance") && r.request().method() === "POST");
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchStart",
@@ -86,11 +90,12 @@ test.describe("ruedita táctil real", () => {
       });
       await page.waitForTimeout(40);
     }
-    await expect(page.getByTestId("attendance-wheel")).toBeVisible();
+    await expect(page.getByTestId("attendance-wheel").first()).toBeVisible();
     await page.waitForTimeout(250); // release with ~zero velocity
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await written;
 
-    await expect(page.getByText("Presentes — total: 1")).toBeVisible();
+    await expect(page.getByTestId("section-presentes").locator("[data-player-row]")).toHaveCount(1);
     await expect(
       page.getByTestId("section-presentes").getByText(`${LAST}, Lento`),
     ).toBeVisible();
@@ -99,11 +104,15 @@ test.describe("ruedita táctil real", () => {
   test("flick corto y veloz encastra en el imán y marca presente", async ({ page }) => {
     await openPage(page);
 
-    const row = page.locator(`[data-player-row="${ids.get("Rapido")}"]`);
+    const row = page.locator(`[data-player-row="${ids.get("Rapido")}"]`).first();
     const box = (await row.boundingBox())!;
     const startX = box.x + 20;
     const y = box.y + box.height / 2;
 
+    // The row moves optimistically; without waiting for the write the test
+    // would end and the closing context would cancel the request.
+    const written = page.waitForResponse((r) =>
+      r.url().includes("/attendance") && r.request().method() === "POST");
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchStart",
@@ -119,14 +128,15 @@ test.describe("ruedita táctil real", () => {
       await page.waitForTimeout(16);
     }
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await written;
 
-    await expect(page.getByText("Presentes — total: 2")).toBeVisible();
+    await expect(page.getByTestId("section-presentes").locator("[data-player-row]")).toHaveCount(2);
   });
 
   test("swipe vertical scrollea sin despertar la ruedita", async ({ page }) => {
     await openPage(page);
 
-    const row = page.locator(`[data-player-row="${ids.get("Quieto")}"]`);
+    const row = page.locator(`[data-player-row="${ids.get("Quieto")}"]`).first();
     const box = (await row.boundingBox())!;
     const x = box.x + box.width / 2;
     let y = box.y + box.height / 2;

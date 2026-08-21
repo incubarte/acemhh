@@ -104,13 +104,15 @@ test("solo la cuota anual completa cuenta como al día", async ({ page }) => {
   // Three visual states on the beta screen: amber for the partial payer,
   // red for who paid nothing, no band at all for the settled one.
   await page.goto(`/training-sessions-beta/${SESSION}`);
-  await expect(page.getByText(/Presentes — total/)).toBeVisible();
-  const rowOf = (name: string) => page.locator(`[data-player-row="${ids.get(name)}"]`);
+  await expect(page.getByTestId("section-presentes")).toBeVisible();
+  // A debtor renders twice (Deudores plus their own section); either copy
+  // carries the same band.
+  const rowOf = (name: string) => page.locator(`[data-player-row="${ids.get(name)}"]`).first();
 
-  await expect(rowOf("Parcial").getByTestId("dues-band-partial")).toBeVisible();
+  await expect(rowOf("Parcial").getByTestId("dues-band-partial").first()).toBeVisible();
   await expect(rowOf("Parcial").getByTestId("dues-band-solid")).toHaveCount(0);
 
-  await expect(rowOf("Nada").getByTestId("dues-band-solid")).toBeVisible();
+  await expect(rowOf("Nada").getByTestId("dues-band-solid").first()).toBeVisible();
   await expect(rowOf("Nada").getByTestId("dues-band-partial")).toHaveCount(0);
 
   await expect(rowOf("Completo").getByTestId("dues-band-partial")).toHaveCount(0);

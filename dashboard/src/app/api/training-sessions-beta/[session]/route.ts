@@ -134,14 +134,19 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
       (attendancesRes.data ?? []).map((a) => [a.player_id, a.attended]),
     );
     const paymentMap = new Map<string, number>();
+    const amountsMap = new Map<string, number[]>();
     const hasSessionPaymentIds = new Set<string>();
     const monthlyPayerIds = new Set<string>();
+    const addAmount = (playerId: string, amount: number) => {
+      paymentMap.set(playerId, (paymentMap.get(playerId) ?? 0) + amount);
+      amountsMap.set(playerId, [...(amountsMap.get(playerId) ?? []), amount]);
+    };
     for (const p of monthlyPaymentsRes.data ?? []) {
-      paymentMap.set(p.player_id, (paymentMap.get(p.player_id) ?? 0) + Number(p.amount));
+      addAmount(p.player_id, Number(p.amount));
       monthlyPayerIds.add(p.player_id);
     }
     for (const p of sessionPaymentsRes.data ?? []) {
-      paymentMap.set(p.player_id, (paymentMap.get(p.player_id) ?? 0) + Number(p.amount));
+      addAmount(p.player_id, Number(p.amount));
       hasSessionPaymentIds.add(p.player_id);
     }
     // Up to date only when the year's dues payments SUM to the full amount.
@@ -188,6 +193,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
         categories: p.categories as string[],
         player_type: p.player_type as string,
         scholarship: Number(p.scholarship) || 0,
+        attendedThisSession: Boolean(attendanceMap.get(p.id as string)),
       })),
       selectedMonth,
     );
@@ -200,6 +206,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
           ...p,
           attended: attendanceMap.get(id) || false,
           payments: paymentMap.get(id) ?? 0,
+          payment_amounts: amountsMap.get(id) ?? [],
           hasSessionPayment: hasSessionPaymentIds.has(id),
           paidMonthlyForSlot: monthlyPayerIds.has(id),
           paidMembershipDues: duesStatusOf(id) === "full",

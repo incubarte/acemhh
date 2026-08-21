@@ -140,24 +140,36 @@ async function seed() {
 async function openPage(page: Page) {
   await page.request.post("/api/auth/dev");
   await page.goto(`/training-sessions-beta/${SESSION}`);
-  await expect(page.getByText(/Presentes — total/)).toBeVisible();
+  await expect(page.getByTestId("section-presentes")).toBeVisible();
 }
 
+/** A player can appear twice (Deudores plus their own section); either copy
+ * carries the same wheel, so the first is as good as the other. */
 function row(page: Page, name: string) {
-  return page.locator(`[data-player-row="${ids.get(name)}"]`);
+  return page.locator(`[data-player-row="${ids.get(name)}"]`).first();
 }
 
 /** Slides the attendance wheel by `fraction` of the row width — negative
  * fraction slides left — slow (release velocity ~0), so the majority-area
  * rule decides. */
 async function slideWheel(page: Page, name: string, fraction: number) {
+  // The row moves optimistically, so an assertion can pass before the write
+  // reaches the server — and the test would end (closing the context, killing
+  // the request) with nothing persisted. Wait for the POST when the slide is
+  // long enough to commit.
+  const commits = Math.abs(fraction) > 0.5;
+  const written = commits
+    ? page.waitForResponse((r) =>
+      r.url().includes("/attendance") && r.request().method() === "POST")
+    : null;
   const box = (await row(page, name).boundingBox())!;
-  const startX = fraction >= 0 ? box.x + 20 : box.x + box.width - 20;
+  // Clear of the + button on the right, which the wheel gesture ignores.
+  const startX = fraction >= 0 ? box.x + 20 : box.x + box.width - 70;
   const y = box.y + box.height / 2;
   await page.mouse.move(startX, y);
   await page.mouse.down();
   // The state word shows from the finger-down, before any movement.
-  await expect(page.getByTestId("attendance-wheel")).toBeVisible();
+  await expect(page.getByTestId("attendance-wheel").first()).toBeVisible();
   const distance = box.width * fraction;
   for (let i = 1; i <= 10; i++) {
     await page.mouse.move(startX + (distance * i) / 10, y);
@@ -166,8 +178,9 @@ async function slideWheel(page: Page, name: string, fraction: number) {
   // Pause so the release velocity is ~zero.
   await page.waitForTimeout(250);
   await page.mouse.up();
-  // Wait for the spring (and the commit collapse) to finish.
+  // Wait for the spring to finish, then for the write to land.
   await expect(page.getByTestId("attendance-wheel")).toHaveCount(0);
+  if (written) await written;
 }
 
 test.describe.configure({ mode: "serial" });
@@ -185,7 +198,7 @@ test("clasifica presentes por pago y ausentes por historial, ignorando trains", 
   const ausentes = page.getByTestId("section-ausentes");
 
   // Three present players (trains=false, still listed).
-  await expect(page.getByText("Presentes — total: 3")).toBeVisible();
+  await expect(page.getByTestId("section-presentes").locator("[data-player-row]")).toHaveCount(3);
   await expect(presentes.getByText(`${LAST}, Mensual`)).toBeVisible();
   await expect(presentes.getByText(`${LAST}, Sesionista`)).toBeVisible();
   await expect(presentes.getByText(`${LAST}, Deudor`)).toBeVisible();
@@ -213,7 +226,7 @@ test("deslizar la ruedita más de la mitad marca presente", async ({ page }) => 
 
   await slideWheel(page, "Reciente", 0.8);
 
-  await expect(page.getByText("Presentes — total: 4")).toBeVisible();
+  await expect(page.getByTestId("section-presentes").locator("[data-player-row]")).toHaveCount(4);
   await expect(
     page.getByTestId("section-presentes").getByText(`${LAST}, Reciente`),
   ).toBeVisible();
@@ -225,7 +238,7 @@ test("un deslizamiento corto vuelve atrás sin cambiar nada", async ({ page }) =
   await slideWheel(page, "Mensual", 0.3);
 
   // Still present: the wheel snapped back to its detent.
-  await expect(page.getByText("Presentes — total: 4")).toBeVisible();
+  await expect(page.getByTestId("section-presentes").locator("[data-player-row]")).toHaveCount(4);
   await expect(
     page.getByTestId("section-presentes").getByText(`${LAST}, Mensual`),
   ).toBeVisible();
@@ -236,37 +249,39 @@ test("la ruedita también gira a la izquierda: presente pasa a ausente", async (
 
   await slideWheel(page, "Mensual", -0.8);
 
-  await expect(page.getByText("Presentes — total: 3")).toBeVisible();
+  await expect(page.getByTestId("section-presentes").locator("[data-player-row]")).toHaveCount(3);
   await expect(
     page.getByTestId("section-ausentes").getByText(`${LAST}, Mensual`),
   ).toBeVisible();
 });
 
-test("toggles rápidos encadenados durante el refresh", async ({ page }) => {
+test("los toggles se aplican al instante y encadenados", async ({ page }) => {
   await openPage(page);
+  const deudores = page.getByTestId("section-deudores");
+  const ausentes = page.getByTestId("section-ausentes");
+  const presentes = page.getByTestId("section-presentes");
 
-  // First toggle: Mensual (absent) slides right. No slot is reserved among
-  // Presentes — the player appears there only once the refresh applies.
-  await slideWheel(page, "Mensual", 0.8);
-  await expect(
-    page.getByTestId("section-presentes").getByText(`${LAST}, Mensual`),
-  ).toHaveCount(0);
+  // Deudor is present and owes this session, so they show in both sections.
+  await expect(deudores.getByText(`${LAST}, Deudor`)).toBeVisible();
+  await expect(presentes.getByText(`${LAST}, Deudor`)).toBeVisible();
 
-  // Without waiting for any refresh, second toggle: Sesionista slides left to
-  // absent, and their reserved row shows among Ausentes immediately.
-  await slideWheel(page, "Sesionista", -0.8);
-  await expect(
-    page.getByTestId("section-ausentes").getByText(`${LAST}, Sesionista`),
-  ).toBeVisible();
+  // Moving them out drops the row from Deudores on the spot: with the
+  // attendance gone there is nothing left unpaid this month. (They also
+  // leave the visible absent list: no attendance in the last 3 trainings.)
+  await slideWheel(page, "Deudor", -0.8);
+  await expect(deudores.getByText(`${LAST}, Deudor`)).toHaveCount(0);
+  await expect(presentes.getByText(`${LAST}, Deudor`)).toHaveCount(0);
 
-  // After the 3s quiet window the LAST refresh renders the real diff.
-  await expect(
-    page.getByTestId("section-presentes").getByText(`${LAST}, Mensual`),
-  ).toBeVisible({ timeout: 8000 });
-  await expect(
-    page.getByTestId("section-ausentes").getByText(`${LAST}, Sesionista`),
-  ).toBeVisible();
-  await expect(page.getByText("Presentes — total: 3")).toBeVisible();
+  // Chained straight after, without waiting for any refresh. Reciente did
+  // train recently, so they land in the absent list right away.
+  await slideWheel(page, "Reciente", -0.8);
+  await expect(ausentes.getByText(`${LAST}, Reciente`)).toBeVisible();
+
+  // Both writes survive a fresh load.
+  await openPage(page);
+  await expect(ausentes.getByText(`${LAST}, Reciente`)).toBeVisible();
+  await expect(presentes.getByText(`${LAST}, Deudor`)).toHaveCount(0);
+  await expect(deudores.getByText(`${LAST}, Deudor`)).toHaveCount(0);
 });
 
 test("buscar jugador lo marca presente", async ({ page }) => {
@@ -274,7 +289,41 @@ test("buscar jugador lo marca presente", async ({ page }) => {
 
   await page.getByRole("button", { name: /Buscar jugador/ }).click();
   await page.getByPlaceholder("Nombre o apellido").fill("Fantasma");
+  // The row appears optimistically, so wait for the write itself.
+  const written = page.waitForResponse((r) =>
+    r.url().includes("/attendance") && r.request().method() === "POST");
   await page.getByRole("button", { name: `${LAST}, Fantasma` }).click();
+  await written;
 
-  await expect(page.getByText("Presentes — total: 4")).toBeVisible();
+  await expect(
+    page.getByTestId("section-presentes").getByText(`${LAST}, Fantasma`),
+  ).toBeVisible();
+});
+
+test("el modal de cobro ofrece sesión, mes y otro, y confirma con el detalle", async ({ page }) => {
+  await openPage(page);
+
+  // Fantasma was marked present by the previous test's search.
+  const row = page.getByTestId("section-presentes")
+    .locator(`[data-player-row="${ids.get("Fantasma")}"]`);
+  await row.getByRole("button", { name: "+" }).click();
+
+  const modal = page.getByTestId("payment-modal");
+  await expect(modal).toBeVisible();
+  await expect(modal.getByText(`${LAST}, Fantasma`)).toBeVisible();
+  await expect(modal.getByText(/Sesión individual/)).toBeVisible();
+  await expect(modal.getByText(/Mes completo/)).toBeVisible();
+  await expect(modal.getByPlaceholder("Otro...")).toBeVisible();
+
+  // Picking the session preset moves to the summary, which spells out which
+  // session is being paid.
+  await modal.getByText(/Sesión individual/).click();
+  await expect(modal.getByText(/Sesión del/)).toBeVisible();
+  await expect(modal.getByText("$30k")).toBeVisible();
+
+  await modal.getByRole("button", { name: "Confirmar" }).click();
+  await expect(modal).toHaveCount(0);
+
+  // The payment shows next to the name, and settles them.
+  await expect(row.getByText(/\(30k\)/)).toBeVisible();
 });

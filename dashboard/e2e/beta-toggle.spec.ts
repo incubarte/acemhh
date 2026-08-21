@@ -19,7 +19,7 @@ test("el switch beta rutea a la pantalla nueva y persiste", async ({ page }) => 
   await page.getByTestId("beta-toggle").click();
   await page.getByRole("button", { name: /22:00hs/ }).click();
   await page.waitForURL("**/training-sessions-beta/2026-08-20-22");
-  await expect(page.getByText(/Presentes — total/)).toBeVisible();
+  await expect(page.getByTestId("section-presentes")).toBeVisible();
 
   // Persists across a logout/login on the same device (localStorage).
   await page.context().clearCookies();
