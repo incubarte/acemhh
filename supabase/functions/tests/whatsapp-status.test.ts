@@ -427,7 +427,7 @@ Deno.test("fetchMonthStatuses aggregates payments and attendance per month", asy
     }
 });
 
-Deno.test("trainingsFor counts each slot-group's dates from training_slots", async () => {
+Deno.test("trainingsFor counts each slot-group's dates from training_sessions", async () => {
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
         auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
     });
@@ -447,4 +447,63 @@ Deno.test("trainingsFor counts each slot-group's dates from training_slots", asy
 
     // July (winter break) has no slots at all.
     assertEquals(activeMonths(slots).includes("2026-07"), false);
+});
+
+// ////////////////////////////////////
+// THE TWO RUNTIMES AGREE
+// ////////////////////////////////////
+
+Deno.test("computeLedger y runLedger dan lo mismo: una sola implementación", async () => {
+    // The bot reaches the ledger through computeLedger (month statuses with
+    // their tariff already resolved); the dashboard reaches it through
+    // runLedger (months plus a price table). Both now sit on the same
+    // ledgerStep — this is what stops the bot from telling a player one number
+    // while the admin sees another.
+    const { runLedger } = await import("../_shared/ledger.ts");
+
+    const months = ["2026-08", "2026-09", "2026-10"];
+    const activity = [
+        // Bought the month, a holiday shrank it: leaves a bonified session.
+        { attended: 3, paidMonthly: true, totalPaid: 100000, trainings: 3 },
+        // Spent the bonified one and underpaid the rest: contracts debt.
+        { attended: 4, paidMonthly: false, totalPaid: 30000, trainings: 4 },
+        // Overpays: covers the month first, and what is left eats into the
+        // old debt without clearing it.
+        { attended: 2, paidMonthly: false, totalPaid: 150000, trainings: 4 },
+    ];
+
+    const viaBot = computeLedger(
+        activity.map((a, i) => raw(months[i], a.attended, a.totalPaid, {
+            paidMonthly: a.paidMonthly,
+            trainings: a.trainings,
+        })),
+        0,
+    );
+
+    const viaDashboard = runLedger(
+        months,
+        new Map(months.map((m, i) => [m, {
+            attended: activity[i].attended,
+            paidMonthly: activity[i].paidMonthly,
+            totalPaid: activity[i].totalPaid,
+        }])),
+        new Map(months.map((m, i) => [m, activity[i].trainings])),
+        [{ valid_from: "2026-01-01", session_price: 30000, prepaid_session_price: 25000 }],
+        0,
+    );
+
+    assertEquals(
+        viaBot.map((m) => [m.month, m.charge, m.debtAfter]),
+        viaDashboard.rows.map((r) => [r.month, r.charge, r.debtAfter]),
+    );
+    // And the state each side carries forward matches too.
+    assertEquals(viaBot.at(-1)!.carryoverOut, viaDashboard.state.carryoverIn);
+
+    // A run that exercises something, not three no-ops: a bonified session
+    // out of August, 60k of debt in September, and October paying 100k for the
+    // month plus 50k against that debt — 10k still owing.
+    assertEquals(viaBot[0].carryoverOut, 1);
+    assertEquals(viaBot[1].debtAfter, 60000);
+    assertEquals(viaBot[2].charge, 100000);
+    assertEquals(viaBot[2].debtAfter, 10000);
 });

@@ -3,7 +3,7 @@
 // extra session charged the month before. The month's real price now derives
 // from the database (trainings in training_sessions x the prepaid rate in
 // prices), and over/under-charging is handled by the carryover ledger
-// (lib/ledger.ts and the whatsapp webhook status): an extra session paid one
+// (the shared ledger in supabase/functions/_shared): an extra session paid one
 // month becomes credit for the next, so no future override should be needed.
 
 // Key format: "YYYY-MM|<generic slot>", e.g. "2026-05|jue 22hs".

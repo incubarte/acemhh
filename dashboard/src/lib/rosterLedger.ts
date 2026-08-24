@@ -8,7 +8,7 @@ import {
   runLedger,
   trainingsFor,
   type MonthActivity,
-} from "@/lib/ledger";
+} from "@shared/ledger";
 
 export type LedgerExtras = {
   /** Bonified sessions from last month (club's fault), usable this month. */

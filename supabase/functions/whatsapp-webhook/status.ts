@@ -3,6 +3,17 @@
 // index.ts only wires it to the transport.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+    ledgerStep,
+    MinBundleTrainings,
+    priceFor,
+    trainingsFor,
+    type LedgerPrice,
+    type SlotDay,
+} from "../_shared/ledger.ts";
+
+export { MinBundleTrainings, priceFor, trainingsFor };
+export type { LedgerPrice, SlotDay };
 
 // The activity agenda derives from training_sessions: a month is active when
 // at least one training happens in it (fetchMonthTrainings keys). Holidays and
@@ -42,39 +53,14 @@ export async function fetchTrainingSlots(
     });
 }
 
-/** Trainings per month for one slot-group: distinct dates with a slot for any
- * of the given categories (or any goalie-friendly slot, for goalkeepers).
- * Every player of a category shares the same n — the month's price follows. */
-export function trainingsFor(
-    slots: TrainingSlotRow[],
-    categories: string[],
-    goalkeeper: boolean,
-): Map<string, number> {
-    const byMonth = new Map<string, Set<string>>();
-    for (const s of slots) {
-        const matches = goalkeeper
-            ? s.goalies
-            : s.categories.some((c) => categories.includes(c));
-        if (!matches) continue;
-        const month = s.date.slice(0, 7);
-        if (!byMonth.has(month)) byMonth.set(month, new Set());
-        byMonth.get(month)!.add(s.date);
-    }
-    return new Map([...byMonth].map(([m, dates]) => [m, dates.size]));
-}
 
 /** The whole agenda's months (any category): drives the semester window. */
 export function activeMonths(slots: TrainingSlotRow[]): string[] {
     return [...new Set(slots.map((s) => s.date.slice(0, 7)))].sort();
 }
 
-export type Price = {
-    valid_from: string; // YYYY-MM-DD
-    /** A session paid on its own. */
-    session_price: number;
-    /** A session bought as part of a whole month, paid upfront. */
-    prepaid_session_price: number;
-};
+/** Kept as a local alias: callers here have always said `Price`. */
+export type Price = LedgerPrice;
 
 export async function fetchPrices(supabase: SupabaseClient): Promise<Price[]> {
     const { data, error } = await supabase
@@ -87,14 +73,6 @@ export async function fetchPrices(supabase: SupabaseClient): Promise<Price[]> {
         session_price: Number(p.session_price),
         prepaid_session_price: Number(p.prepaid_session_price),
     }));
-}
-
-/** The tariff in force at the start of a month: the newest price whose
- * valid_from is not after it, falling back to the oldest known one. */
-export function priceFor(prices: Price[], month: string): Price {
-    if (prices.length === 0) throw new Error("No prices configured");
-    const applicable = prices.filter((p) => p.valid_from <= `${month}-01`);
-    return applicable.at(-1) ?? prices[0];
 }
 
 export function currentMonthBA(now: Date = new Date()): string {
@@ -200,72 +178,32 @@ export type LedgerMonth = MonthStatus & {
     debtAfter: number;
 };
 
-/** The month admits a prepaid bundle only with at least 2 trainings. */
-export const MinBundleTrainings = 2;
-
-// The ledger rules:
-// - The month's bundle costs (trainings - carryover) x prepaid rate, and only
-//   exists for months with at least MinBundleTrainings trainings. A bought
-//   month is use-it-or-lose-it: absences earn nothing.
-// - Not bought, each attendance beyond the bonified ones costs the single
-//   rate; what goes unpaid accumulates as debt (in single-rate pesos).
-// - Payments cover this month first, then old debt.
-// - Carryover exists only when the club fell short: money paid beyond the
-//   month's worth (a holiday miscount, a cancelled training) becomes whole
-//   bonified sessions for the NEXT month only — never while debt remains, and
-//   never as a peso balance.
+/**
+ * Runs the shared ledger over a player's months, keeping the per-month detail
+ * the reply needs. The arithmetic itself lives in _shared/ledger.ts — this only
+ * threads state from one month to the next and reshapes the result.
+ */
 export function computeLedger(statuses: MonthStatus[], scholarship: number): LedgerMonth[] {
-    const k = (100 - scholarship) / 100;
-    let debt = 0;
-    let carryoverIn = 0;
+    let state = { debt: 0, carryoverIn: 0 };
 
     return statuses.map((s) => {
-        const bundleSessions = Math.max(0, s.trainings - carryoverIn);
-        const prepaidUnit = Math.round(s.prepaidPrice * k);
-        const bundle = bundleSessions * prepaidUnit;
-        const hasBundle = s.trainings >= MinBundleTrainings && bundle > 0;
-        const boughtMonth = hasBundle && (s.paidMonthly || s.totalPaid >= bundle);
-
-        // Bonified sessions absorb attendance before anything is charged.
-        const bonifiedUsed = Math.min(carryoverIn, s.attended);
-        const attEff = s.attended - bonifiedUsed;
-        const singles = Math.round(attEff * s.sessionPrice * k);
-
-        // A payment at most one prepaid session short of the bundle reads as
-        // an incomplete bundle purchase: the whole bundle is owed and the
-        // rest becomes debt — but never worse than paying singles.
-        const partialBundle = !boughtMonth && hasBundle && s.totalPaid > 0 &&
-            s.totalPaid >= (bundleSessions - 1) * prepaidUnit;
-
-        const charge = boughtMonth
-            ? bundle
-            : partialBundle
-            ? Math.min(singles, bundle)
-            : singles;
-
-        let carryoverOut = 0;
-        if (s.totalPaid >= charge) {
-            let excess = s.totalPaid - charge;
-            const payingDebt = Math.min(debt, excess);
-            debt -= payingDebt;
-            excess -= payingDebt;
-            if (boughtMonth && debt === 0 && excess > 0 && prepaidUnit > 0) {
-                carryoverOut = Math.floor(excess / prepaidUnit);
-            }
-        } else {
-            debt += charge - s.totalPaid;
-        }
-
+        const step = ledgerStep(
+            state,
+            { attended: s.attended, paidMonthly: s.paidMonthly, totalPaid: s.totalPaid },
+            { session_price: s.sessionPrice, prepaid_session_price: s.prepaidPrice },
+            s.trainings,
+            scholarship,
+        );
         const row = {
             ...s,
-            boughtMonth,
-            charge,
-            carryoverIn,
-            carryoverOut,
-            debtAfter: debt,
+            boughtMonth: step.bought,
+            charge: step.charge,
+            carryoverIn: state.carryoverIn,
+            // Carryover only reaches the immediately following month.
+            carryoverOut: step.next.carryoverIn,
+            debtAfter: step.next.debt,
         };
-        // Carryover only reaches the immediately following month.
-        carryoverIn = carryoverOut;
+        state = step.next;
         return row;
     });
 }

@@ -6,7 +6,7 @@ import {
   trainingsFor,
   type LedgerPrice,
   type LedgerState,
-} from "../src/lib/ledger";
+} from "../../supabase/functions/_shared/ledger";
 
 // Pure unit tests for the carryover ledger (no browser involved). Mirrors the
 // rules tested for the whatsapp webhook in whatsapp-status.test.ts: singles at

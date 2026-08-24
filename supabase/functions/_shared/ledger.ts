@@ -1,6 +1,11 @@
-// Pure ledger math for player balances. Mirrors the rules in
-// supabase/functions/whatsapp-webhook/status.ts — the two runtimes share the
-// database, not code, so keep them in sync.
+// Pure ledger math for player balances. THE single implementation: imported by
+// the Next dashboard (as @shared/ledger) and by the WhatsApp webhook (as a
+// relative path). It was written twice before, and two copies of money rules
+// drift — the bot would tell a player one number and the admin see another.
+//
+// Nothing here touches the database. Fetching legitimately differs between the
+// two runtimes; the arithmetic does not. Keep it free of imports so both
+// module systems can consume it unchanged.
 //
 // The rules:
 // - The month's bundle costs (trainings - carryover) x prepaid rate, and only
@@ -14,10 +19,14 @@
 //   bonified sessions for the NEXT month only — never while debt remains, and
 //   never as a peso balance.
 
-export type LedgerPrice = {
-  valid_from: string; // YYYY-MM-DD
+/** The two tariffs in force, already resolved for some month. */
+export type Rates = {
   session_price: number;
   prepaid_session_price: number;
+};
+
+export type LedgerPrice = Rates & {
+  valid_from: string; // YYYY-MM-DD
 };
 
 // Carryover/debt accounting starts with the 2026 second semester. Earlier
@@ -87,7 +96,7 @@ export type LedgerStepResult = {
 export function ledgerStep(
   state: LedgerState,
   a: MonthActivity,
-  price: LedgerPrice,
+  price: Rates,
   trainings: number,
   scholarship: number,
 ): LedgerStepResult {
