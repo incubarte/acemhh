@@ -146,6 +146,17 @@ cobró. El individual vuelve siempre. Se pagan 5.000 de más por esa flexibilida
 Los tokens heredados que no se usan **mueren ahí**. Sin esta regla, un token sin
 usar se trasladaría indefinidamente.
 
+### La unidad es la sesión, nunca el dinero
+
+Lo que pasa de un mes al otro son **fracciones de sesión ya cubierta**, no
+pesos. Un sobrante de 20.000 de un pago mensual no pasa como 20.000: pasa como
+**0,8 de sesión**, porque a 25.000 el token eso es lo que compró. El mismo
+sobrante de un pago individual pasa como 0,66 de sesión, porque ahí el token
+costó 30.000.
+
+Es lo que hace que un cambio de tarifa no toque lo ya comprado. Si el mes que
+viene la sesión sale 35.000, esos 0,8 de sesión siguen valiendo 0,8 de sesión.
+
 ### Ejemplo
 
 > Pago mensual de 100.000 para las 22hs (4 tokens), pero sólo se dieron 3
@@ -259,7 +270,7 @@ que corresponde; no se puede avanzar con otra cosa mientras tanto.
 |---|---|---|
 | **Cerrada** | Todos los pagos mensuales e individuales | Sólo pago de deuda |
 | **Sesión impaga del mes**, slot S, sesión X | Pago de otras sesiones; mensual de otros slots | Mensual de **S**; individual de **X** |
-| **Parcial mensual** del slot S | Individuales de **S** | Segundo parcial que complete el 100% de S |
+| **Parcial mensual** del slot S | Individuales de **S** | Segundo parcial que complete el 100% de S; cualquier pago de **otros slots** |
 
 Esto es lo que evita que asistir antes de pagar cueste el descuento: quien debe
 la sesión de un slot todavía puede comprar el mes **de ese slot** y quedar
@@ -426,12 +437,16 @@ el arquero que va a las 21 y a las 22 suma 2 asistencias contra un mes que cont�
 
 ---
 
-## Pendiente de definir
+## Sesiones extraordinarias
 
-**Alcance de los bloqueos del parcial mensual.** Está definido que un parcial del
-slot S bloquea los individuales de S y habilita el pago que lo completa. No está
-dicho qué pasa con pagos de *otros* slots. La lectura natural es que los permite,
-porque el compromiso es de ese slot.
+Una sesión que caiga en un `(día de la semana, hora)` sin features definidas
+**no se resuelve sola: la consulta falla**. Es deliberado. Adivinar categorías
+significa cobrarle a quien no corresponde, y eso es peor que una pantalla rota.
 
-**Qué pasa con una sesión extraordinaria** que cae en un día sin slot definido,
-una vez que las features vivan en su propia tabla.
+La consecuencia operativa: crear una sesión extraordinaria son **dos inserts**,
+la sesión y sus features. Van juntos.
+
+Una propiedad a tener presente: las features se identifican por
+`(día de la semana, hora)`, así que una fila creada para un martes 20hs puntual
+rige desde esa fecha en adelante para **todos** los martes 20hs. Si no hay otros,
+no molesta.
