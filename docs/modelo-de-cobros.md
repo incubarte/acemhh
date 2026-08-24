@@ -68,15 +68,21 @@ asistencia como bonificada, a su criterio.
 
 ### Orden de consumo
 
-Cuando una asistencia consume un token, se queman en este orden:
+El mes **abre** con los tokens que dejó el mes anterior (ver
+[Carryover](#carryover)) y durante el mes se compran más. Cuando una asistencia
+consume un token, se queman en este orden:
 
-1. **Carryover** — mueren a fin de mes sin excepción
+1. **El saldo de apertura** — lo heredado del mes anterior
 2. **Promocionales del slot asistido** — mueren salvo que el club haya fallado
 3. **Individuales** — pasan libremente al mes siguiente
 
-El criterio es quemar primero lo que antes se pierde, de modo que al jugador le
-quede lo más flexible. Es una elección deliberada y cambia números: ver
-[Decisiones tomadas](#decisiones-tomadas).
+Lo heredado va primero por ser saldo de apertura: se gasta lo que ya se tenía
+antes que lo que se compra durante el mes. Y es además la única lectura que no
+lo desperdicia, porque un token heredado no sobrevive otro mes.
+
+Entre lo comprado, el criterio es quemar primero lo que antes se pierde, de modo
+que al jugador le quede lo más flexible. Es una elección deliberada y cambia
+números: ver [Decisiones tomadas](#decisiones-tomadas).
 
 ---
 
@@ -114,8 +120,18 @@ de las 23hs paga esa sesión.
 
 ## Carryover
 
-El carryover no es una entidad con origen ni vencimiento. Es un cálculo: cuántos
-tokens sin usar del mes N−1 se pueden usar en el mes N.
+**El carryover no vive dentro del mes.** No es un tipo de token ni una entidad
+con origen y vencimiento: es un método para evaluar que el mes anterior quedó
+con **sesiones sin usar**, y cuántas de ellas se pueden usar en el mes que
+empieza. El resultado es el saldo de apertura del mes siguiente.
+
+Las sesiones sin usar vienen de dos lados:
+
+- Sesiones individuales prepagas que no se usaron
+- Un pago mensual por `n` sesiones en un mes que tuvo `n−1`: se cobró una sesión
+  que, por culpa del club, no se pudo dar
+
+De ahí sale la tabla:
 
 | Origen del token | Cuánto pasa |
 |---|---|
@@ -411,13 +427,6 @@ el arquero que va a las 21 y a las 22 suma 2 asistencias contra un mes que cont�
 ---
 
 ## Pendiente de definir
-
-**Dónde entra el carryover en el orden de consumo.** Está acordado que lo
-promocional se quema antes que lo individual, pero el carryover no entró en esa
-comparación. La propuesta de este documento es quemarlo **primero**, por el
-mismo criterio que fundamentó la decisión original: se quema antes lo que antes
-se pierde, y el carryover muere a fin de mes sin ninguna posibilidad de
-recuperación. Falta confirmarlo.
 
 **Alcance de los bloqueos del parcial mensual.** Está definido que un parcial del
 slot S bloquea los individuales de S y habilita el pago que lo completa. No está
