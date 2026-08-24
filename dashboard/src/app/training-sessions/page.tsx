@@ -22,7 +22,7 @@ function TrainingSessionsContent() {
     setExperience(readExperience());
   }, []);
 
-  // The agenda lives in training_slots: navigation walks the dates that
+  // The agenda lives in training_sessions: navigation walks the dates that
   // actually have trainings, so holidays are skipped without special cases.
   const load = useCallback(async (date: string | null) => {
     const res = await fetch(`/api/training-slots${date ? `?date=${date}` : ""}`);

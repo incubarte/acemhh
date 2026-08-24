@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { requireFeatures } from "./slotFeatures";
 import {
   LEDGER_FROM,
   ledgerStep,
@@ -102,7 +103,7 @@ export async function ledgerExtrasFor(
     s.from("prices")
       .select("valid_from,session_price,prepaid_session_price")
       .order("valid_from"),
-    s.from("training_slots")
+    s.from("training_sessions_resolved")
       .select("date,categories,goalies")
       .gte("date", `${carryFrom}-01`)
       // Bounded by the first of the NEXT month: "YYYY-09-31" is not a date,
@@ -133,11 +134,12 @@ export async function ledgerExtrasFor(
     session_price: Number(p.session_price),
     prepaid_session_price: Number(p.prepaid_session_price),
   }));
-  const slotDays = (slotsRes.data ?? []).map((r) => ({
-    date: String(r.date),
-    categories: (r.categories ?? []) as string[],
-    goalies: Boolean(r.goalies),
-  }));
+  // A session whose slot has no features would silently count as belonging to
+  // no category, shrinking every month it falls in. Refuse instead.
+  const slotDays = (slotsRes.data ?? []).map((r) => {
+    const f = requireFeatures(r, String(r.date));
+    return { date: String(r.date), categories: f.categories, goalies: f.goalies };
+  });
 
   const byPlayer = new Map<string, Map<string, MonthActivity>>();
   const activityOf = (playerId: string, month: string): MonthActivity => {

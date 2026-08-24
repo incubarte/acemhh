@@ -368,7 +368,7 @@ async function handleIncoming(incoming: Incoming) {
     const name = admin?.first_name ?? self?.name ?? null;
     const sections: string[] = [name ? `Hola ${name}!` : "Hola!"];
 
-    // Agenda and tariffs live in the database (training_slots, prices). The
+    // Agenda and tariffs live in the database (training_sessions, prices). The
     // ledger runs over the semester: debt accumulates, and last month's
     // bonified sessions apply to the current one; the reply displays the last
     // three months plus the balance lines.

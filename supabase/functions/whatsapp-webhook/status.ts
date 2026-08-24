@@ -4,9 +4,13 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-// The activity agenda derives from training_slots: a month is active when at
-// least one training happens in it (fetchMonthTrainings keys). Holidays and
+// The activity agenda derives from training_sessions: a month is active when
+// at least one training happens in it (fetchMonthTrainings keys). Holidays and
 // breaks fall out naturally.
+//
+// Categories and goalies are features of the SLOT (weekday + hour), versioned
+// by date in training_slot_features; the training_sessions_resolved view
+// resolves each session against the configuration in force at its own date.
 
 export type TrainingSlotRow = {
     date: string; // YYYY-MM-DD
@@ -18,14 +22,24 @@ export async function fetchTrainingSlots(
     supabase: SupabaseClient,
 ): Promise<TrainingSlotRow[]> {
     const { data, error } = await supabase
-        .from("training_slots")
+        .from("training_sessions_resolved")
         .select("date,categories,goalies");
-    if (error) throw new Error("training_slots: " + error.message);
-    return (data ?? []).map((r) => ({
-        date: String(r.date),
-        categories: r.categories ?? [],
-        goalies: Boolean(r.goalies),
-    }));
+    if (error) throw new Error("training_sessions_resolved: " + error.message);
+    return (data ?? []).map((r) => {
+        // NULL means the slot has no features in force at that date. Treating
+        // it as "no categories" would silently shrink the month it falls in,
+        // so it fails loudly instead.
+        if (r.categories === null || r.goalies === null) {
+            throw new Error(
+                `Sin configuración de slot para ${r.date}: cargá la fila en training_slot_features.`,
+            );
+        }
+        return {
+            date: String(r.date),
+            categories: r.categories as string[],
+            goalies: Boolean(r.goalies),
+        };
+    });
 }
 
 /** Trainings per month for one slot-group: distinct dates with a slot for any

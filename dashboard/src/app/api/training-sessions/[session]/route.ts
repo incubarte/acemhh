@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { requireFeatures } from "@/lib/slotFeatures";
 import { withPermission } from "@/lib/authMiddleware";
 import { LEDGER_DEFAULTS, ledgerExtrasFor } from "@/lib/rosterLedger";
 import { duesStatusFor, duesTotalsByPlayer } from "@/lib/dues";
@@ -41,10 +42,10 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
 
     const s = supabaseAdmin();
 
-    // The agenda lives in training_slots; a date/hour without a row (e.g. a
+    // The agenda lives in training_sessions; a date/hour without a row (e.g. a
     // holiday) is not a valid session.
     const { data: slot, error: slotError } = await s
-      .from("training_slots")
+      .from("training_sessions_resolved")
       .select("categories,goalies")
       .eq("date", isoDate)
       .eq("hour", Number(hour))
@@ -57,7 +58,9 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
     if (!slot) {
       return new NextResponse("Invalid slot", { status: 400 });
     }
-    const cats = slot.categories;
+    // Features resolve as of the session's date; a slot with none configured
+    // is a broken agenda, not something to guess at.
+    const { categories: cats, goalies } = requireFeatures(slot, session);
 
     // Fetch A: all players that belong to any of the slot's categories and train.
     // A player appears in the sessions of every category they belong to.
@@ -165,7 +168,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
 
     // On goalkeeper-friendly slots, every goalkeeper shows up in the arqueros
     // section regardless of their category.
-    if (slot.goalies) {
+    if (goalies) {
       const { data: allGoalkeepers, error: gkError } = await s
         .from("players")
         .select("*")
@@ -250,7 +253,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
         ...p,
         ...(extras.get(p.id as string) ?? LEDGER_DEFAULTS),
       })),
-      slot: { categories: cats, goalies: slot.goalies },
+      slot: { categories: cats, goalies },
       // Lets the screen warn when a past or future session is open.
       current_date: await currentTrainingDate(s),
     });

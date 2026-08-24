@@ -39,13 +39,32 @@ const future = shiftDays(today, 21);
 const probeDates = [today, yesterday, future];
 
 async function clearProbeSlots() {
-  await admin().from("training_slots").delete().in("date", probeDates);
+  await admin().from("training_sessions").delete().in("date", probeDates);
 }
 
+/** ISO weekday (1 = Monday .. 7 = Sunday), the key of training_slot_features. */
+function isoWeekday(date: string): number {
+  const day = new Date(`${date}T12:00:00Z`).getUTCDay();
+  return day === 0 ? 7 : day;
+}
+
+/**
+ * A session plus the features of its slot. These probe dates land on whatever
+ * weekday today happens to be, so the slot they belong to usually has no
+ * configuration — creating one is part of adding an off-schedule training.
+ */
 async function addSlot(date: string) {
-  const { error } = await admin().from("training_slots").insert({
-    date, hour: 22, categories: ["cat-a", "cat-b"], goalies: false,
-  });
+  const { error: featError } = await admin().from("training_slot_features")
+    .upsert({
+      weekday: isoWeekday(date),
+      hour: 22,
+      valid_from: "2026-01-01",
+      categories: ["cat-a", "cat-b"],
+      goalies: false,
+    }, { onConflict: "weekday,hour,valid_from" });
+  if (featError) throw new Error(JSON.stringify(featError));
+
+  const { error } = await admin().from("training_sessions").insert({ date, hour: 22 });
   if (error) throw new Error(JSON.stringify(error));
 }
 
@@ -57,7 +76,7 @@ test.describe.configure({ mode: "serial" });
 let savedSlots: Record<string, unknown>[] = [];
 
 test.beforeAll(async () => {
-  const { data } = await admin().from("training_slots").select("*").in("date", probeDates);
+  const { data } = await admin().from("training_sessions").select("*").in("date", probeDates);
   savedSlots = data ?? [];
   await clearProbeSlots();
 });
@@ -65,7 +84,7 @@ test.beforeEach(clearProbeSlots);
 test.afterAll(async () => {
   await clearProbeSlots();
   if (savedSlots.length > 0) {
-    const { error } = await admin().from("training_slots").insert(savedSlots);
+    const { error } = await admin().from("training_sessions").insert(savedSlots);
     if (error) throw new Error("Failed to restore slots: " + JSON.stringify(error));
   }
 });
@@ -93,7 +112,7 @@ test("sin hoy ni ayer, abre el próximo", async ({ page }) => {
   await addSlot(future);
 
   // Whatever the seeded agenda holds, the pick is the earliest date ahead.
-  const { data } = await admin().from("training_slots")
+  const { data } = await admin().from("training_sessions")
     .select("date").gt("date", today).order("date").limit(1);
   const nextUp = String(data![0].date);
 
@@ -175,7 +194,7 @@ test("header y cartel quedan fijos arriba, a todo el ancho y en orden", async ({
 });
 
 test("el ledger funciona en meses de 30 días", async ({ page }) => {
-  // Regression: the roster query bounded training_slots with `${month}-31`,
+  // Regression: the roster query bounded training_sessions with `${month}-31`,
   // which Postgres rejects outright in 30-day months, silently dropping every
   // ledger figure (debt, presets, bonified sessions) for that session.
   const september = "2026-09-24"; // a seeded Thursday

@@ -1,7 +1,7 @@
 // DEPRECATED: do not add new entries. These ad-hoc overrides patched the
 // S1-2026 schedule restructurings, where some slots owed players credit for an
 // extra session charged the month before. The month's real price now derives
-// from the database (trainings in training_slots x the prepaid rate in
+// from the database (trainings in training_sessions x the prepaid rate in
 // prices), and over/under-charging is handled by the carryover ledger
 // (lib/ledger.ts and the whatsapp webhook status): an extra session paid one
 // month becomes credit for the next, so no future override should be needed.

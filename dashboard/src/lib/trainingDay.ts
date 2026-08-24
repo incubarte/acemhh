@@ -33,17 +33,17 @@ export async function currentTrainingDate(
   const yesterday = previousDay(today);
 
   const { data: recent, error } = await s
-    .from("training_slots")
+    .from("training_sessions")
     .select("date")
     .in("date", [yesterday, today]);
-  if (error) throw new Error("training_slots: " + error.message);
+  if (error) throw new Error("training_sessions: " + error.message);
 
   const dates = new Set((recent ?? []).map((r) => String(r.date)));
   if (dates.has(today)) return today;
   if (dates.has(yesterday)) return yesterday;
 
   const { data: upcoming } = await s
-    .from("training_slots")
+    .from("training_sessions")
     .select("date")
     .gt("date", today)
     .order("date")
@@ -51,7 +51,7 @@ export async function currentTrainingDate(
   if (upcoming?.length) return String(upcoming[0].date);
 
   const { data: last } = await s
-    .from("training_slots")
+    .from("training_sessions")
     .select("date")
     .order("date", { ascending: false })
     .limit(1);

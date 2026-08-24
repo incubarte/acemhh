@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { requireFeatures } from "@/lib/slotFeatures";
 import { withPermission } from "@/lib/authMiddleware";
 import { LEDGER_DEFAULTS, ledgerExtrasFor } from "@/lib/rosterLedger";
 import { duesStatusFor, duesTotalsByPlayer } from "@/lib/dues";
@@ -45,7 +46,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
     const s = supabaseAdmin();
 
     const { data: slot, error: slotError } = await s
-      .from("training_slots")
+      .from("training_sessions_resolved")
       .select("categories,goalies")
       .eq("date", isoDate)
       .eq("hour", Number(hour))
@@ -58,7 +59,9 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
     if (!slot) {
       return new NextResponse("Invalid slot", { status: 400 });
     }
-    const cats: string[] = slot.categories;
+    // Features resolve as of the session's date; a slot with none configured
+    // is a broken agenda, not something to guess at.
+    const { categories: cats, goalies } = requireFeatures(slot, session);
 
     const [
       categoryPlayersRes,
@@ -70,7 +73,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
       recentDatesRes,
     ] = await Promise.all([
       s.from("players").select("*").overlaps("categories", cats),
-      slot.goalies
+      goalies
         ? s.from("players").select("*").eq("player_type", "goalkeeper")
         : Promise.resolve({ data: [], error: null }),
       s.from("attendances").select("player_id,attended").eq("session", specificSlot),
@@ -91,7 +94,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
         .gte("month", `${sessionYear}-01`)
         .lte("month", `${sessionYear}-12`),
       // The slot group's most recent training dates before this session.
-      s.from("training_slots")
+      s.from("training_sessions_resolved")
         .select("date")
         .overlaps("categories", cats)
         .lt("date", isoDate)
@@ -216,7 +219,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
           ...(extras.get(id) ?? LEDGER_DEFAULTS),
         };
       }),
-      slot: { categories: cats, goalies: slot.goalies },
+      slot: { categories: cats, goalies },
       // Lets the screen warn when a past or future session is open.
       current_date: await currentTrainingDate(s),
     });

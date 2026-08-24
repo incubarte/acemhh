@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
+import { requireFeatures } from "@/lib/slotFeatures";
 import { currentTrainingDate } from "@/lib/trainingDay";
 
 export type DaySlot = {
@@ -41,16 +42,16 @@ export const GET = withPermission('api', '/api/training-slots', 'GET', async (se
   }
 
   const [slotsRes, prevRes, nextRes] = await Promise.all([
-    s.from("training_slots")
+    s.from("training_sessions_resolved")
       .select("hour,categories,goalies")
       .eq("date", date)
       .order("hour"),
-    s.from("training_slots")
+    s.from("training_sessions")
       .select("date")
       .lt("date", date)
       .order("date", { ascending: false })
       .limit(1),
-    s.from("training_slots")
+    s.from("training_sessions")
       .select("date")
       .gt("date", date)
       .order("date")
@@ -62,11 +63,10 @@ export const GET = withPermission('api', '/api/training-slots', 'GET', async (se
 
   const day: TrainingDay = {
     date,
-    slots: (slotsRes.data ?? []).map((r) => ({
-      hour: r.hour,
-      categories: r.categories,
-      goalies: r.goalies,
-    })),
+    slots: (slotsRes.data ?? []).map((r) => {
+      const f = requireFeatures(r, `${date} ${r.hour}hs`);
+      return { hour: r.hour, categories: f.categories, goalies: f.goalies };
+    }),
     prev: prevRes.data?.[0]?.date ?? null,
     next: nextRes.data?.[0]?.date ?? null,
     current,
