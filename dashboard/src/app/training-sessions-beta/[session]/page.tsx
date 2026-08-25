@@ -7,6 +7,7 @@ import Overlay from "../../components/Overlay";
 import SessionDateWarning from "../../components/SessionDateWarning";
 import ExperienceToggle from "../../components/ExperienceToggle";
 import { usePageTitle } from "../../components/PageTitleContext";
+import type { PaymentConcept } from "@shared/tokens";
 
 // Redesigned attendance & payments screen. Presence is expressed by the
 // section a player sits in, and toggled with a horizontal thumb-wheel on the
@@ -39,6 +40,7 @@ type RosterPlayer = {
   owes_if_present: boolean;
   owes_if_absent: boolean;
   owed_now: number;
+  debt_outstanding: number;
   prev_owed: number;
   prev_attended: number;
   prev_paid: number;
@@ -403,6 +405,96 @@ const PlayerRow = React.memo(function PlayerRow({
   );
 });
 
+/**
+ * Marking somebody present who owes money. It warns and never blocks: whether
+ * the player trains is the admin's call, and either way we want to know they
+ * were there.
+ */
+function DebtWarningModal({
+  player,
+  onCancel,
+  onConfirm,
+  onCharge,
+}: {
+  player: RosterPlayer;
+  onCancel: () => void;
+  onConfirm: () => void;
+  onCharge: () => void;
+}) {
+  const owed = (player.debt_outstanding ?? 0) + player.owed_now;
+  return (
+    <Overlay>
+      <div
+        onClick={onCancel}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,0.65)",
+          zIndex: 100,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 20,
+        }}
+      >
+        <div
+          data-testid="debt-warning"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            width: "100%",
+            maxWidth: 380,
+            borderRadius: 12,
+            border: "1px solid #b45309",
+            background: "#16211b",
+            padding: 18,
+          }}
+        >
+          <p style={{ margin: 0, fontWeight: 700, fontSize: "1.05rem" }}>
+            {player.last_name}, {player.name}
+          </p>
+          <p style={{ margin: "8px 0 0", color: "#fbbf24" }}>
+            Debe ${formatArs(owed)}
+          </p>
+          <p style={{ margin: "4px 0 0", opacity: 0.75, fontSize: "0.9rem" }}>
+            Pasale el mensaje antes de que entrene.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
+            <button className="btnPrimary" data-testid="debt-warning-charge" onClick={onCharge}>
+              Marcar presente y cobrar
+            </button>
+            <button
+              data-testid="debt-warning-anyway"
+              onClick={onConfirm}
+              style={{
+                padding: 12,
+                borderRadius: 8,
+                border: "1px solid rgba(255,255,255,0.2)",
+                background: "rgba(255,255,255,0.06)",
+                cursor: "pointer",
+              }}
+            >
+              Marcar presente igual
+            </button>
+            <button
+              onClick={onCancel}
+              style={{
+                padding: 12,
+                borderRadius: 8,
+                border: "none",
+                background: "transparent",
+                color: "inherit",
+                cursor: "pointer",
+              }}
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
 // ---- Payment modal ----
 
 function PaymentModal({
@@ -417,17 +509,23 @@ function PaymentModal({
   sessionLabel: string;
   monthLabel: string;
   onClose: () => void;
-  onConfirm: (amount: number) => void;
+  onConfirm: (amount: number, concept: PaymentConcept) => void;
   busy: boolean;
 }) {
-  const [amount, setAmount] = useState<number | null>(null);
+  const [chosen, setChosen] = useState<{ amount: number; concept: PaymentConcept } | null>(null);
   const [custom, setCustom] = useState("");
+  // "Otro..." has to say WHAT it is: the amount no longer decides.
+  const [customConcept, setCustomConcept] = useState<PaymentConcept>("session");
 
   const sessionPreset = player.session_preset;
   const monthPreset = player.month_preset;
-  // Mirrors how the API files a payment: anything up to one session's price
-  // is a session, more than that is the month.
-  const isSession = amount !== null && sessionPreset !== null && amount <= sessionPreset;
+  const owing = player.debt_outstanding;
+
+  const conceptLabel: Record<PaymentConcept, string> = {
+    session: sessionLabel,
+    monthly: monthLabel,
+    "debt settlement": "Saldo de meses anteriores",
+  };
 
   const button: React.CSSProperties = {
     width: "100%",
@@ -471,18 +569,50 @@ function PaymentModal({
             {player.last_name}, {player.name}
           </p>
 
-          {amount === null ? (
+          {chosen === null ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
-              {sessionPreset !== null && (
-                <button style={button} onClick={() => setAmount(sessionPreset)}>
-                  Sesión individual · <strong>${formatArs(sessionPreset)}</strong>
+              {/* With debt outstanding, nothing else may be collected: the
+                  money on the table settles it first. */}
+              {owing > 0 ? (
+                <button
+                  data-testid="pay-debt"
+                  style={button}
+                  onClick={() => setChosen({ amount: owing, concept: "debt settlement" })}
+                >
+                  Saldar deuda · <strong>${formatArs(owing)}</strong>
                 </button>
+              ) : (
+                <>
+                  {sessionPreset !== null && (
+                    <button
+                      data-testid="pay-session"
+                      style={button}
+                      onClick={() => setChosen({ amount: sessionPreset, concept: "session" })}
+                    >
+                      Sesión individual · <strong>${formatArs(sessionPreset)}</strong>
+                    </button>
+                  )}
+                  {monthPreset !== null && (
+                    <button
+                      data-testid="pay-month"
+                      style={button}
+                      onClick={() => setChosen({ amount: monthPreset, concept: "monthly" })}
+                    >
+                      Mes completo · <strong>${formatArs(monthPreset)}</strong>
+                    </button>
+                  )}
+                </>
               )}
-              {monthPreset !== null && (
-                <button style={button} onClick={() => setAmount(monthPreset)}>
-                  Mes completo · <strong>${formatArs(monthPreset)}</strong>
-                </button>
-              )}
+              <select
+                data-testid="custom-concept"
+                value={customConcept}
+                onChange={(e) => setCustomConcept(e.target.value as PaymentConcept)}
+                style={{ ...button, cursor: "pointer" }}
+              >
+                <option value="session">Otro monto · sesión individual</option>
+                <option value="monthly">Otro monto · mes</option>
+                {owing > 0 && <option value="debt settlement">Otro monto · deuda</option>}
+              </select>
               <div style={{ display: "flex", gap: 8 }}>
                 <input
                   type="number"
@@ -507,7 +637,7 @@ function PaymentModal({
                     if (!Number.isFinite(value) || value <= 0) return;
                     // Typing "30" means 30k: the amounts here are thousands.
                     if (value < 1000) value = value * 1000;
-                    setAmount(value);
+                    setChosen({ amount: value, concept: customConcept });
                   }}
                 >
                   OK
@@ -523,16 +653,16 @@ function PaymentModal({
           ) : (
             <div style={{ marginTop: 14 }}>
               <p style={{ margin: 0, fontSize: "1.6rem", fontWeight: 700 }}>
-                ${formatArs(amount)}
+                ${formatArs(chosen.amount)}
               </p>
               <p style={{ margin: "4px 0 0", opacity: 0.75, fontSize: "0.9rem" }}>
-                {isSession ? sessionLabel : monthLabel}
+                {conceptLabel[chosen.concept]}
               </p>
               <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
                 <button
                   style={{ ...button, textAlign: "center" }}
                   disabled={busy}
-                  onClick={() => setAmount(null)}
+                  onClick={() => setChosen(null)}
                 >
                   Cancelar
                 </button>
@@ -540,7 +670,7 @@ function PaymentModal({
                   className="btnPrimary"
                   style={{ flex: 1 }}
                   disabled={busy}
-                  onClick={() => onConfirm(amount)}
+                  onClick={() => onConfirm(chosen.amount, chosen.concept)}
                 >
                   Confirmar
                 </button>
@@ -570,6 +700,8 @@ function TrainingSessionBetaContent() {
   const [expandedAbsent, setExpandedAbsent] = useState(false);
   const [debtModalPlayer, setDebtModalPlayer] = useState<RosterPlayer | null>(null);
   const [payModalPlayer, setPayModalPlayer] = useState<RosterPlayer | null>(null);
+  /** Marking this player present is waiting on the admin's confirmation. */
+  const [confirmPlayer, setConfirmPlayer] = useState<RosterPlayer | null>(null);
   const [busy, setBusy] = useState(false);
 
   // Search popup
@@ -781,7 +913,15 @@ function TrainingSessionBetaContent() {
       if (Math.abs(target - x) < 1 && Math.abs(v) < 0.05) {
         animsRef.current.delete(playerId);
         setRowWheel(playerId, null);
-        if (target !== 0) setAttendance(playerId, !wasAttended);
+        if (target !== 0) {
+          // Marking someone present who owes money is worth a word with them,
+          // so the admin gets asked. It only ever warns: if they let the
+          // player train anyway we still want the attendance recorded.
+          const owes = !wasAttended &&
+            ((g.player.debt_outstanding ?? 0) > 0 || g.player.owed_now > 0);
+          if (owes) setConfirmPlayer(g.player);
+          else setAttendance(playerId, !wasAttended);
+        }
         return;
       }
       setRowWheel(playerId, { attended: wasAttended, x, width: W });
@@ -894,19 +1034,22 @@ function TrainingSessionBetaContent() {
     },
   }), [setRowWheel, settleWheel, endGesture, noteGestureEnd]);
 
-  const registerPayment = useCallback(async (playerId: string, amount: number) => {
+  const registerPayment = useCallback(async (
+    playerId: string,
+    amount: number,
+    concept: PaymentConcept,
+  ) => {
     setBusy(true);
     const res = await fetch(`/api/training-sessions/${session}/payment`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ player_id: playerId, amount }),
+      body: JSON.stringify({ player_id: playerId, amount, concept }),
     });
     setBusy(false);
     if (!res.ok) {
-      const text = await res.text();
-      alert(text.includes("duplicate") || text.includes("23505")
-        ? "Pago ya registrado"
-        : "Error al registrar pago");
+      // The service refuses with a reason the admin can act on; show it
+      // instead of a generic failure.
+      alert(res.status === 409 ? await res.text() : "Error al registrar pago");
       return;
     }
     setPayModalPlayer(null);
@@ -1056,6 +1199,24 @@ function TrainingSessionBetaContent() {
         {renderRows(arquerosAusentes, "absent", "Sin arqueros")}
       </Section>
 
+      {confirmPlayer && (
+        <DebtWarningModal
+          player={confirmPlayer}
+          onCancel={() => setConfirmPlayer(null)}
+          onConfirm={() => {
+            const p = confirmPlayer;
+            setConfirmPlayer(null);
+            setAttendance(p.id, true);
+          }}
+          onCharge={() => {
+            const p = confirmPlayer;
+            setConfirmPlayer(null);
+            setAttendance(p.id, true);
+            setPayModalPlayer(p);
+          }}
+        />
+      )}
+
       {payModalPlayer && (
         <PaymentModal
           player={payModalPlayer}
@@ -1063,7 +1224,7 @@ function TrainingSessionBetaContent() {
           monthLabel={monthLabel}
           busy={busy}
           onClose={() => setPayModalPlayer(null)}
-          onConfirm={(amount) => registerPayment(payModalPlayer.id, amount)}
+          onConfirm={(amount, concept) => registerPayment(payModalPlayer.id, amount, concept)}
         />
       )}
 
@@ -1212,6 +1373,7 @@ function sameRoster(a: RosterPlayer, b: RosterPlayer): boolean {
     a.paidMonthlyForSlot === b.paidMonthlyForSlot &&
     a.dues_status === b.dues_status &&
     a.debt === b.debt &&
+    a.debt_outstanding === b.debt_outstanding &&
     a.owes_now === b.owes_now &&
     a.owes_if_present === b.owes_if_present &&
     a.owes_if_absent === b.owes_if_absent &&

@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { writableSession } from "./fixtures";
+import { confirmDebtWarning, writableSession } from "./fixtures";
 
 // Real-touch regression for the attendance wheel. Mouse events skip the
 // browser's touch pipeline entirely (touch-action, scroll intent,
@@ -113,6 +113,7 @@ test.describe("ruedita táctil real", () => {
     await expect(page.getByTestId("attendance-wheel").first()).toBeVisible();
     await page.waitForTimeout(250); // release with ~zero velocity
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await confirmDebtWarning(page);
     await written;
 
     await expect(seeded(page, "section-presentes")).toHaveCount(1);
@@ -155,6 +156,7 @@ test.describe("ruedita táctil real", () => {
       await page.waitForTimeout(16);
     }
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await confirmDebtWarning(page);
     await written;
 
     await expect(seeded(page, "section-presentes")).toHaveCount(2);
@@ -183,6 +185,7 @@ test.describe("ruedita táctil real", () => {
       await page.waitForTimeout(16);
     }
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await confirmDebtWarning(page);
 
     await expect(page.getByTestId("attendance-wheel")).toHaveCount(0);
     // Quieto stays absent.

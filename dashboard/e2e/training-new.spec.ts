@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { writableSession } from "./fixtures";
+import { confirmDebtWarning, writableSession } from "./fixtures";
 
 // The redesigned attendance & payments screen: presence expressed by
 // sections, toggled by long-press + drag to the goal bar.
@@ -201,6 +201,7 @@ async function slideWheel(page: Page, name: string, fraction: number) {
   // Pause so the release velocity is ~zero.
   await page.waitForTimeout(250);
   await page.mouse.up();
+  await confirmDebtWarning(page);
   // Wait for the spring to finish, then for the write to land.
   await expect(page.getByTestId("attendance-wheel")).toHaveCount(0);
   if (written) await written;

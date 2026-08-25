@@ -101,3 +101,15 @@ export async function futureSession(hour = 22): Promise<{ session: string; month
   }
   throw new Error(`La agenda no tiene un mes futuro con dos entrenamientos de ${hour}hs`);
 }
+
+/**
+ * Marking somebody present who owes money asks first. Confirms it when it
+ * shows, and does nothing when it does not — most players owe nothing.
+ */
+export async function confirmDebtWarning(page: import("@playwright/test").Page) {
+  const anyway = page.getByTestId("debt-warning-anyway");
+  // It appears when the wheel finishes settling, not at finger-up, so a bare
+  // isVisible() checks too early.
+  await anyway.waitFor({ state: "visible", timeout: 2000 }).catch(() => {});
+  if (await anyway.isVisible().catch(() => false)) await anyway.click();
+}

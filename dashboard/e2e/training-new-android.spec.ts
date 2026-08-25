@@ -1,6 +1,6 @@
 import { test, expect, devices, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { writableSession } from "./fixtures";
+import { confirmDebtWarning, writableSession } from "./fixtures";
 
 // The drag gesture under Playwright's Pixel 7 descriptor: mobile viewport,
 // isMobile viewport-meta handling, device scale factor and touch on Blink —
@@ -108,6 +108,7 @@ test.describe("Pixel 7 (Blink, como Android Chrome)", () => {
     await expect(page.getByTestId("attendance-wheel").first()).toBeVisible();
     await page.waitForTimeout(250);
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await confirmDebtWarning(page);
     await written;
 
     await expect(seeded(page, "section-presentes")).toHaveCount(1);
@@ -138,6 +139,7 @@ test.describe("Pixel 7 (Blink, como Android Chrome)", () => {
       await page.waitForTimeout(16);
     }
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await confirmDebtWarning(page);
 
     // The permanent non-passive blocker must not kill normal scrolling: the
     // page really moved, and the wheel never woke up.
