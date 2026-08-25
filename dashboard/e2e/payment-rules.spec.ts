@@ -57,7 +57,7 @@ test.beforeEach(clearPayments);
 
 async function pay(
   page: import("@playwright/test").Page,
-  concept: "session" | "monthly" | "debt settlement",
+  concept: "session" | "monthly" | "half month" | "debt settlement",
   amount: number,
   session = fx.session,
 ) {
@@ -175,4 +175,46 @@ test("no se cobra ni se marca presente en una sesión ya cerrada", async ({ page
   );
   expect(attendance.status()).toBe(409);
   expect(await attendance.text()).toContain("cerrada");
+});
+
+test("medio mes cobra lo que queda, y sólo como primer pago del período", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+
+  // A month still ahead, so its sessions are all still to come.
+  const { data: monthSessions } = await admin().from("training_sessions")
+    .select("date").eq("hour", 22)
+    .gte("date", `${ahead.month}-01`)
+    .lt("date", `${ahead.month}-99`.replace("-99", "-01").replace(
+      ahead.month,
+      ((): string => {
+        const [y, m] = ahead.month.split("-").map(Number);
+        return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+      })(),
+    ))
+    .order("date");
+  const dates = (monthSessions ?? []).map((r) => String(r.date));
+  expect(dates.length).toBeGreaterThanOrEqual(3);
+
+  // Registered at the SECOND session: it buys that one and everything after,
+  // never the one already gone.
+  const second = `${dates[1]}-22`;
+  const expected = (dates.length - 1) * 25000;
+
+  const roster = await (await page.request.get(`/api/training-sessions-beta/${second}`)).json();
+  const row = roster.players.find((p: { id: string }) => p.id === playerId);
+  expect(row.half_month_preset, `${dates.length} sesiones, arranca en la 2a`).toBe(expected);
+
+  const res = await pay(page, "half month", expected, second);
+  expect(res.status(), await res.text()).toBe(200);
+
+  const { data: saved } = await admin().from("payments")
+    .select("concept,amount,session").eq("player_id", playerId).single();
+  expect(saved!.concept).toBe("half month");
+  // It names its own session: that is what says how many it bought.
+  expect(saved!.session).toBe(`${dates[1]} 22hs`);
+
+  // And it is a first-payment-only thing: now that they have paid, no more.
+  const again = await pay(page, "half month", expected, second);
+  expect(again.status()).toBe(409);
+  expect(await again.text()).toContain("primer pago");
 });

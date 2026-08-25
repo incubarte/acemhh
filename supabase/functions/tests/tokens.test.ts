@@ -336,6 +336,7 @@ Deno.test("la bonificación discrecional del admin gana sobre todo", () => {
 
 import {
     checkPayment,
+    type PaymentConcept,
     type PaymentGuard,
     weekStart,
     withinWriteWindow,
@@ -343,13 +344,15 @@ import {
 
 const OPEN: PaymentGuard = {
     closedDebt: 0,
+    firstOfPeriod: false,
+    halfMonthPrice: 0,
     monthlySlots: new Set(),
     individualSlots: new Set(),
     monthPrice: 100000,
     monthlyPaid: 0,
     monthlyClosed: false,
 };
-const pay = (concept: "monthly" | "session" | "debt settlement", amount: number) => ({
+const pay = (concept: PaymentConcept, amount: number) => ({
     concept, amount, slot: S22,
 });
 
@@ -431,4 +434,64 @@ Deno.test("un horario sin entrenamientos este mes no tiene mes que vender", () =
 Deno.test("el monto tiene que ser positivo", () => {
     assertEquals(checkPayment(pay("session", 0), OPEN)?.includes("mayor a cero"), true);
     assertEquals(checkPayment(pay("session", -1), OPEN)?.includes("mayor a cero"), true);
+});
+
+// ////////////////////////////////////
+// MEDIO MES
+// ////////////////////////////////////
+
+Deno.test("medio mes compra las sesiones que quedan, sin obligación por las que no", () => {
+    // Arranca con el mes empezado: quedan 2 de las 4, paga 2 x 25k y va a las 2.
+    const r = run(EMPTY_STATE, {
+        attendances: [{ slot: S22 }, { slot: S22 }],
+        payments: [{ concept: "half month", amount: 50000, slot: S22, coversSessions: 2 }],
+        sessionsPerSlot: new Map([[S22, 4]]),
+    });
+    assertEquals(r.pending, 0);
+    assertEquals(r.next.debt, 0);
+    assertEquals(r.carryoverOut, 0);
+});
+
+Deno.test("el mismo caso como parcial mensual le cobraría el mes entero", () => {
+    // Esta es la diferencia que motiva el concepto: mismo dinero, misma
+    // asistencia, y como anticipo termina debiendo los otros 50k.
+    const r = run(EMPTY_STATE, month({ held: 4, attended: 2, monthly: 50000 }));
+    assertEquals(r.next.debt, 50000);
+});
+
+Deno.test("medio mes cubre sólo lo que compró: lo que exceda se cobra suelto", () => {
+    const r = run(EMPTY_STATE, {
+        attendances: [{ slot: S22 }, { slot: S22 }, { slot: S22 }],
+        payments: [{ concept: "half month", amount: 50000, slot: S22, coversSessions: 2 }],
+        sessionsPerSlot: new Map([[S22, 4]]),
+    });
+    assertEquals(r.pending, 30000);
+});
+
+Deno.test("si el club cancela una de las sesiones que vendió, el medio mes la devuelve", () => {
+    // Vendió 3 de las que quedaban y sólo se dieron 2: una vuelve.
+    const r = run(EMPTY_STATE, {
+        attendances: [{ slot: S22 }, { slot: S22 }],
+        payments: [{ concept: "half month", amount: 75000, slot: S22, coversSessions: 2 }],
+        sessionsPerSlot: new Map([[S22, 4]]),
+    });
+    assertEquals(r.carryoverOut, 1);
+});
+
+Deno.test("medio mes es sólo para el primer pago del período", () => {
+    const first = { ...OPEN, firstOfPeriod: true, halfMonthPrice: 50000 };
+    assertEquals(checkPayment(pay("half month", 50000), first), null);
+
+    const notFirst = { ...first, firstOfPeriod: false };
+    assertEquals(checkPayment(pay("half month", 50000), notFirst)?.includes("primer pago"), true);
+});
+
+Deno.test("sin sesiones por delante no hay medio mes que vender", () => {
+    const sinNada = { ...OPEN, firstOfPeriod: true, halfMonthPrice: 0 };
+    assertEquals(checkPayment(pay("half month", 50000), sinNada)?.includes("No quedan"), true);
+});
+
+Deno.test("la deuda cerrada también bloquea el medio mes", () => {
+    const conDeuda = { ...OPEN, firstOfPeriod: true, halfMonthPrice: 50000, closedDebt: 30000 };
+    assertEquals(checkPayment(pay("half month", 50000), conDeuda)?.includes("deuda"), true);
 });

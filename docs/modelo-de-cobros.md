@@ -42,6 +42,7 @@ el momento de la venta:
 | Concepto | Precio por token |
 |---|---|
 | Mensual (promocional) | 25.000 |
+| Medio mes (promocional) | 25.000 |
 | Individual | 30.000 |
 | Cualquiera, para arqueros | 25.000 |
 
@@ -54,6 +55,22 @@ puede pasar al mes siguiente vía [carryover](#carryover), no por ser tokens.
 
 Se admiten **tokens fraccionarios**: un pago arbitrario de 15.000 a precio
 individual compra medio token. Es la vía normal para los montos improvisados.
+
+### Medio mes
+
+Para el que arranca el período con el mes ya empezado. **Compra las sesiones
+que quedan** — esa incluida — a tarifa promocional, y nada más: no es un
+anticipo, no deja obligación y no hay nada que condonar.
+
+El precio lo deriva la pantalla de **en qué sesión se está cobrando**. En un mes
+de 5 sesiones, cobrado en la 3ra son 3/5; cobrado en la 4ta, 2/5.
+
+Sólo se admite como **primer pago del jugador dentro del período**, en
+cualquiera de sus meses. Las cuotas anuales no cuentan: son ortogonales.
+
+Sin este concepto, el que arranca a mitad de mes y paga 50k terminaba debiendo
+el mes entero — el parcial mensual lo leía como un compromiso por las sesiones
+que ni siquiera existieron para él.
 
 ### A qué slot pertenece un token
 
@@ -137,6 +154,7 @@ De ahí sale la tabla:
 | Origen del token | Cuánto pasa |
 |---|---|
 | Mensual (promocional) | `min(tokens sin usar, n(S,M) − sesiones que realmente se dieron)` |
+| Medio mes | Igual, pero medido contra **las sesiones que le vendieron**, no contra el mes entero |
 | Individual | Todos los que sobraron |
 | Carryover del mes anterior | **Nada.** No hay segundo salto. |
 

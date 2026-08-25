@@ -35,6 +35,7 @@ type RosterPlayer = {
   debt_months: { month: string; charge: number; paid: number }[];
   month_preset: number | null;
   session_preset: number | null;
+  half_month_preset: number | null;
   owes_now: boolean | null;
   bought_month: boolean;
   owes_if_present: boolean;
@@ -524,6 +525,7 @@ function PaymentModal({
   const conceptLabel: Record<PaymentConcept, string> = {
     session: sessionLabel,
     monthly: monthLabel,
+    "half month": "Lo que queda del mes",
     "debt settlement": "Saldo de meses anteriores",
   };
 
@@ -599,6 +601,19 @@ function PaymentModal({
                       onClick={() => setChosen({ amount: monthPreset, concept: "monthly" })}
                     >
                       Mes completo · <strong>${formatArs(monthPreset)}</strong>
+                    </button>
+                  )}
+                  {/* Only for somebody starting the period with the month
+                      already under way: it buys what is still to come. */}
+                  {player.half_month_preset !== null && (
+                    <button
+                      data-testid="pay-half-month"
+                      style={button}
+                      onClick={() =>
+                        setChosen({ amount: player.half_month_preset!, concept: "half month" })}
+                    >
+                      Lo que queda del mes ·{" "}
+                      <strong>${formatArs(player.half_month_preset)}</strong>
                     </button>
                   )}
                 </>
@@ -1387,6 +1402,7 @@ function sameRoster(a: RosterPlayer, b: RosterPlayer): boolean {
     a.carryover_sessions === b.carryover_sessions &&
     a.month_preset === b.month_preset &&
     a.session_preset === b.session_preset &&
+    a.half_month_preset === b.half_month_preset &&
     a.qualifies === b.qualifies &&
     a.recent_attendance === b.recent_attendance &&
     a.name === b.name &&

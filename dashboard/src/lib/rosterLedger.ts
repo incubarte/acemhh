@@ -14,6 +14,7 @@ import {
   periodStart,
   priceFor,
   ratesFor,
+  type SlotKey,
   slotKey,
 } from "@shared/tokens";
 
@@ -34,6 +35,10 @@ export type LedgerExtras = {
   month_preset: number | null;
   /** What one session costs this player on its own. */
   session_preset: number | null;
+  /** What the sessions still to come cost — this session included. Only for
+   * somebody starting the period late. Null when there is nothing left, or
+   * when they have already paid something this period. */
+  half_month_preset: number | null;
   /** Pesos this month is still waiting for. Shown as debt while the month
    * runs, even though closing it may forgive part. */
   owed_now: number;
@@ -58,6 +63,7 @@ export const LEDGER_DEFAULTS: LedgerExtras = {
   debt_months: [],
   month_preset: null,
   session_preset: null,
+  half_month_preset: null,
   owed_now: 0,
   owes_now: null,
   bought_month: false,
@@ -136,11 +142,11 @@ export async function ledgerExtrasFor(
       // and Postgres rejects the whole query rather than clamping it.
       .lt("date", monthAfter(selectedMonth)),
     s.from("payments")
-      .select("player_id,month,concept,amount,slot_weekday,slot_hour")
+      .select("player_id,month,concept,amount,slot_weekday,slot_hour,session")
       .in("player_id", ids)
       .gte("month", carryFrom)
       .lte("month", selectedMonth)
-      .in("concept", ["monthly", "session", "debt settlement"]),
+      .in("concept", ["monthly", "session", "half month", "debt settlement"]),
     s.from("attendances")
       .select("player_id,session,bonified")
       .in("player_id", ids)
@@ -210,7 +216,23 @@ export async function ledgerExtrasFor(
       concept: p.concept as MonthPayment["concept"],
       amount: Number(p.amount),
       slot: slotKey(Number(p.slot_weekday), Number(p.slot_hour)),
+      // A half month bought the sessions that were still to come when it was
+      // sold, which is what its own session marks.
+      ...(p.concept === "half month" && p.session
+        ? { coversSessions: sessionsFrom(String(p.session).slice(0, 10),
+              slotKey(Number(p.slot_weekday), Number(p.slot_hour))) }
+        : {}),
     });
+  }
+
+  /** Sessions of a slot in their month from `date` onward, that one included.
+   * What a half month sold on that date is entitled to. */
+  function sessionsFrom(date: string, slot: SlotKey): number {
+    return [...featuresAt.entries()].filter(([key, f]) =>
+      f.slot === slot &&
+      key.slice(0, 10) >= date &&
+      key.slice(0, 7) === date.slice(0, 7)
+    ).length;
   }
 
   const monthsUpTo = (last: string) => {
@@ -289,6 +311,10 @@ export async function ledgerExtrasFor(
     const prevRow = debtMonths.find((d) => d.month === prevMonth);
 
     const heldThisMonth = sessionsPerSlot.get(selectedMonth)?.get(screenSlot) ?? 0;
+    // Half month is for the player's FIRST payment of the period. Membership
+    // dues are orthogonal and never counted here.
+    const paidSomethingThisPeriod = [...payMonths.values()].some((ps) => ps.length > 0);
+    const stillToCome = sessionsFrom(isoDate, screenSlot);
     const monthlyPaid = (payMonths.get(selectedMonth) ?? [])
       .filter((p) => p.concept === "monthly" && p.slot === screenSlot)
       .reduce((sum, p) => sum + p.amount, 0);
@@ -308,6 +334,11 @@ export async function ledgerExtrasFor(
         ? Math.round(heldThisMonth * rates.promo)
         : null,
       session_preset: rates.individual > 0 ? rates.individual : null,
+      half_month_preset:
+        !paidSomethingThisPeriod && stillToCome > 0 && stillToCome < heldThisMonth &&
+          rates.promo > 0
+          ? Math.round(stillToCome * rates.promo)
+          : null,
       owed_now: now.pending,
       owes_now: now.pending > 0,
       bought_month: heldThisMonth > 0 && monthlyPaid >= Math.round(heldThisMonth * rates.promo),

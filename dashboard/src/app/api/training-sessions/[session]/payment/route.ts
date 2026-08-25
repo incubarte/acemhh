@@ -50,7 +50,7 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
     }
 
     const concept: PaymentConcept = body.concept ?? "session";
-    if (!["session", "monthly", "debt settlement"].includes(concept)) {
+    if (!["session", "monthly", "half month", "debt settlement"].includes(concept)) {
       return new NextResponse("Concepto inválido", { status: 400 });
     }
 
@@ -90,7 +90,7 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
       .select("concept,amount,slot_weekday,slot_hour")
       .eq("player_id", body.player_id)
       .eq("month", selectedMonth)
-      .in("concept", ["monthly", "session"]);
+      .in("concept", ["monthly", "session", "half month"]);
 
     const monthlySlots = new Set<string>();
     const individualSlots = new Set<string>();
@@ -98,9 +98,9 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
     for (const p of sameMonth ?? []) {
       if (p.slot_weekday === null || p.slot_hour === null) continue;
       const k = slotKey(Number(p.slot_weekday), Number(p.slot_hour));
-      if (p.concept === "monthly") {
+      if (p.concept === "monthly" || p.concept === "half month") {
         monthlySlots.add(k);
-        if (k === slot) monthlyPaid += Number(p.amount);
+        if (p.concept === "monthly" && k === slot) monthlyPaid += Number(p.amount);
       } else individualSlots.add(k);
     }
 
@@ -129,6 +129,11 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
         monthPrice: extras?.month_preset ?? 0,
         monthlyPaid,
         monthlyClosed,
+        // Half month is the first thing a late starter pays. The ledger has
+        // already worked out whether that is the case and what it costs.
+        firstOfPeriod: extras?.half_month_preset !== null &&
+          extras?.half_month_preset !== undefined,
+        halfMonthPrice: extras?.half_month_preset ?? 0,
       },
     );
     if (refusal) return new NextResponse(refusal, { status: 409 });
@@ -146,7 +151,11 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
         slot_hour: Number(hour),
         concept,
         month: selectedMonth,
-        session: concept === "session" ? `${isoDate} ${hour}hs` : null,
+        // A half month names its session too: that is what says how many
+        // sessions it bought.
+        session: concept === "session" || concept === "half month"
+          ? `${isoDate} ${hour}hs`
+          : null,
         amount,
         is_cash: true,
       }]);

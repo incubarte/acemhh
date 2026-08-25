@@ -9,6 +9,10 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: "list",
+  // The dev server compiles routes on first hit, and a cold route under a full
+  // suite can take longer than the 5s default — which showed up as two flaky
+  // failures that passed on their own.
+  expect: { timeout: 10_000 },
   use: {
     baseURL: "http://localhost:3111",
   },

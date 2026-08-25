@@ -96,13 +96,21 @@ export function slotKey(weekday: number, hour: number): SlotKey {
   return `${weekday}-${hour}`;
 }
 
-export type PaymentConcept = "monthly" | "session" | "debt settlement";
+export type PaymentConcept =
+  | "monthly"
+  | "session"
+  /** The sessions left of a month, for somebody starting the period late. */
+  | "half month"
+  | "debt settlement";
 
 export type MonthPayment = {
   concept: PaymentConcept;
   amount: number;
-  /** Where the money was taken. Only a monthly payment is bound by it. */
+  /** Where the money was taken. Only the monthly family is bound by it. */
   slot: SlotKey;
+  /** For a half month: how many sessions of that slot were still to come when
+   * it was sold. That is what it bought, and what the club owes against it. */
+  coversSessions?: number;
 };
 
 export type MonthInput = {
@@ -181,17 +189,46 @@ export function ledgerMonth(
   // Paying for MORE sessions than the slot held is the other direction — the
   // club charged for a training it did not give — and that surplus is the only
   // promotional carryover there is.
-  const promoBySlot = new Map<SlotKey, { granted: number; paid: number; held: number }>();
+  const promoBySlot = new Map<SlotKey, {
+    /** Tokens the slot's promotional payments made available. */
+    granted: number;
+    /** A full-month payment: what was paid, and what the month costs. */
+    monthlyPaid: number;
+    monthlyHeld: number;
+    /** A half month: what was paid, and how many sessions it was sold for. */
+    halfPaid: number;
+    halfHeld: number;
+  }>();
+  const entry = (slot: SlotKey) => {
+    const found = promoBySlot.get(slot) ?? {
+      granted: 0,
+      monthlyPaid: 0,
+      monthlyHeld: input.sessionsPerSlot.get(slot) ?? 0,
+      halfPaid: 0,
+      halfHeld: 0,
+    };
+    promoBySlot.set(slot, found);
+    return found;
+  };
+
   for (const p of input.payments) {
-    if (p.concept !== "monthly") continue;
-    const held = input.sessionsPerSlot.get(p.slot) ?? 0;
-    const entry = promoBySlot.get(p.slot) ?? { granted: 0, paid: 0, held };
-    entry.paid += p.amount;
-    promoBySlot.set(p.slot, entry);
+    if (p.concept === "monthly") {
+      entry(p.slot).monthlyPaid += p.amount;
+    } else if (p.concept === "half month") {
+      const e = entry(p.slot);
+      e.halfPaid += p.amount;
+      e.halfHeld += p.coversSessions ?? 0;
+    }
   }
+
+  const tokensOf = (pesos: number) => (promo > 0 ? pesos / promo : 0);
   for (const [, e] of promoBySlot) {
-    const paidTokens = promo > 0 ? e.paid / promo : 0;
-    e.granted = Math.max(e.held, paidTokens);
+    // A full month is an ANTICIPO: it grants the whole month whatever was
+    // paid. A half month is a plain purchase: it grants what it bought.
+    const fromMonthly = e.monthlyPaid > 0
+      ? Math.max(e.monthlyHeld, tokensOf(e.monthlyPaid))
+      : 0;
+    e.granted = fromMonthly + tokensOf(e.halfPaid);
   }
 
   // --- Individual tokens: what the money bought, at the normal rate, usable
@@ -246,15 +283,18 @@ export function ledgerMonth(
   }
   let forgivable = 0;
   for (const [slot, e] of promoBySlot) {
-    const full = Math.round(e.held * promo);
-    if (e.paid >= full) continue;
-    const short = full - e.paid;
+    // Only a full month can fall short: a half month bought exactly what it
+    // paid for, so it owes nothing and has nothing to forgive.
+    if (e.monthlyPaid === 0) continue;
+    const full = Math.round(e.monthlyHeld * promo);
+    if (e.monthlyPaid >= full) continue;
+    const short = full - e.monthlyPaid;
     pending += short;
     // Closing the month forgives that shortfall — but only for someone who
     // barely used the month: what they paid has to cover the sessions they
     // did attend at the individual rate.
     const attended = attendancesBySlot.get(slot) ?? 0;
-    if (e.paid >= Math.round(attended * individual)) forgivable += short;
+    if (e.monthlyPaid >= Math.round(attended * individual)) forgivable += short;
   }
 
   // --- Debt settlements pay down what closed months left.
@@ -270,8 +310,10 @@ export function ledgerMonth(
   // The opening balance itself never hops twice.
   let carryoverOut = individualLeft;
   for (const [slot, e] of promoBySlot) {
-    const paidTokens = promo > 0 ? e.paid / promo : 0;
-    const clubShortfall = Math.max(0, paidTokens - e.held);
+    // Each promotional purchase is measured against what it was sold for: the
+    // whole month, or the sessions that were still to come.
+    const clubShortfall = Math.max(0, tokensOf(e.monthlyPaid) - e.monthlyHeld) +
+      Math.max(0, tokensOf(e.halfPaid) - e.halfHeld);
     carryoverOut += Math.min(promoLeft.get(slot) ?? 0, clubShortfall);
   }
 
@@ -399,6 +441,12 @@ export type PaymentIntent = {
 export type PaymentGuard = {
   /** Pesos owed from months that already closed. */
   closedDebt: number;
+  /** Whether the player has yet to pay anything in this period. Membership
+   * dues do not count: they are a separate, orthogonal payment. */
+  firstOfPeriod: boolean;
+  /** For a half month: what the sessions still to come cost. 0 when there are
+   * none left. */
+  halfMonthPrice: number;
   /** Slots of this month that already took a monthly payment. */
   monthlySlots: Set<SlotKey>;
   /** Slots of this month that already took an individual one. */
@@ -439,9 +487,23 @@ export function checkPayment(intent: PaymentIntent, ctx: PaymentGuard): string |
     return null;
   }
 
+  // A half month is what somebody starting the period late buys: the sessions
+  // that are still to come, at the promotional rate, with no obligation for
+  // the ones that already happened without them.
+  if (intent.concept === "half month") {
+    if (!ctx.firstOfPeriod) {
+      return "Medio mes es sólo para el primer pago del jugador en el período";
+    }
+    if (ctx.halfMonthPrice <= 0) {
+      return "No quedan sesiones de este horario en el mes";
+    }
+    return null;
+  }
+
   // One concept per (month, slot). From the first payment the decision is
   // taken, so promotional and normal prices never mix in the same month.
-  if (intent.concept === "monthly" && ctx.individualSlots.has(intent.slot)) {
+  const promotional = intent.concept === "monthly";
+  if (promotional && ctx.individualSlots.has(intent.slot)) {
     return "Ya hay un pago de sesión para este mes y horario";
   }
   if (intent.concept === "session" && ctx.monthlySlots.has(intent.slot)) {
