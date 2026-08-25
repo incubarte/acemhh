@@ -143,6 +143,13 @@ async function openPage(page: Page) {
   await expect(page.getByTestId("section-presentes")).toBeVisible();
 }
 
+/** Rows of the seeded players only. The database carries the club's real
+ * roster, so counting a whole section would count strangers. */
+function seeded(page: Page, section: string) {
+  const sel = [...ids.values()].map((id) => `[data-player-row="${id}"]`).join(", ");
+  return page.getByTestId(section).locator(sel);
+}
+
 /** A player can appear twice (Deudores plus their own section). Only the copy
  * in their own section takes the wheel — the debtors list is inert. */
 function row(page: Page, name: string) {
@@ -205,7 +212,7 @@ test("clasifica presentes por pago y ausentes por historial, ignorando trains", 
   const ausentes = page.getByTestId("section-ausentes");
 
   // Three present players (trains=false, still listed).
-  await expect(page.getByTestId("section-presentes").locator("[data-player-row]")).toHaveCount(3);
+  await expect(seeded(page, "section-presentes")).toHaveCount(3);
   await expect(presentes.getByText(`${LAST}, Mensual`)).toBeVisible();
   await expect(presentes.getByText(`${LAST}, Sesionista`)).toBeVisible();
   await expect(presentes.getByText(`${LAST}, Deudor`)).toBeVisible();
@@ -233,7 +240,7 @@ test("deslizar la ruedita más de la mitad marca presente", async ({ page }) => 
 
   await slideWheel(page, "Reciente", 0.8);
 
-  await expect(page.getByTestId("section-presentes").locator("[data-player-row]")).toHaveCount(4);
+  await expect(seeded(page, "section-presentes")).toHaveCount(4);
   await expect(
     page.getByTestId("section-presentes").getByText(`${LAST}, Reciente`),
   ).toBeVisible();
@@ -245,7 +252,7 @@ test("un deslizamiento corto vuelve atrás sin cambiar nada", async ({ page }) =
   await slideWheel(page, "Mensual", 0.3);
 
   // Still present: the wheel snapped back to its detent.
-  await expect(page.getByTestId("section-presentes").locator("[data-player-row]")).toHaveCount(4);
+  await expect(seeded(page, "section-presentes")).toHaveCount(4);
   await expect(
     page.getByTestId("section-presentes").getByText(`${LAST}, Mensual`),
   ).toBeVisible();
@@ -256,7 +263,7 @@ test("la ruedita también gira a la izquierda: presente pasa a ausente", async (
 
   await slideWheel(page, "Mensual", -0.8);
 
-  await expect(page.getByTestId("section-presentes").locator("[data-player-row]")).toHaveCount(3);
+  await expect(seeded(page, "section-presentes")).toHaveCount(3);
   await expect(
     page.getByTestId("section-ausentes").getByText(`${LAST}, Mensual`),
   ).toBeVisible();

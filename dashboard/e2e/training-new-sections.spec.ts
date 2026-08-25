@@ -97,7 +97,13 @@ test.afterAll(cleanup);
 test("un scroll que arranca sobre una fila no cambia la palabra, una pulsación sí", async ({ page }) => {
   await openPage(page);
   const wheel = page.getByTestId("attendance-wheel");
-  const box = (await rowIn(page, "section-presentes", "Alcorriente").boundingBox())!;
+  // Centred and settled: with the club's real roster loaded the row sits well
+  // down the page, and near the bottom-left corner the dev-tools badge eats
+  // the press.
+  const target = rowIn(page, "section-presentes", "Alcorriente");
+  await target.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await page.waitForTimeout(400);
+  const box = (await target.boundingBox())!;
   const x = box.x + 20;
   const y = box.y + box.height / 2;
 

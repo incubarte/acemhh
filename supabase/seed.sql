@@ -1,10 +1,24 @@
--- Seed user for local development (matches DEV_AUTH_ID in .env.local)
-INSERT INTO users (id, username, first_name, last_name)
+-- Seed users for local development. The first matches DEV_AUTH_ID in
+-- .env.local, which /api/auth/dev looks up by tg_id.
+--
+-- groups has to be set here: it drives the ACL, and the identity refactor
+-- migration can only backfill rows that already existed when it ran — a seed
+-- loads afterwards.
+INSERT INTO users (tg_id, tg_username, first_name, last_name, groups)
 VALUES
-    (45669763, 'Migralito', 'Alejandro', null),
-    (40541227, 'DiegoBerko', 'Diego', 'Berko'),
-    (6885365547, null, 'Fran', null)
-ON CONFLICT (id) DO NOTHING;
+    (45669763, 'Migralito', 'Alejandro', null, ARRAY['ROOT']),
+    (40541227, 'DiegoBerko', 'Diego', 'Berko', ARRAY['WHEEL']),
+    (6885365547, null, 'Fran', null, ARRAY['WHEEL'])
+ON CONFLICT (tg_id) DO NOTHING;
+
+-- The jue 22hs slot's training before 2026-08-20. The agenda migration derives
+-- past sessions from attendance and payments, which a fresh database has none
+-- of, so this one has to be stated: several ledger specs use it as "the
+-- previous session of this slot group" and would otherwise only pass on a
+-- database that had accumulated data.
+INSERT INTO training_sessions (date, hour)
+VALUES ('2026-08-06', 22)
+ON CONFLICT (date, hour) DO NOTHING;
 
 -- Contact backfill for local development.
 -- Regenerate with:

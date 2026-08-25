@@ -457,9 +457,8 @@ Deno.test("trainingsFor counts each slot-group's dates from training_sessions", 
 
     const slots = await fetchTrainingSlots(admin);
 
-    // The migration seeds every remaining Thursday of the 2026 second
-    // semester: 4 in September, 5 in October — for every category and for
-    // goalkeepers (the 21hs slot is goalie-friendly).
+    // Every Thursday of the season: 4 in September, 5 in October — for every
+    // category and for goalkeepers (the 21hs slot is goalie-friendly).
     for (const group of [["cat-a"], ["cat-c"], ["youth"]]) {
         const trainings = trainingsFor(slots, group, false);
         assertEquals(trainings.get("2026-09"), 4, group.join());
@@ -468,8 +467,14 @@ Deno.test("trainingsFor counts each slot-group's dates from training_sessions", 
     const goalies = trainingsFor(slots, [], true);
     assertEquals(goalies.get("2026-09"), 4);
 
-    // July (winter break) has no slots at all.
-    assertEquals(activeMonths(slots).includes("2026-07"), false);
+    // July is a training month — the winter break falls inside it, not around
+    // it: the season stops after Thursday the 9th and resumes on August 6th.
+    // So cat-c trains once in July and goalkeepers twice, and July closes the
+    // first period, so none of it follows anybody into August.
+    assertEquals(activeMonths(slots).includes("2026-07"), true);
+    assertEquals(trainingsFor(slots, ["cat-c"], false).get("2026-07"), 1);
+    assertEquals(trainingsFor(slots, [], true).get("2026-07"), 2);
+    assertEquals(monthsWindow("2026-08", activeMonths(slots)), ["2026-08"]);
 });
 
 // ////////////////////////////////////

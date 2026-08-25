@@ -37,6 +37,13 @@ async function openPage(page: Page) {
   await expect(page.getByTestId("section-presentes")).toBeVisible();
 }
 
+/** Rows of the seeded players only. The database carries the club's real
+ * roster, so counting a whole section would count strangers. */
+function seeded(page: Page, section: string) {
+  const sel = [...ids.values()].map((id) => `[data-player-row="${id}"]`).join(", ");
+  return page.getByTestId(section).locator(sel);
+}
+
 test.describe("ruedita táctil real", () => {
   test.use({ hasTouch: true, viewport: { width: 390, height: 664 } });
   test.describe.configure({ mode: "serial" });
@@ -102,7 +109,7 @@ test.describe("ruedita táctil real", () => {
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     await written;
 
-    await expect(page.getByTestId("section-presentes").locator("[data-player-row]")).toHaveCount(1);
+    await expect(seeded(page, "section-presentes")).toHaveCount(1);
     await expect(
       page.getByTestId("section-presentes").getByText(`${LAST}, Lento`),
     ).toBeVisible();
@@ -144,7 +151,7 @@ test.describe("ruedita táctil real", () => {
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     await written;
 
-    await expect(page.getByTestId("section-presentes").locator("[data-player-row]")).toHaveCount(2);
+    await expect(seeded(page, "section-presentes")).toHaveCount(2);
   });
 
   test("swipe vertical scrollea sin despertar la ruedita", async ({ page }) => {

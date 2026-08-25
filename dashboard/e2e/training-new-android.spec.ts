@@ -1,4 +1,4 @@
-import { test, expect, devices } from "@playwright/test";
+import { test, expect, devices, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 // The drag gesture under Playwright's Pixel 7 descriptor: mobile viewport,
@@ -31,6 +31,13 @@ async function cleanup() {
 }
 
 test.use({ ...devices["Pixel 7"] });
+
+/** Rows of the seeded players only. The database carries the club's real
+ * roster, so counting a whole section would count strangers. */
+function seeded(page: Page, section: string) {
+  const sel = [...ids.values()].map((id) => `[data-player-row="${id}"]`).join(", ");
+  return page.getByTestId(section).locator(sel);
+}
 
 test.describe("Pixel 7 (Blink, como Android Chrome)", () => {
   test.beforeAll(async () => {
@@ -97,7 +104,7 @@ test.describe("Pixel 7 (Blink, como Android Chrome)", () => {
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     await written;
 
-    await expect(page.getByTestId("section-presentes").locator("[data-player-row]")).toHaveCount(1);
+    await expect(seeded(page, "section-presentes")).toHaveCount(1);
   });
 
   test("un swipe inmediato sobre una fila scrollea de verdad", async ({ page }) => {

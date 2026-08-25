@@ -170,8 +170,11 @@ test("los movimientos arrancan en agosto, pero el saldo cuenta todo", async ({ p
   const balance = caja.users.find((u: { id: string }) => u.id === receiverId).balance;
   expect(balance).toBe(530000);
 
-  // ...but only the August one shows among the movements.
-  const incomes = caja.history.filter((h: { kind: string }) => h.kind === "income");
+  // ...but only the August one shows among this collector's movements. Scoped
+  // by name: the club's caja carries everyone else's real history too.
+  const incomes = caja.history.filter(
+    (h: { kind: string; name: string }) => h.kind === "income" && h.name === RECEIVER_NAME,
+  );
   expect(incomes).toHaveLength(1);
   expect(incomes[0].amount).toBe(30000);
   expect(incomes[0].at >= "2026-08-01").toBe(true);
@@ -295,20 +298,26 @@ test("los cobros se discriminan por slot, y la entrega dice cuánto fue", async 
   await page.goto("/caja");
   await expect(page.getByText("Cajas del club")).toBeVisible();
 
-  // One income entry per slot, each with its own takings.
-  await expect(page.getByText(/cobró 1 pago en jue 21hs/)).toBeVisible();
-  await expect(page.getByText(/cobró 2 pagos en jue 22hs/)).toBeVisible();
+  // One income entry per slot, each with its own takings. Named, because other
+  // collectors have real entries on the same slots.
+  await expect(page.getByText(`${RECEIVER_NAME} cobró 1 pago en jue 21hs`)).toBeVisible();
+  await expect(page.getByText(`${RECEIVER_NAME} cobró 2 pagos en jue 22hs`)).toBeVisible();
 
   const caja = await (await page.request.get("/api/caja")).json();
-  const incomes = caja.history.filter((h: { kind: string }) => h.kind === "income");
+  const incomes = caja.history.filter(
+    (h: { kind: string; name: string }) => h.kind === "income" && h.name === RECEIVER_NAME,
+  );
   expect(incomes.map((i: { slot: string; amount: number }) => [i.slot, i.amount]))
     .toEqual([["jue 21hs", 30000], ["jue 22hs", 75000]]);
 
   // Seen from the club's caja a handoff moves nothing, so the delta column
   // reads "—": the amount has to be in the text or it is nowhere.
-  const handoff = page.getByText(/le entregó \$12\.345 a/);
+  const handoff = page.getByText(new RegExp(`le entregó \\$12\\.345 a ${RECEIVER_NAME}`));
   await expect(handoff).toBeVisible();
-  expect(caja.history.find((h: { kind: string }) => h.kind === "handoff").delta).toBe(0);
+  expect(caja.history.find(
+    (h: { kind: string; to_name?: string }) =>
+      h.kind === "handoff" && h.to_name === RECEIVER_NAME,
+  ).delta).toBe(0);
 
   await s.from("payments").delete().eq("player_id", player!.id);
   await s.from("players").delete().eq("id", player!.id);

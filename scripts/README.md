@@ -201,3 +201,24 @@ rather than violating the not-empty constraints.
 
 Nicknames outside the `Nicknames` table, and shortenings that are not simple
 diminutives. Lower `--threshold` to sweep wider, and expect siblings in the results.
+
+## `import-prod-2026.ts` — datos reales en local
+
+Copia la temporada 2026 de producción a la base local. Producción se lee y
+nunca se escribe, y el script se niega a apuntar a algo que no sea localhost.
+
+```sh
+npx supabase db reset --local                                   # esquema + seed
+deno run --allow-net --allow-env --allow-read scripts/import-prod-2026.ts
+```
+
+**El suite e2e corre contra estos datos**, no contra el seed pelado: los specs
+siembran sus propios jugadores y acotan sus aserciones a ellos, pero el roster,
+la agenda y la caja son los de verdad. Sin el import, varios specs fallan porque
+la agenda del seed arranca en agosto y la real arranca en marzo.
+
+Producción todavía tiene el esquema previo al split (`training_slots` con sus
+propias categorías), así que el script deriva `training_slot_features` igual que
+la migración **y lo verifica**: cada sesión tiene que resolver exactamente las
+features que producción tenía en ella. Hoy son cinco configuraciones para 105
+sesiones — las categorías de las 21hs y las 22hs cambiaron el 2026-05-07.
