@@ -42,6 +42,16 @@ async function clearProbeSlots() {
   await admin().from("training_sessions").delete().in("date", probeDates);
 }
 
+/** The probe dates land on whatever weekday today happens to be, so addSlot
+ * has to invent a configuration for that slot. Left behind, it turns every
+ * later count of "trainings this month" into a wrong number for whoever else
+ * is looking. */
+async function clearProbeFeatures() {
+  const weekdays = [...new Set(probeDates.map(isoWeekday))];
+  await admin().from("training_slot_features").delete()
+    .in("weekday", weekdays).eq("hour", 22).eq("valid_from", "2026-01-01");
+}
+
 /** ISO weekday (1 = Monday .. 7 = Sunday), the key of training_slot_features. */
 function isoWeekday(date: string): number {
   const day = new Date(`${date}T12:00:00Z`).getUTCDay();
@@ -83,6 +93,7 @@ test.beforeAll(async () => {
 test.beforeEach(clearProbeSlots);
 test.afterAll(async () => {
   await clearProbeSlots();
+  await clearProbeFeatures();
   if (savedSlots.length > 0) {
     const { error } = await admin().from("training_sessions").insert(savedSlots);
     if (error) throw new Error("Failed to restore slots: " + JSON.stringify(error));

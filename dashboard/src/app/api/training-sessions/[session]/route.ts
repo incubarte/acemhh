@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireFeatures } from "@/lib/slotFeatures";
+import { isoWeekday } from "@shared/slot";
 import { withPermission } from "@/lib/authMiddleware";
 import { LEDGER_DEFAULTS, ledgerExtrasFor } from "@/lib/rosterLedger";
 import { duesStatusFor, duesTotalsByPlayer } from "@/lib/dues";
@@ -10,14 +11,6 @@ function toSpecificSlot(isoDate: string, hour: string): string {
   return `${isoDate} ${hour}hs`;
 }
 
-function toGenericSlot(isoDate: string, hour: string): string {
-  const date = new Date(`${isoDate}T${hour}:00`);
-  return date.toLocaleString("es-AR", {
-    weekday: "short",
-    hour: "numeric",
-    hour12: false,
-  }).replace(",", "") + "hs";
-}
 
 type Section = "jugadores" | "invitados" | "arqueros";
 
@@ -37,7 +30,6 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
     const hour = parts[3];
 
     const specificSlot = toSpecificSlot(isoDate, hour);
-    const genericSlot = toGenericSlot(isoDate, hour);
     const selectedMonth = isoDate.substring(0, 7);
 
     const s = supabaseAdmin();
@@ -99,7 +91,8 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
         .select("player_id, amount")
         .eq("concept", "monthly")
         .eq("month", selectedMonth)
-        .eq("slot", genericSlot),
+        .eq("slot_weekday", isoWeekday(isoDate))
+        .eq("slot_hour", Number(hour)),
       s.from("payments")
         .select("player_id, amount")
         .eq("concept", "session")

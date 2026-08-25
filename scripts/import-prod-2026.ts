@@ -141,7 +141,14 @@ for (const t of [
 
 await insert("users", users);
 await insert("players", players);
-await insert("prices", prices);
+// Local's schema runs ahead of production: the goalkeeper rate does not exist
+// there yet. Today it equals the prepaid rate, which is the honest default for
+// rows that predate the column — they are kept apart precisely so changing one
+// does not move the other from here on.
+await insert("prices", prices.map((p) => ({
+    ...p,
+    goalkeeper_session_price: p.goalkeeper_session_price ?? p.prepaid_session_price,
+})));
 await insert("training_slot_features", features);
 await insert("training_sessions", sessions);
 // attendances.id is a sequence, and nothing references it — the real key is
@@ -149,7 +156,21 @@ await insert("training_sessions", sessions);
 // assign fresh ones, instead of leaving it behind production's numbering and
 // colliding on the very next insert.
 await insert("attendances", attendances.map(({ id: _id, ...rest }) => rest));
-await insert("payments", payments);
+// Production still stores the slot as a locale-formatted string; local wants
+// the pair that identifies it. Membership dues belong to no slot.
+const WEEKDAY_ES: Record<string, number> = {
+    lun: 1, mar: 2, "mié": 3, mie: 3, jue: 4, vie: 5, "sáb": 6, sab: 6, dom: 7,
+};
+await insert("payments", payments.map(({ slot, ...rest }) => {
+    if (!slot) return { ...rest, slot_weekday: null, slot_hour: null };
+    const [day, hour] = String(slot).split(" ");
+    const weekday = WEEKDAY_ES[day.toLowerCase()];
+    const h = Number(String(hour).replace(/\D/g, ""));
+    if (!weekday || !Number.isFinite(h)) {
+        throw new Error(`No pude interpretar el slot "${slot}" del pago ${rest.id}`);
+    }
+    return { ...rest, slot_weekday: weekday, slot_hour: h };
+}));
 await insert("expenses", expenses);
 await insert("cash_handoffs", handoffs);
 

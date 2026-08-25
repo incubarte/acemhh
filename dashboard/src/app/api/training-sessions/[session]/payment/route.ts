@@ -1,15 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
-
-function toGenericSlot(isoDate: string, hour: string): string {
-  const date = new Date(`${isoDate}T${hour}:00`);
-  return date.toLocaleString("es-AR", {
-    weekday: "short",
-    hour: "numeric",
-    hour12: false,
-  }).replace(",", "") + "hs";
-}
+import { isoWeekday } from "@shared/slot";
 
 export const POST = withPermission('api', '/api/training-sessions/payment', 'POST', async (sess, req) => {
   try {
@@ -25,7 +17,6 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
 
     const isoDate = `${parts[0]}-${parts[1]}-${parts[2]}`;
     const hour = parts[3];
-    const genericSlot = toGenericSlot(isoDate, hour);
     const selectedMonth = isoDate.substring(0, 7);
 
     const body = await req.json() as { player_id: string; amount: number };
@@ -69,7 +60,10 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
         player_id: body.player_id,
         registered_by: registeredBy,
         registered_by_user_id: sess.id,
-        slot: genericSlot,
+        // The slot this pays for, as the pair that identifies it — the same
+        // key training_slot_features uses.
+        slot_weekday: isoWeekday(isoDate),
+        slot_hour: Number(hour),
         concept: isSession ? "session" : "monthly",
         month: selectedMonth,
         session: isSession ? `${isoDate} ${hour}hs` : null,

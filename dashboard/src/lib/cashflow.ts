@@ -1,6 +1,8 @@
 // Cash-flow history helpers. Pure: imported by the API route and unit-tested
 // directly (dashboard/e2e/cashflow.spec.ts).
 
+import { slotLabel } from "@shared/slot";
+
 export const BuenosAires = "America/Argentina/Buenos_Aires";
 
 /** A collection day runs 5am → 5am (Buenos Aires), so a training night's
@@ -26,9 +28,10 @@ export type IncomePayment = {
   user_id: string;
   amount: number;
   created_at: string;
-  /** The training the money was collected for ("jue 22hs"). Older rows,
-   * booked before the column existed, have none. */
-  slot: string | null;
+  /** The slot the money was collected at. Membership dues belong to no slot
+   * and never reach the caja anyway (they go to the bank). */
+  slot_weekday: number | null;
+  slot_hour: number | null;
 };
 
 /** What a group without a slot is called on screen. */
@@ -53,7 +56,9 @@ export function groupIncomeByDay(payments: IncomePayment[]): IncomeGroup[] {
 
   for (const p of [...payments].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
     const day = collectionDay(p.created_at);
-    const slot = p.slot ?? NoSlotLabel;
+    const slot = p.slot_weekday !== null && p.slot_hour !== null
+      ? slotLabel(p.slot_weekday, p.slot_hour)
+      : NoSlotLabel;
     const key = `${p.user_id}|${day}|${slot}`;
     const existing = groups.get(key);
     if (existing) {

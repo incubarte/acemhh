@@ -150,6 +150,8 @@ test("los movimientos arrancan en agosto, pero el saldo cuenta todo", async ({ p
     registered_by: "__test",
     registered_by_user_id: receiverId,
     concept: "session",
+    slot_weekday: 4,
+    slot_hour: 22,
     session: "2026-05-07 22hs",
     month: createdAt.slice(0, 7),
     amount,
@@ -199,6 +201,8 @@ test("saldo inicial, balance corrido y filtro por persona", async ({ page }) => 
     registered_by: "__test",
     registered_by_user_id: receiverId,
     concept: "session",
+    slot_weekday: 4,
+    slot_hour: 22,
     session: "2026-05-07 22hs",
     month: createdAt.slice(0, 7),
     amount,
@@ -260,15 +264,17 @@ test("los cobros se discriminan por slot, y la entrega dice cuánto fue", async 
     categories: ["cat-b"], player_type: "player", trains: true, invitee: false,
   }).select("id").single();
 
-  const pay = (createdAt: string, amount: number, slot: string) => ({
+  /** `hour` is the hour of the Thursday slot the money was taken at. */
+  const pay = (createdAt: string, amount: number, hour: number) => ({
     id: crypto.randomUUID(),
     player_id: player!.id,
     registered_by: "__test",
     registered_by_user_id: receiverId,
     concept: "session",
-    session: "2026-08-13 22hs",
+    slot_weekday: 4,
+    slot_hour: hour,
+    session: `2026-08-13 ${hour}hs`,
     month: "2026-08",
-    slot,
     amount,
     is_cash: true,
     created_at: createdAt,
@@ -276,9 +282,9 @@ test("los cobros se discriminan por slot, y la entrega dice cuánto fue", async 
   // One night, two trainings: the 21hs takings must not be lumped in with
   // the 22hs ones just because the same person collected both.
   const { error } = await s.from("payments").insert([
-    pay("2026-08-14T00:10:00Z", 30000, "jue 21hs"),
-    pay("2026-08-14T01:10:00Z", 30000, "jue 22hs"),
-    pay("2026-08-14T01:20:00Z", 45000, "jue 22hs"),
+    pay("2026-08-14T00:10:00Z", 30000, 21),
+    pay("2026-08-14T01:10:00Z", 30000, 22),
+    pay("2026-08-14T01:20:00Z", 45000, 22),
   ]);
   if (error) throw new Error(JSON.stringify(error));
 

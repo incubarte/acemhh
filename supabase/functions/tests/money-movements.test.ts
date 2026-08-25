@@ -128,6 +128,8 @@ Deno.test("caja balances add up", async () => {
                 registered_by: TestName,
                 registered_by_user_id: ids.userA,
                 concept: "session",
+                slot_weekday: 4,
+                slot_hour: 22,
                 session: "2026-08-13 22hs",
                 month: "2026-08",
                 amount: 5000,

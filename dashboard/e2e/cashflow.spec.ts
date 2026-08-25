@@ -8,8 +8,15 @@ import { collectionDay, groupIncomeByDay, NoSlotLabel } from "../src/lib/cashflo
 const A = "user-a";
 const B = "user-b";
 
-function pay(user_id: string, created_at: string, amount = 1000, slot: string | null = "jue 22hs") {
-  return { user_id, amount, created_at, slot };
+/** `slot` is the hour of a Thursday slot, or null for money with no slot. */
+function pay(user_id: string, created_at: string, amount = 1000, slot: number | null = 22) {
+  return {
+    user_id,
+    amount,
+    created_at,
+    slot_weekday: slot === null ? null : 4,
+    slot_hour: slot,
+  };
 }
 
 test("un entrenamiento nocturno y sus cobros pasada la medianoche son un solo día", () => {
@@ -72,10 +79,10 @@ test("cada slot de la misma noche es una entrada aparte", () => {
   // One collector takes money at the three trainings of a single night: the
   // day is the same, but each training is settled on its own.
   const groups = groupIncomeByDay([
-    pay(A, "2026-08-14T00:00:00Z", 1000, "jue 21hs"),
-    pay(A, "2026-08-14T01:00:00Z", 2000, "jue 22hs"),
-    pay(A, "2026-08-14T01:30:00Z", 3000, "jue 22hs"),
-    pay(A, "2026-08-14T02:00:00Z", 4000, "jue 23hs"),
+    pay(A, "2026-08-14T00:00:00Z", 1000, 21),
+    pay(A, "2026-08-14T01:00:00Z", 2000, 22),
+    pay(A, "2026-08-14T01:30:00Z", 3000, 22),
+    pay(A, "2026-08-14T02:00:00Z", 4000, 23),
   ]);
 
   expect(groups).toHaveLength(3);
@@ -90,8 +97,8 @@ test("cada slot de la misma noche es una entrada aparte", () => {
 
 test("un mismo slot en noches distintas no se junta", () => {
   const groups = groupIncomeByDay([
-    pay(A, "2026-08-14T01:00:00Z", 1000, "jue 22hs"),
-    pay(A, "2026-08-21T01:00:00Z", 2000, "jue 22hs"),
+    pay(A, "2026-08-14T01:00:00Z", 1000, 22),
+    pay(A, "2026-08-21T01:00:00Z", 2000, 22),
   ]);
 
   expect(groups).toHaveLength(2);
@@ -101,7 +108,7 @@ test("un mismo slot en noches distintas no se junta", () => {
 test("los cobros viejos sin slot quedan en su propia entrada", () => {
   const groups = groupIncomeByDay([
     pay(A, "2026-08-14T01:00:00Z", 1000, null),
-    pay(A, "2026-08-14T01:10:00Z", 2000, "jue 22hs"),
+    pay(A, "2026-08-14T01:10:00Z", 2000, 22),
   ]);
 
   expect(groups).toHaveLength(2);

@@ -55,7 +55,7 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
   const [usersRes, paymentsRes, expensesRes, handoffsRes] = await Promise.all([
     s.from("users").select("id,first_name,last_name,groups"),
     s.from("payments")
-      .select("registered_by_user_id,amount,created_at,slot")
+      .select("registered_by_user_id,amount,created_at,slot_weekday,slot_hour")
       .eq("is_cash", true)
       .not("registered_by_user_id", "is", null),
     s.from("expenses").select("paid_by,amount,concept,notes,is_cash,created_at"),
@@ -124,7 +124,8 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
     user_id: p.registered_by_user_id!,
     amount: Number(p.amount),
     created_at: p.created_at,
-    slot: p.slot,
+    slot_weekday: p.slot_weekday,
+    slot_hour: p.slot_hour,
   })));
   for (const g of incomeGroups) {
     if (scope && g.user_id !== scope) continue;

@@ -13,7 +13,7 @@ const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ??
 const SESSION = "2026-08-20-22";
 const SESSION_STR = "2026-08-20 22hs";
 const PREV_STR = "2026-08-06 22hs";
-const SLOT = "jue 22hs";
+const SLOT_HOUR = 22;
 const LAST = "Grouptest";
 
 function admin(): SupabaseClient {
@@ -77,10 +77,13 @@ test.beforeAll(async () => {
       player_id: ids.get(c.name)!,
       registered_by: "__test",
       month: "2026-08",
+      // Every training payment names the slot it was taken at.
+      slot_weekday: 4,
+      slot_hour: SLOT_HOUR,
       is_cash: true,
     };
     if (c.pay === "month") {
-      return { ...base, concept: "monthly", slot: SLOT, amount: 100000 };
+      return { ...base, concept: "monthly", amount: 100000 };
     }
     if (c.pay === "session") {
       return { ...base, concept: "session", session: SESSION_STR, amount: 30000 };

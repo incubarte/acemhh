@@ -67,6 +67,8 @@ async function seed() {
     player_id: ids.get("Alcorriente")!,
     registered_by: "__test",
     concept: "session",
+    slot_weekday: 4,
+    slot_hour: 22,
     session: SESSION_STR,
     month: "2026-08",
     amount: 30000,
