@@ -377,18 +377,23 @@ async function handleIncoming(incoming: Incoming) {
     if (months.length > 0) {
         const prices = await fetchPrices(supabaseAdmin);
         const reportFor = async (player: PlayerLink): Promise<string | null> => {
-            // n is per slot: every player of a category shares their slot's
-            // training count, so they all pay the same — carryover is the
-            // only per-player variable.
-            const trainings = trainingsFor(slots, player.categories, player.goalkeeper);
+            // The ledger prices each month from the agenda itself: how many
+            // sessions each slot held, what the player attended of them, and
+            // what they paid at which slot.
+            const billing = {
+                goalkeeper: player.goalkeeper,
+                categories: player.categories,
+                scholarship: player.scholarship,
+            };
             const statuses = await fetchMonthStatuses(
                 supabaseAdmin,
                 player.id,
                 months,
                 prices,
-                trainings,
+                slots,
+                billing,
             );
-            const ledger = computeLedger(statuses, player.scholarship);
+            const ledger = computeLedger(statuses, prices, billing);
             const isSelf = player.relation === "self";
             return buildPlayerSection(
                 ledger,

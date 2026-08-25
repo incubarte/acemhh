@@ -17,10 +17,12 @@ import {
     fetchTrainingSlots,
     formatMonthLine,
     monthsWindow,
+    type MonthStatus,
     periodMonths,
     priceFor,
     trainingsFor,
 } from "../whatsapp-webhook/status.ts";
+import { slotKey } from "../_shared/tokens.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "http://127.0.0.1:54321";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
@@ -75,8 +77,8 @@ Deno.test("monthsWindow: julio cierra el primer período y agosto abre el segund
 
 Deno.test("priceFor picks the newest tariff at or before the month", () => {
     const prices = [
-        { valid_from: "2026-01-01", session_price: 25000, prepaid_session_price: 20000 },
-        { valid_from: "2026-09-01", session_price: 30000, prepaid_session_price: 25000 },
+        { valid_from: "2026-01-01", session_price: 25000, prepaid_session_price: 20000, goalkeeper_session_price: 20000 },
+        { valid_from: "2026-09-01", session_price: 30000, prepaid_session_price: 25000, goalkeeper_session_price: 25000 },
     ];
     assertEquals(priceFor(prices, "2026-08").session_price, 25000);
     assertEquals(priceFor(prices, "2026-09").session_price, 30000);
@@ -92,150 +94,47 @@ const VOS = { voice: "vos" as const, fullScholarship: false };
 const EL = { voice: "el" as const, fullScholarship: false };
 const BECA = { voice: "vos" as const, fullScholarship: true };
 
-// Raw month builder: single 30000 / prepaid 25000, 4 trainings by default.
+const PRICES = [{
+    valid_from: "2026-01-01",
+    session_price: 30000,
+    prepaid_session_price: 25000,
+    goalkeeper_session_price: 25000,
+}];
+const PLAYER = { goalkeeper: false, scholarship: 0 };
+const SLOT = slotKey(4, 22);
+
+/** A month of one slot: `trainings` sessions held, `attended` of them
+ * attended, and the money as one payment of the given kind. The ledger rules
+ * themselves live in tokens.test.ts; what is checked here is the wording. */
 function raw(
     month: string,
     attended: number,
     totalPaid: number,
     opts: { paidMonthly?: boolean; trainings?: number } = {},
-) {
+): MonthStatus {
     return {
         month,
         attended,
-        paidMonthly: opts.paidMonthly ?? false,
         totalPaid,
         sessionPrice: 30000,
-        prepaidPrice: 25000,
-        trainings: opts.trainings ?? 4,
+        input: {
+            attendances: Array.from({ length: attended }, () => ({ slot: SLOT })),
+            payments: totalPaid > 0
+                ? [{
+                    concept: opts.paidMonthly ? "monthly" as const : "session" as const,
+                    amount: totalPaid,
+                    slot: SLOT,
+                }]
+                : [],
+            sessionsPerSlot: new Map([[SLOT, opts.trainings ?? 4]]),
+        },
     };
 }
 
-Deno.test("ledger: the prepaid month is use-it-or-lose-it", () => {
-    // Paid the 4-training month, attended 2: the 2 absences earn nothing.
-    const [m] = computeLedger([raw("2026-08", 2, 100000, { paidMonthly: true })], 0);
-    assertEquals(m.charge, 100000);
-    assertEquals(m.carryoverOut, 0);
-    assertEquals(m.debtAfter, 0);
-    assertEquals(formatMonthLine(m, VOS), "- Agosto: asististe 2 veces / pagaste el mes ✅");
-});
-
-Deno.test("ledger: paying beyond the month's capacity is the club's fault and bonifies sessions", () => {
-    // A holiday left the month with 3 trainings but the player was charged 4
-    // sessions (100k): bundle is 75k, the extra 25k becomes 1 bonified session.
-    const [m] = computeLedger([raw("2026-08", 3, 100000, { trainings: 3 })], 0);
-    assertEquals(m.charge, 75000);
-    assertEquals(m.carryoverOut, 1);
-    assertEquals(m.debtAfter, 0);
-});
-
-Deno.test("ledger: unpaid attendance owes singles, uncapped", () => {
-    // Attended 1 of 4: owes 1 single (30k).
-    assertEquals(computeLedger([raw("2026-08", 1, 0)], 0)[0].debtAfter, 30000);
-    // Attended all 4 unpaid: 4 singles (120k) — the prepaid rate is only for
-    // paying the month upfront, not an entitlement.
-    assertEquals(computeLedger([raw("2026-08", 4, 0)], 0)[0].debtAfter, 120000);
-    // 3-training month, attended all 3 unpaid: 3 singles too (90k).
-    assertEquals(
-        computeLedger([raw("2026-08", 3, 0, { trainings: 3 })], 0)[0].debtAfter,
-        90000,
-    );
-});
-
-Deno.test("ledger: a payment close to the bundle is an incomplete bundle purchase", () => {
-    // >= (n-1) prepaid sessions reads as a partial bundle: the whole bundle
-    // (100k) is owed and the rest is debt...
-    assertEquals(computeLedger([raw("2026-08", 4, 80000)], 0)[0].debtAfter, 20000);
-    // ...but never worse than paying singles: 3 attendances at 90k are clear.
-    assertEquals(computeLedger([raw("2026-08", 3, 90000)], 0)[0].debtAfter, 0);
-    // Below the partial-bundle threshold it is plain singles: owes 60k.
-    assertEquals(computeLedger([raw("2026-08", 4, 60000)], 0)[0].debtAfter, 60000);
-});
-
-Deno.test("ledger: debt composes month by month, payments settle it", () => {
-    // The enero-mayo walkthrough: 4/3/4/-/4 trainings, paid 75/75/75/0/125.
-    const ledger = computeLedger([
-        raw("2026-08", 4, 75000), // partial bundle: owes 100k, debt 25k
-        raw("2026-09", 3, 75000, { trainings: 3 }), // bundle paid in full
-        raw("2026-10", 4, 75000), // partial bundle again, debt grows to 50k
-        raw("2026-11", 0, 0), // no attendance: no new debt
-        raw("2026-12", 4, 125000), // bundle + 25k against the oldest debt
-    ], 0);
-
-    assertEquals(ledger.map((l) => l.debtAfter), [25000, 25000, 50000, 50000, 25000]);
-    // Extra money settles debt, so it never becomes a bonified session.
-    assertEquals(ledger[4].carryoverOut, 0);
-});
-
-Deno.test("ledger: payments settle the current month first, then old debt", () => {
-    // The marzo/abril example: 1 unpaid attendance (30k debt), then a
-    // 3-training month paid with 100k: 75k buys the month, 25k goes to the
-    // debt, 5k of it remain — and no carryover while debt exists.
-    const ledger = computeLedger([
-        raw("2026-08", 1, 0),
-        raw("2026-09", 3, 100000, { trainings: 3 }),
-    ], 0);
-
-    assertEquals(ledger[0].debtAfter, 30000);
-    assertEquals(ledger[1].charge, 75000);
-    assertEquals(ledger[1].debtAfter, 5000);
-    assertEquals(ledger[1].carryoverOut, 0);
-});
-
-Deno.test("ledger: bonified sessions absorb attendance and discount the next bundle", () => {
-    // Month 1 generates 1 bonified session (charged 4, month had 3). Month 2:
-    // the bundle for a 4-training month costs (4-1) x 25k = 75k.
-    const ledger = computeLedger([
-        raw("2026-08", 3, 100000, { trainings: 3 }),
-        raw("2026-09", 4, 75000),
-    ], 0);
-
-    assertEquals(ledger[1].boughtMonth, true);
-    assertEquals(ledger[1].charge, 75000);
-    assertEquals(ledger[1].debtAfter, 0);
-});
-
-Deno.test("ledger: bonified sessions cover individual attendance too", () => {
-    const ledger = computeLedger([
-        raw("2026-08", 3, 100000, { trainings: 3 }),
-        raw("2026-09", 3, 60000), // 1 bonified + 2 paid singles
-    ], 0);
-
-    assertEquals(ledger[1].charge, 60000);
-    assertEquals(ledger[1].debtAfter, 0);
-    assertEquals(
-        formatMonthLine(ledger[1], VOS),
-        "- Septiembre: asististe 3 veces (1 bonificada) / pagaste 2 sesiones ✅",
-    );
-});
-
-Deno.test("ledger: carryover only reaches the following month", () => {
-    const ledger = computeLedger([
-        raw("2026-08", 3, 100000, { trainings: 3 }), // generates 1
-        raw("2026-09", 0, 0), // unused: expires
-        raw("2026-10", 1, 0),
-    ], 0);
-
-    assertEquals(ledger[1].carryoverIn, 1);
-    assertEquals(ledger[2].carryoverIn, 0);
-    assertEquals(ledger[2].debtAfter, 30000);
-});
-
-Deno.test("ledger: a 1-training month has no bundle", () => {
-    // Even a monthly-concept payment cannot buy a 1-training month: the
-    // attendance is charged at the single rate.
-    const [m] = computeLedger([raw("2026-08", 1, 30000, { trainings: 1, paidMonthly: true })], 0);
-    assertEquals(m.boughtMonth, false);
-    assertEquals(m.charge, 30000);
-    assertEquals(m.debtAfter, 0);
-});
-
-Deno.test("ledger: scholarship discounts both rates", () => {
-    // Half scholarship: singles at 15k, bundle at 12.5k per training.
-    assertEquals(computeLedger([raw("2026-08", 2, 30000)], 50)[0].debtAfter, 0);
-    const [bought] = computeLedger([raw("2026-08", 4, 50000)], 50);
-    assertEquals(bought.boughtMonth, true); // 4 x 12.5k = 50k
-    assertEquals(bought.charge, 50000);
-});
+/** The ledger over a run of months, as the reply sees it. */
+function ledgerOf(...statuses: MonthStatus[]) {
+    return computeLedger(statuses, PRICES, PLAYER);
+}
 
 // ////////////////////////////////////
 // WORDING
@@ -302,23 +201,27 @@ Deno.test("formatMonthLine: full scholarship reports attendance only", () => {
 });
 
 Deno.test("buildPlayerSection: last 3 months plus debt and bonified lines", () => {
-    const ledger = computeLedger([
-        raw("2026-08", 1, 0), // 30k debt
-        raw("2026-09", 3, 100000, { trainings: 3 }), // 75k bundle + 25k to debt
-    ], 0);
+    const ledger = ledgerOf(
+        raw("2026-08", 1, 0), // 30k de deuda
+        // Le cobraron 4 sesiones y el mes tuvo 3: paga el mes y le queda una
+        // bonificada. Lo pagado de más NO salda la deuda vieja — para eso hay
+        // un concepto propio.
+        raw("2026-09", 3, 100000, { trainings: 3, paidMonthly: true }),
+    );
 
     assertEquals(buildPlayerSection(ledger, "Registro:", VOS), [
         "Registro:",
         "- Agosto: asististe 1 vez / no pagaste ❌",
         "- Septiembre: asististe 3 veces / pagaste el mes ❌",
-        "Deuda pendiente: $5.000",
+        "Tenés 1 sesión bonificada para el mes que viene",
+        "Deuda pendiente: $30.000",
     ].join("\n"));
 });
 
 Deno.test("buildPlayerSection: bonified sessions for the coming month", () => {
-    const ledger = computeLedger([
-        raw("2026-08", 3, 100000, { trainings: 3 }),
-    ], 0);
+    const ledger = ledgerOf(
+        raw("2026-08", 3, 100000, { trainings: 3, paidMonthly: true }),
+    );
 
     assertEquals(buildPlayerSection(ledger, "Registro:", VOS), [
         "Registro:",
@@ -328,10 +231,10 @@ Deno.test("buildPlayerSection: bonified sessions for the coming month", () => {
 });
 
 Deno.test("buildPlayerSection: bonified sessions still usable this month", () => {
-    const ledger = computeLedger([
-        raw("2026-08", 3, 100000, { trainings: 3 }),
+    const ledger = ledgerOf(
+        raw("2026-08", 3, 100000, { trainings: 3, paidMonthly: true }),
         raw("2026-09", 0, 0),
-    ], 0);
+    );
 
     assertEquals(buildPlayerSection(ledger, "Registro:", VOS), [
         "Registro:",
@@ -420,16 +323,18 @@ Deno.test("fetchMonthStatuses aggregates payments and attendance per month", asy
         ]);
         if (payError) throw new Error(JSON.stringify(payError));
 
-        // Tariff from the migration (single 30000 / prepaid 25000); trainings
-        // pinned so the test doesn't drift with the seeded agenda.
+        // Tariff and agenda both come from the database, the same way the
+        // reply builds them.
         const prices = await fetchPrices(admin);
-        const trainings = new Map([["2026-08", 4], ["2026-09", 4], ["2026-10", 5]]);
+        const slots = await fetchTrainingSlots(admin);
+        const billing = { goalkeeper: false, categories: ["cat-b"], scholarship: 0 };
         const statuses = await fetchMonthStatuses(
             admin,
             playerId,
             ["2026-08", "2026-09", "2026-10"],
             prices,
-            trainings,
+            slots,
+            billing,
         );
 
         // August's unpaid sessions stay as debt: September's prepaid month
@@ -437,7 +342,7 @@ Deno.test("fetchMonthStatuses aggregates payments and attendance per month", asy
         // October.
         assertEquals(
             buildPlayerSection(
-                computeLedger(statuses, 0),
+                computeLedger(statuses, prices, billing),
                 "Registro de tus pagos en los últimos meses:",
                 VOS,
             ),
@@ -479,69 +384,4 @@ Deno.test("trainingsFor counts each slot-group's dates from training_sessions", 
     assertEquals(trainingsFor(slots, ["cat-c"], false).get("2026-07"), 1);
     assertEquals(trainingsFor(slots, [], true).get("2026-07"), 2);
     assertEquals(monthsWindow("2026-08", activeMonths(slots)), ["2026-08"]);
-});
-
-// ////////////////////////////////////
-// THE TWO RUNTIMES AGREE
-// ////////////////////////////////////
-
-Deno.test("computeLedger y runLedger dan lo mismo: una sola implementación", async () => {
-    // The bot reaches the ledger through computeLedger (month statuses with
-    // their tariff already resolved); the dashboard reaches it through
-    // runLedger (months plus a price table). Both now sit on the same
-    // ledgerStep — this is what stops the bot from telling a player one number
-    // while the admin sees another.
-    //
-    // The scenario characterises the CURRENT model, not the one in
-    // docs/modelo-de-cobros.md: there, October's 150k could not be registered
-    // as one payment at all — 60k would settle September's debt first and the
-    // rest would be a partial month. Expect this test to change with tokens;
-    // what must not change is that both entry points agree.
-    const { runLedger } = await import("../_shared/ledger.ts");
-
-    const months = ["2026-08", "2026-09", "2026-10"];
-    const activity = [
-        // Bought the month, a holiday shrank it: leaves a bonified session.
-        { attended: 3, paidMonthly: true, totalPaid: 100000, trainings: 3 },
-        // Spent the bonified one and underpaid the rest: contracts debt.
-        { attended: 4, paidMonthly: false, totalPaid: 30000, trainings: 4 },
-        // Overpays: covers the month first, and what is left eats into the
-        // old debt without clearing it.
-        { attended: 2, paidMonthly: false, totalPaid: 150000, trainings: 4 },
-    ];
-
-    const viaBot = computeLedger(
-        activity.map((a, i) => raw(months[i], a.attended, a.totalPaid, {
-            paidMonthly: a.paidMonthly,
-            trainings: a.trainings,
-        })),
-        0,
-    );
-
-    const viaDashboard = runLedger(
-        months,
-        new Map(months.map((m, i) => [m, {
-            attended: activity[i].attended,
-            paidMonthly: activity[i].paidMonthly,
-            totalPaid: activity[i].totalPaid,
-        }])),
-        new Map(months.map((m, i) => [m, activity[i].trainings])),
-        [{ valid_from: "2026-01-01", session_price: 30000, prepaid_session_price: 25000 }],
-        0,
-    );
-
-    assertEquals(
-        viaBot.map((m) => [m.month, m.charge, m.debtAfter]),
-        viaDashboard.rows.map((r) => [r.month, r.charge, r.debtAfter]),
-    );
-    // And the state each side carries forward matches too.
-    assertEquals(viaBot.at(-1)!.carryoverOut, viaDashboard.state.carryoverIn);
-
-    // A run that exercises something, not three no-ops: a bonified session
-    // out of August, 60k of debt in September, and October paying 100k for the
-    // month plus 50k against that debt — 10k still owing.
-    assertEquals(viaBot[0].carryoverOut, 1);
-    assertEquals(viaBot[1].debtAfter, 60000);
-    assertEquals(viaBot[2].charge, 100000);
-    assertEquals(viaBot[2].debtAfter, 10000);
 });

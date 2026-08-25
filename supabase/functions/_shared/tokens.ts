@@ -23,6 +23,72 @@ export type Rates = {
 
 export type LedgerPrice = Rates & { valid_from: string };
 
+// Carryover/debt accounting starts with the 2026 second semester. Earlier
+// months were settled through the ad-hoc overrides in lib/thresholds.ts
+// (deprecated); computing them with current tariffs would invent debts that
+// never existed.
+export const LEDGER_FROM = "2026-08";
+
+/**
+ * The club's activity periods, and the window every calculation is clamped to:
+ * debt and carryover accumulate inside a period and do not cross into the next
+ * one. Anything spanning periods is a discretionary, manual analysis.
+ *
+ * They are NOT calendar semesters: the club trains March through July, and
+ * August through December. January and February are the summer break — no
+ * training happens, so they get a period of their own that is always empty.
+ */
+export function periodMonths(month: string): string[] {
+  const year = month.slice(0, 4);
+  const m = Number(month.slice(5, 7));
+  const [from, to] = m >= 8 ? [8, 12] : m >= 3 ? [3, 7] : [1, 2];
+  const out: string[] = [];
+  for (let i = from; i <= to; i++) out.push(`${year}-${String(i).padStart(2, "0")}`);
+  return out;
+}
+
+/** First month of the period `month` belongs to, as YYYY-MM. */
+export function periodStart(month: string): string {
+  return periodMonths(month)[0];
+}
+
+/** The tariff in force at the start of a month: the newest price whose
+ * valid_from is not after it, falling back to the oldest known one. */
+export function priceFor(prices: LedgerPrice[], month: string): LedgerPrice {
+  if (prices.length === 0) throw new Error("No prices configured");
+  const applicable = prices.filter((p) => p.valid_from <= `${month}-01`);
+  return applicable[applicable.length - 1] ?? prices[0];
+}
+
+export type SlotDay = {
+  date: string; // YYYY-MM-DD
+  categories: string[];
+  goalies: boolean;
+};
+
+/** Trainings per month for one slot-group: distinct dates with a slot for any
+ * of the given categories (or any goalie-friendly slot, for goalkeepers).
+ * Every player of a category shares the same n — the month's price follows;
+ * carryover is the only per-player variable. */
+export function trainingsFor(
+  slots: SlotDay[],
+  categories: string[],
+  goalkeeper: boolean,
+): Map<string, number> {
+  const byMonth = new Map<string, Set<string>>();
+  for (const s of slots) {
+    const matches = goalkeeper
+      ? s.goalies
+      : s.categories.some((c) => categories.includes(c));
+    if (!matches) continue;
+    const month = s.date.slice(0, 7);
+    if (!byMonth.has(month)) byMonth.set(month, new Set());
+    byMonth.get(month)!.add(s.date);
+  }
+  return new Map([...byMonth].map(([m, dates]) => [m, dates.size]));
+}
+
+
 /** A slot, as the pair that identifies it: `${weekday}-${hour}`. */
 export type SlotKey = string;
 

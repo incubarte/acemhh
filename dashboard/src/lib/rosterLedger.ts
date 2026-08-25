@@ -1,44 +1,77 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireFeatures } from "./slotFeatures";
+import { isoWeekday } from "@shared/slot";
 import {
+  billableAttendances,
+  EMPTY_STATE,
+  type AttendanceRow,
+  type LedgerPrice,
+  type LedgerState,
+  ledgerMonth,
+  type MonthInput,
+  type MonthPayment,
   LEDGER_FROM,
-  ledgerStep,
-  MinBundleTrainings,
   periodStart,
   priceFor,
-  runLedger,
-  trainingsFor,
-  type MonthActivity,
-} from "@shared/ledger";
+  ratesFor,
+  slotKey,
+} from "@shared/tokens";
 
+/** What the attendance screens add to each roster row, on top of the player. */
 export type LedgerExtras = {
-  /** Bonified sessions from last month (club's fault), usable this month. */
+  /** Tokens this month opened with, inherited from the last one. */
   carryover_sessions: number;
-  /** Accumulated unpaid pesos from earlier months. */
+  /** Pesos owed from months that already closed. */
   debt: number;
+  /** Which closed months are behind that debt. */
   debt_months: { month: string; charge: number; paid: number }[];
-  /** This month's bundle for the player, carryover-adjusted; null = no bundle. */
+  /** What this screen's slot costs for the whole month, at the promotional
+   * rate. Null when the slot holds no sessions this month. */
   month_preset: number | null;
+  /** What one session costs this player on its own. */
   session_preset: number | null;
-  /** Whether this month's charge is currently unpaid; null on pre-ledger sessions. */
+  /** Pesos this month is still waiting for. Shown as debt while the month
+   * runs, even though closing it may forgive part. */
+  owed_now: number;
   owes_now: boolean | null;
-  /** The player bought this month's bundle (fully). */
+  /** A monthly payment covers this screen's slot for the month. */
   bought_month: boolean;
-  /** Would this month be unpaid with the player marked present at this
-   * session? And absent? Both are precomputed so the screen can move a row
-   * between sections — and in or out of Deudores — without a round trip. */
+  /** The same month with this session's attendance forced on and off, so the
+   * screen can flip the instant a row is toggled. */
   owes_if_present: boolean;
   owes_if_absent: boolean;
-  /** Pesos still owed for this month right now — what a fresh payment has to
-   * cover for the row to stop counting as a debtor. */
-  owed_now: number;
-  /** Last month only: what was left unpaid, plus the attendance and payments
-   * behind it. Debt older than that is not what this screen is chasing. */
   prev_owed: number;
   prev_attended: number;
   prev_paid: number;
   cur_attended: number;
   cur_paid: number;
+};
+
+export const LEDGER_DEFAULTS: LedgerExtras = {
+  carryover_sessions: 0,
+  debt: 0,
+  debt_months: [],
+  month_preset: null,
+  session_preset: null,
+  owed_now: 0,
+  owes_now: null,
+  bought_month: false,
+  owes_if_present: false,
+  owes_if_absent: false,
+  prev_owed: 0,
+  prev_attended: 0,
+  prev_paid: 0,
+  cur_attended: 0,
+  cur_paid: 0,
+};
+
+type RosterPlayer = {
+  id: string;
+  categories?: string[] | null;
+  player_type?: string | null;
+  scholarship?: number | null;
+  /** Whether they are currently marked present at the session being viewed. */
+  attendedThisSession?: boolean;
 };
 
 /** The month before `month` (YYYY-MM). */
@@ -57,167 +90,220 @@ function monthAfter(month: string): string {
     : `${year}-${String(m + 1).padStart(2, "0")}-01`;
 }
 
-export const LEDGER_DEFAULTS: LedgerExtras = {
-  carryover_sessions: 0,
-  debt: 0,
-  debt_months: [],
-  month_preset: null,
-  session_preset: null,
-  owes_now: null,
-  bought_month: false,
-  owes_if_present: false,
-  owes_if_absent: false,
-  owed_now: 0,
-  prev_owed: 0,
-  prev_attended: 0,
-  prev_paid: 0,
-  cur_attended: 0,
-  cur_paid: 0,
-};
+/** attendances.session is "YYYY-MM-DD HHhs". */
+function parseSession(session: string): { date: string; hour: number } {
+  return { date: session.slice(0, 10), hour: Number(session.slice(11).replace(/\D/g, "")) };
+}
 
-type RosterPlayer = {
-  id: string;
-  categories?: string[] | null;
-  player_type?: string | null;
-  scholarship?: number | null;
-  /** Whether they are currently marked present at the session being viewed. */
-  attendedThisSession?: boolean;
-};
-
-/** Each roster player's ledger enrichment for a session month: debt, bonified
- * sessions, presets and whether this month is settled. Sessions older than
- * LEDGER_FROM get no enrichment (legacy threshold logic applies client-side). */
+/**
+ * Each roster player's ledger enrichment for the session being viewed: what
+ * closed months left owing, what this month is still waiting for, and the
+ * amounts the payment modal offers.
+ *
+ * Sessions older than LEDGER_FROM get no enrichment — computing them with
+ * today's tariffs would invent debts that never existed.
+ */
 export async function ledgerExtrasFor(
   s: SupabaseClient,
   players: RosterPlayer[],
-  selectedMonth: string,
+  session: string,
 ): Promise<Map<string, LedgerExtras>> {
   const extras = new Map<string, LedgerExtras>();
+  const isoDate = session.slice(0, 10);
+  const selectedMonth = isoDate.slice(0, 7);
+  const screenSlot = slotKey(isoWeekday(isoDate), Number(session.slice(11)));
   if (selectedMonth < LEDGER_FROM || players.length === 0) return extras;
 
+  // Debt and carryover accumulate inside a period and never cross into the
+  // next one.
   const start = periodStart(selectedMonth);
   const carryFrom = start > LEDGER_FROM ? start : LEDGER_FROM;
   const ids = players.map((p) => p.id);
 
-  const [pricesRes, slotsRes, payRes, attRes] = await Promise.all([
+  const [pricesRes, sessionsRes, payRes, attRes] = await Promise.all([
     s.from("prices")
-      .select("valid_from,session_price,prepaid_session_price")
+      .select("valid_from,session_price,prepaid_session_price,goalkeeper_session_price")
       .order("valid_from"),
     s.from("training_sessions_resolved")
-      .select("date,categories,goalies")
+      .select("date,hour,categories,goalies")
       .gte("date", `${carryFrom}-01`)
       // Bounded by the first of the NEXT month: "YYYY-09-31" is not a date,
       // and Postgres rejects the whole query rather than clamping it.
       .lt("date", monthAfter(selectedMonth)),
     s.from("payments")
-      .select("player_id,month,concept,amount")
+      .select("player_id,month,concept,amount,slot_weekday,slot_hour")
       .in("player_id", ids)
       .gte("month", carryFrom)
       .lte("month", selectedMonth)
-      .in("concept", ["monthly", "session"]),
+      .in("concept", ["monthly", "session", "debt settlement"]),
     s.from("attendances")
-      .select("player_id,session")
+      .select("player_id,session,bonified")
       .in("player_id", ids)
       .eq("attended", true)
       .gte("session", `${carryFrom}-01`),
   ]);
 
-  const ledgerError = pricesRes.error ?? slotsRes.error ?? payRes.error ?? attRes.error;
+  const ledgerError = pricesRes.error ?? sessionsRes.error ?? payRes.error ?? attRes.error;
   if (ledgerError || (pricesRes.data ?? []).length === 0) {
     // The roster is useful without the ledger; log and move on.
     console.error("Ledger lookup failed:", ledgerError);
     return extras;
   }
 
-  const prices = (pricesRes.data ?? []).map((p) => ({
+  const prices: LedgerPrice[] = (pricesRes.data ?? []).map((p) => ({
     valid_from: String(p.valid_from),
     session_price: Number(p.session_price),
     prepaid_session_price: Number(p.prepaid_session_price),
+    goalkeeper_session_price: Number(p.goalkeeper_session_price),
   }));
-  // A session whose slot has no features would silently count as belonging to
-  // no category, shrinking every month it falls in. Refuse instead.
-  const slotDays = (slotsRes.data ?? []).map((r) => {
-    const f = requireFeatures(r, String(r.date));
-    return { date: String(r.date), categories: f.categories, goalies: f.goalies };
-  });
 
-  const byPlayer = new Map<string, Map<string, MonthActivity>>();
-  const activityOf = (playerId: string, month: string): MonthActivity => {
-    if (!byPlayer.has(playerId)) byPlayer.set(playerId, new Map());
-    const months = byPlayer.get(playerId)!;
-    if (!months.has(month)) {
-      months.set(month, { attended: 0, paidMonthly: false, totalPaid: 0 });
-    }
-    return months.get(month)!;
-  };
+  // The agenda, indexed two ways: what each session was, and how many sessions
+  // each slot held each month.
+  const featuresAt = new Map<string, { categories: string[]; goalies: boolean; slot: string }>();
+  const sessionsPerSlot = new Map<string, Map<string, number>>();
+  for (const r of sessionsRes.data ?? []) {
+    const date = String(r.date);
+    const f = requireFeatures(r, `${date} ${r.hour}hs`);
+    const slot = slotKey(isoWeekday(date), Number(r.hour));
+    featuresAt.set(`${date}|${r.hour}`, { ...f, slot });
 
-  for (const p of payRes.data ?? []) {
-    const a = activityOf(p.player_id, p.month);
-    a.totalPaid += Number(p.amount);
-    if (p.concept === "monthly") a.paidMonthly = true;
+    const month = date.slice(0, 7);
+    if (!sessionsPerSlot.has(month)) sessionsPerSlot.set(month, new Map());
+    const perSlot = sessionsPerSlot.get(month)!;
+    perSlot.set(slot, (perSlot.get(slot) ?? 0) + 1);
   }
+
+  // Per player, per month: what they attended and what they paid.
+  const attByPlayer = new Map<string, Map<string, AttendanceRow[]>>();
   for (const a of attRes.data ?? []) {
-    const month = String(a.session).slice(0, 7);
-    if (month <= selectedMonth) activityOf(a.player_id, month).attended += 1;
+    const { date, hour } = parseSession(String(a.session));
+    const month = date.slice(0, 7);
+    if (month < carryFrom || month > selectedMonth) continue;
+    const f = featuresAt.get(`${date}|${hour}`);
+    // An attendance at a session the agenda no longer has cannot be priced —
+    // there is no slot to charge it to. Leaving it out is the honest read.
+    if (!f) continue;
+    if (!attByPlayer.has(a.player_id)) attByPlayer.set(a.player_id, new Map());
+    const months = attByPlayer.get(a.player_id)!;
+    if (!months.has(month)) months.set(month, []);
+    months.get(month)!.push({
+      date,
+      slot: f.slot,
+      categories: f.categories,
+      goalies: f.goalies,
+      bonified: Boolean(a.bonified),
+    });
   }
+
+  const payByPlayer = new Map<string, Map<string, MonthPayment[]>>();
+  for (const p of payRes.data ?? []) {
+    if (p.slot_weekday === null || p.slot_hour === null) continue;
+    if (!payByPlayer.has(p.player_id)) payByPlayer.set(p.player_id, new Map());
+    const months = payByPlayer.get(p.player_id)!;
+    if (!months.has(p.month)) months.set(p.month, []);
+    months.get(p.month)!.push({
+      concept: p.concept as MonthPayment["concept"],
+      amount: Number(p.amount),
+      slot: slotKey(Number(p.slot_weekday), Number(p.slot_hour)),
+    });
+  }
+
+  const monthsUpTo = (last: string) => {
+    const out: string[] = [];
+    let m = carryFrom;
+    while (m <= last) {
+      out.push(m);
+      const [y, mm] = m.split("-").map(Number);
+      m = mm === 12 ? `${y + 1}-01` : `${y}-${String(mm + 1).padStart(2, "0")}`;
+    }
+    return out;
+  };
+  const history = monthsUpTo(monthBefore(selectedMonth));
 
   for (const player of players) {
     const scholarship = Number(player.scholarship) || 0;
-    const trainings = trainingsFor(
-      slotDays,
-      (player.categories ?? []) as string[],
-      player.player_type === "goalkeeper",
-    );
-    const byMonth = byPlayer.get(player.id) ?? new Map<string, MonthActivity>();
-    const historyMonths = [...new Set([...trainings.keys(), ...byMonth.keys()])]
-      .filter((m) => m >= carryFrom && m < selectedMonth)
-      .sort();
+    const goalkeeper = player.player_type === "goalkeeper";
+    const billing = {
+      goalkeeper,
+      categories: (player.categories ?? []) as string[],
+    };
+    const attMonths = attByPlayer.get(player.id) ?? new Map<string, AttendanceRow[]>();
+    const payMonths = payByPlayer.get(player.id) ?? new Map<string, MonthPayment[]>();
 
-    const { state, rows } = runLedger(historyMonths, byMonth, trainings, prices, scholarship);
+    const inputFor = (month: string, attendances: AttendanceRow[]): MonthInput => ({
+      attendances: billableAttendances(attendances, billing),
+      payments: payMonths.get(month) ?? [],
+      sessionsPerSlot: sessionsPerSlot.get(month) ?? new Map(),
+    });
+
+    // Closed months, in order: they are what "debt" means.
+    let state: LedgerState = EMPTY_STATE;
+    const debtMonths: LedgerExtras["debt_months"] = [];
+    for (const month of history) {
+      const before = state.debt;
+      const r = ledgerMonth(
+        state,
+        inputFor(month, attMonths.get(month) ?? []),
+        priceFor(prices, month),
+        goalkeeper,
+        scholarship,
+      );
+      const added = r.next.debt - before;
+      if (added > 0) {
+        const paid = (payMonths.get(month) ?? []).reduce((sum, p) => sum + p.amount, 0);
+        debtMonths.push({ month, charge: added + paid, paid });
+      }
+      state = r.next;
+    }
 
     const price = priceFor(prices, selectedMonth);
-    const nMonth = trainings.get(selectedMonth) ?? 0;
-    const activityNow = byMonth.get(selectedMonth) ??
-      { attended: 0, paidMonthly: false, totalPaid: 0 };
-    const now = ledgerStep(state, activityNow, price, nMonth, scholarship);
+    const rates = ratesFor(price, goalkeeper, scholarship);
+    const nowAttendances = attMonths.get(selectedMonth) ?? [];
+    const now = ledgerMonth(
+      state, inputFor(selectedMonth, nowAttendances), price, goalkeeper, scholarship,
+    );
 
-    // The same month with this session's attendance forced on and off. The
-    // screen flips between them the instant a row is toggled.
-    const owesWith = (attended: number) => {
-      const step = ledgerStep(state, { ...activityNow, attended }, price, nMonth, scholarship);
-      return step.charge > activityNow.totalPaid;
+    // The same month with this session's attendance forced on and off.
+    const withoutThis = nowAttendances.filter(
+      (a) => !(a.date === isoDate && a.slot === screenSlot),
+    );
+    const thisOne: AttendanceRow = {
+      date: isoDate,
+      slot: screenSlot,
+      categories: featuresAt.get(`${isoDate}|${Number(session.slice(11))}`)?.categories ?? [],
+      goalies: featuresAt.get(`${isoDate}|${Number(session.slice(11))}`)?.goalies ?? false,
+      bonified: false,
     };
-    const here = player.attendedThisSession ? 1 : 0;
-    const owesIfPresent = owesWith(activityNow.attended - here + 1);
-    const owesIfAbsent = owesWith(Math.max(0, activityNow.attended - here));
+    const owesWith = (attendances: AttendanceRow[]) =>
+      ledgerMonth(state, inputFor(selectedMonth, attendances), price, goalkeeper, scholarship)
+        .pending > 0;
 
     const prevMonth = monthBefore(selectedMonth);
-    const prevRow = rows.find((r) => r.month === prevMonth);
-    const prevActivity = byMonth.get(prevMonth) ??
-      { attended: 0, paidMonthly: false, totalPaid: 0 };
+    const prevBillable = billableAttendances(attMonths.get(prevMonth) ?? [], billing);
+    const prevPaid = (payMonths.get(prevMonth) ?? []).reduce((s, p) => s + p.amount, 0);
+    const prevRow = debtMonths.find((d) => d.month === prevMonth);
 
-    const k = (100 - scholarship) / 100;
-    const prepaidUnit = Math.round(price.prepaid_session_price * k);
+    const heldThisMonth = sessionsPerSlot.get(selectedMonth)?.get(screenSlot) ?? 0;
+    const monthlyPaid = (payMonths.get(selectedMonth) ?? [])
+      .filter((p) => p.concept === "monthly" && p.slot === screenSlot)
+      .reduce((sum, p) => sum + p.amount, 0);
+
     extras.set(player.id, {
-      carryover_sessions: state.carryoverIn,
+      carryover_sessions: state.carryover,
       debt: state.debt,
-      debt_months: rows
-        .filter((r) => r.charge > r.paid)
-        .map((r) => ({ month: r.month, charge: r.charge, paid: r.paid })),
-      month_preset: nMonth >= MinBundleTrainings
-        ? Math.max(0, nMonth - state.carryoverIn) * prepaidUnit
-        : null,
-      session_preset: Math.round(price.session_price * k),
-      owes_now: now.charge > activityNow.totalPaid,
-      bought_month: now.bought,
-      owes_if_present: owesIfPresent,
-      owes_if_absent: owesIfAbsent,
-      owed_now: Math.max(0, now.charge - activityNow.totalPaid),
-      prev_owed: prevRow ? Math.max(0, prevRow.charge - prevRow.paid) : 0,
-      prev_attended: prevActivity.attended,
-      prev_paid: prevActivity.totalPaid,
-      cur_attended: activityNow.attended,
-      cur_paid: activityNow.totalPaid,
+      debt_months: debtMonths,
+      month_preset: heldThisMonth > 0 ? Math.round(heldThisMonth * rates.promo) : null,
+      session_preset: rates.individual,
+      owed_now: now.pending,
+      owes_now: now.pending > 0,
+      bought_month: heldThisMonth > 0 && monthlyPaid >= Math.round(heldThisMonth * rates.promo),
+      owes_if_present: owesWith([...withoutThis, thisOne]),
+      owes_if_absent: owesWith(withoutThis),
+      prev_owed: prevRow ? prevRow.charge - prevRow.paid : 0,
+      prev_attended: prevBillable.length,
+      prev_paid: prevPaid,
+      cur_attended: billableAttendances(nowAttendances, billing).length,
+      cur_paid: (payMonths.get(selectedMonth) ?? []).reduce((s, p) => s + p.amount, 0),
     });
   }
 

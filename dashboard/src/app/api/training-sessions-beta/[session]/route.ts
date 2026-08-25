@@ -191,7 +191,9 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
         scholarship: Number(p.scholarship) || 0,
         attendedThisSession: Boolean(attendanceMap.get(p.id as string)),
       })),
-      selectedMonth,
+      // The ledger needs the SESSION, not just its month: the payment presets
+      // and "did this month's slot get bought" are per slot.
+      session,
     );
 
     return NextResponse.json({

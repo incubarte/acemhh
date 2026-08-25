@@ -238,7 +238,9 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
         player_type: p.player_type as string,
         scholarship: Number(p.scholarship) || 0,
       })),
-      selectedMonth,
+      // The ledger needs the SESSION, not just its month: the payment presets
+      // and "did this month's slot get bought" are per slot.
+      session,
     );
 
     return NextResponse.json({

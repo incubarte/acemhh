@@ -4,16 +4,24 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
-    ledgerStep,
-    MinBundleTrainings,
+    billableAttendances,
+    EMPTY_STATE,
+    type AttendanceRow,
+    type LedgerPrice,
+    type LedgerState,
+    ledgerMonth,
+    type MonthInput,
+    type MonthPayment,
     periodMonths,
     priceFor,
-    trainingsFor,
-    type LedgerPrice,
+    ratesFor,
     type SlotDay,
-} from "../_shared/ledger.ts";
+    slotKey,
+    trainingsFor,
+} from "../_shared/tokens.ts";
+import { isoWeekday } from "../_shared/slot.ts";
 
-export { MinBundleTrainings, periodMonths, priceFor, trainingsFor };
+export { periodMonths, priceFor, trainingsFor };
 export type { LedgerPrice, SlotDay };
 
 // The activity agenda derives from training_sessions: a month is active when
@@ -26,6 +34,7 @@ export type { LedgerPrice, SlotDay };
 
 export type TrainingSlotRow = {
     date: string; // YYYY-MM-DD
+    hour: number;
     categories: string[];
     goalies: boolean;
 };
@@ -35,7 +44,7 @@ export async function fetchTrainingSlots(
 ): Promise<TrainingSlotRow[]> {
     const { data, error } = await supabase
         .from("training_sessions_resolved")
-        .select("date,categories,goalies");
+        .select("date,hour,categories,goalies");
     if (error) throw new Error("training_sessions_resolved: " + error.message);
     return (data ?? []).map((r) => {
         // NULL means the slot has no features in force at that date. Treating
@@ -48,6 +57,7 @@ export async function fetchTrainingSlots(
         }
         return {
             date: String(r.date),
+            hour: Number(r.hour),
             categories: r.categories as string[],
             goalies: Boolean(r.goalies),
         };
@@ -66,13 +76,14 @@ export type Price = LedgerPrice;
 export async function fetchPrices(supabase: SupabaseClient): Promise<Price[]> {
     const { data, error } = await supabase
         .from("prices")
-        .select("valid_from,session_price,prepaid_session_price")
+        .select("valid_from,session_price,prepaid_session_price,goalkeeper_session_price")
         .order("valid_from");
     if (error) throw new Error("prices: " + error.message);
     return (data ?? []).map((p) => ({
         valid_from: String(p.valid_from),
         session_price: Number(p.session_price),
         prepaid_session_price: Number(p.prepaid_session_price),
+        goalkeeper_session_price: Number(p.goalkeeper_session_price),
     }));
 }
 
@@ -109,33 +120,41 @@ export function monthsWindow(
 
 export type MonthStatus = {
     month: string; // YYYY-MM
+    /** Sessions the club charges this player for — goalkeepers outside their
+     * slot and youth second sessions are already out. */
     attended: number;
-    /** A monthly-concept payment was registered this month. */
-    paidMonthly: boolean;
-    /** Everything paid for the month (monthly + sessions), in pesos. */
+    /** Everything paid that month, whatever the concept. */
     totalPaid: number;
-    /** The tariff in force that month. */
+    /** What one session costs this player on its own, that month. */
     sessionPrice: number;
-    prepaidPrice: number;
-    /** Trainings held that month; the month's full price is trainings x prepaidPrice. */
-    trainings: number;
+    /** What the ledger needs to price the month. */
+    input: MonthInput;
 };
+
+/** attendances.session is "YYYY-MM-DD HHhs". */
+function parseSession(session: string): { date: string; hour: number } {
+    return {
+        date: session.slice(0, 10),
+        hour: Number(session.slice(11).replace(/\D/g, "")),
+    };
+}
 
 export async function fetchMonthStatuses(
     supabase: SupabaseClient,
     playerId: string,
     months: string[],
-    prices: Price[],
-    trainingsByMonth: Map<string, number>,
+    prices: LedgerPrice[],
+    slots: TrainingSlotRow[],
+    player: { goalkeeper: boolean; categories: string[]; scholarship: number },
 ): Promise<MonthStatus[]> {
     const [payments, attendances] = await Promise.all([
         supabase.from("payments")
-            .select("month,concept,amount")
+            .select("month,concept,amount,slot_weekday,slot_hour")
             .eq("player_id", playerId)
             .in("month", months)
-            .in("concept", ["monthly", "session"]),
+            .in("concept", ["monthly", "session", "debt settlement"]),
         supabase.from("attendances")
-            .select("session")
+            .select("session,bonified")
             .eq("player_id", playerId)
             .eq("attended", true)
             .gte("session", `${months[0]}-01`),
@@ -144,62 +163,101 @@ export async function fetchMonthStatuses(
     if (payments.error) throw new Error("payments: " + payments.error.message);
     if (attendances.error) throw new Error("attendances: " + attendances.error.message);
 
+    // The agenda, indexed both ways the ledger needs it.
+    const featuresAt = new Map<string, { slot: string; categories: string[]; goalies: boolean }>();
+    const perMonth = new Map<string, Map<string, number>>();
+    for (const s of slots) {
+        const weekday = isoWeekday(s.date);
+        const slot = slotKey(weekday, s.hour);
+        featuresAt.set(`${s.date}|${s.hour}`, { slot, categories: s.categories, goalies: s.goalies });
+        const month = s.date.slice(0, 7);
+        if (!perMonth.has(month)) perMonth.set(month, new Map());
+        const counts = perMonth.get(month)!;
+        counts.set(slot, (counts.get(slot) ?? 0) + 1);
+    }
+
+    const attByMonth = new Map<string, AttendanceRow[]>();
+    for (const a of attendances.data ?? []) {
+        const { date, hour } = parseSession(String(a.session));
+        const f = featuresAt.get(`${date}|${hour}`);
+        // An attendance whose session the agenda no longer has cannot be
+        // priced: there is no slot to charge it to.
+        if (!f) continue;
+        const month = date.slice(0, 7);
+        if (!attByMonth.has(month)) attByMonth.set(month, []);
+        attByMonth.get(month)!.push({
+            date,
+            slot: f.slot,
+            categories: f.categories,
+            goalies: f.goalies,
+            bonified: Boolean(a.bonified),
+        });
+    }
+
     return months.map((month) => {
         const monthPayments = (payments.data ?? []).filter((p) => p.month === month);
-        const price = priceFor(prices, month);
+        const rows = attByMonth.get(month) ?? [];
         return {
             month,
-            // attendances.session is "YYYY-MM-DD HHhs".
-            attended: (attendances.data ?? [])
-                .filter((a) => (a.session ?? "").startsWith(month)).length,
-            paidMonthly: monthPayments.some((p) => p.concept === "monthly"),
+            attended: billableAttendances(rows, player).length,
             totalPaid: monthPayments.reduce((sum, p) => sum + Number(p.amount), 0),
-            sessionPrice: price.session_price,
-            prepaidPrice: price.prepaid_session_price,
-            trainings: trainingsByMonth.get(month) ?? 0,
+            sessionPrice: ratesFor(priceFor(prices, month), player.goalkeeper, player.scholarship)
+                .individual,
+            input: {
+                attendances: billableAttendances(rows, player),
+                payments: monthPayments
+                    .filter((p) => p.slot_weekday !== null && p.slot_hour !== null)
+                    .map((p): MonthPayment => ({
+                        concept: p.concept as MonthPayment["concept"],
+                        amount: Number(p.amount),
+                        slot: slotKey(Number(p.slot_weekday), Number(p.slot_hour)),
+                    })),
+                sessionsPerSlot: perMonth.get(month) ?? new Map(),
+            },
         };
     });
 }
 
 export type LedgerMonth = MonthStatus & {
-    /** The player bought the (carryover-adjusted) month at the prepaid rate. */
+    /** Nothing left pending, with a monthly payment behind it. */
     boughtMonth: boolean;
-    /** What this month cost, scholarship-adjusted, in pesos. */
-    charge: number;
-    /** Bonified sessions available this month, from last month's excess. */
+    /** Tokens the month opened with. */
     carryoverIn: number;
-    /** Bonified sessions generated for the NEXT month (club's fault only). */
+    /** Tokens handed to the next month. */
     carryoverOut: number;
-    /** Accumulated unpaid pesos through this month. */
+    /** Pesos owed from closed months, through this one. */
     debtAfter: number;
 };
 
 /**
- * Runs the shared ledger over a player's months, keeping the per-month detail
- * the reply needs. The arithmetic itself lives in _shared/ledger.ts — this only
- * threads state from one month to the next and reshapes the result.
+ * Runs the shared token ledger over a player's months, keeping the per-month
+ * detail the reply needs. The arithmetic lives in _shared/tokens.ts — this
+ * only threads state forward and reshapes the result.
  */
-export function computeLedger(statuses: MonthStatus[], scholarship: number): LedgerMonth[] {
-    let state = { debt: 0, carryoverIn: 0 };
+export function computeLedger(
+    statuses: MonthStatus[],
+    prices: LedgerPrice[],
+    player: { goalkeeper: boolean; scholarship: number },
+): LedgerMonth[] {
+    let state: LedgerState = EMPTY_STATE;
 
     return statuses.map((s) => {
-        const step = ledgerStep(
+        const r = ledgerMonth(
             state,
-            { attended: s.attended, paidMonthly: s.paidMonthly, totalPaid: s.totalPaid },
-            { session_price: s.sessionPrice, prepaid_session_price: s.prepaidPrice },
-            s.trainings,
-            scholarship,
+            s.input,
+            priceFor(prices, s.month),
+            player.goalkeeper,
+            player.scholarship,
         );
         const row = {
             ...s,
-            boughtMonth: step.bought,
-            charge: step.charge,
-            carryoverIn: state.carryoverIn,
-            // Carryover only reaches the immediately following month.
-            carryoverOut: step.next.carryoverIn,
-            debtAfter: step.next.debt,
+            boughtMonth: r.pending === 0 &&
+                s.input.payments.some((p) => p.concept === "monthly"),
+            carryoverIn: state.carryover,
+            carryoverOut: r.carryoverOut,
+            debtAfter: r.next.debt,
         };
-        state = step.next;
+        state = r.next;
         return row;
     });
 }
@@ -326,16 +384,18 @@ export function buildPlayerSection(
         const last = ledger.at(-1)!;
         const w = WORDING[opts.voice];
 
-        // Bonified sessions still usable this month (when the month was not
-        // settled as a bundle, which already discounted them).
+        // Bonified sessions are announced whole. A leftover fraction is real
+        // and still gets applied, but "0,33 sesiones" is not something to put
+        // in front of a player — under-promising beats confusing.
         const remaining = last.boughtMonth
             ? 0
-            : Math.max(0, last.carryoverIn - last.attended);
-        if (remaining > 0) {
+            : Math.floor(Math.max(0, last.carryoverIn - last.attended));
+        if (remaining >= 1) {
             lines.push(`${w.has} ${sessionsText(remaining)} bonificada${remaining === 1 ? "" : "s"} este mes`);
         }
-        if (last.carryoverOut > 0) {
-            lines.push(`${w.has} ${sessionsText(last.carryoverOut)} bonificada${last.carryoverOut === 1 ? "" : "s"} para el mes que viene`);
+        const coming = Math.floor(last.carryoverOut);
+        if (coming >= 1) {
+            lines.push(`${w.has} ${sessionsText(coming)} bonificada${coming === 1 ? "" : "s"} para el mes que viene`);
         }
         if (last.debtAfter > 0) {
             lines.push(`Deuda pendiente: ${formatArs(last.debtAfter)}`);
