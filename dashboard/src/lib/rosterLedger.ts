@@ -292,8 +292,12 @@ export async function ledgerExtrasFor(
       carryover_sessions: state.carryover,
       debt: state.debt,
       debt_months: debtMonths,
-      month_preset: heldThisMonth > 0 ? Math.round(heldThisMonth * rates.promo) : null,
-      session_preset: rates.individual,
+      // A full scholarship has nothing to charge: no preset, rather than a
+      // button offering to collect $0.
+      month_preset: heldThisMonth > 0 && rates.promo > 0
+        ? Math.round(heldThisMonth * rates.promo)
+        : null,
+      session_preset: rates.individual > 0 ? rates.individual : null,
       owed_now: now.pending,
       owes_now: now.pending > 0,
       bought_month: heldThisMonth > 0 && monthlyPaid >= Math.round(heldThisMonth * rates.promo),
