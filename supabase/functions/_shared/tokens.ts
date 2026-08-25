@@ -358,3 +358,112 @@ export function billableAttendances(
 
   return kept.map((r) => ({ slot: r.slot }));
 }
+
+// ////////////////////////////////////
+// WHAT MAY BE WRITTEN, AND WHEN
+// ////////////////////////////////////
+
+/** The smallest partial a monthly payment may be. */
+export const MinPartialMonthly = 40000;
+
+/** Monday of the week a YYYY-MM-DD date falls in. */
+export function weekStart(date: string): string {
+  const d = new Date(`${date}T12:00:00Z`);
+  const iso = d.getUTCDay() === 0 ? 7 : d.getUTCDay();
+  d.setUTCDate(d.getUTCDate() - (iso - 1));
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Attendance and money may be written for the current week and the previous
+ * one; anything older takes direct access to the database.
+ *
+ * Monday to Sunday, so a Thursday training and the cash counted at 1am on
+ * Friday always fall in the same week — the two never split.
+ */
+export function withinWriteWindow(date: string, today: string): boolean {
+  const thisWeek = weekStart(today);
+  const previous = weekStart(
+    new Date(new Date(`${thisWeek}T12:00:00Z`).getTime() - 7 * 86400000)
+      .toISOString().slice(0, 10),
+  );
+  return date >= previous;
+}
+
+export type PaymentIntent = {
+  concept: PaymentConcept;
+  amount: number;
+  slot: SlotKey;
+};
+
+export type PaymentGuard = {
+  /** Pesos owed from months that already closed. */
+  closedDebt: number;
+  /** Slots of this month that already took a monthly payment. */
+  monthlySlots: Set<SlotKey>;
+  /** Slots of this month that already took an individual one. */
+  individualSlots: Set<SlotKey>;
+  /** What the whole month costs at this slot; 0 when it holds no sessions. */
+  monthPrice: number;
+  /** Already paid towards that month. */
+  monthlyPaid: number;
+  /** Whether the window to buy this month has passed — it closes one day
+   * after the slot's second session. */
+  monthlyClosed: boolean;
+};
+
+/**
+ * Whether a payment may be registered at all, and why not.
+ *
+ * This lives in the service and not only in the screen. It is a money rule: a
+ * retry, a stale tab or a direct call would walk straight past a check that
+ * only existed in the UI.
+ *
+ * Returns null when the payment is fine, or the reason to show the admin.
+ */
+export function checkPayment(intent: PaymentIntent, ctx: PaymentGuard): string | null {
+  if (!(intent.amount > 0)) return "El monto tiene que ser mayor a cero";
+
+  // Closed debt blocks everything else: the money on the table settles it
+  // first, and it does so through its own concept so it can never be read as
+  // buying sessions.
+  if (ctx.closedDebt > 0 && intent.concept !== "debt settlement") {
+    return "Hay deuda de meses anteriores: primero hay que saldarla";
+  }
+
+  if (intent.concept === "debt settlement") {
+    if (ctx.closedDebt === 0) return "No hay deuda para saldar";
+    if (intent.amount > ctx.closedDebt) {
+      return "El pago de deuda no puede superar la deuda";
+    }
+    return null;
+  }
+
+  // One concept per (month, slot). From the first payment the decision is
+  // taken, so promotional and normal prices never mix in the same month.
+  if (intent.concept === "monthly" && ctx.individualSlots.has(intent.slot)) {
+    return "Ya hay un pago de sesión para este mes y horario";
+  }
+  if (intent.concept === "session" && ctx.monthlySlots.has(intent.slot)) {
+    return "Ya hay un pago mensual para este mes y horario";
+  }
+
+  if (intent.concept === "monthly") {
+    if (ctx.monthPrice <= 0) return "Este horario no tiene entrenamientos este mes";
+    if (ctx.monthlyPaid > 0) {
+      // A partial is completed, never extended: no third instalment.
+      if (ctx.monthlyPaid + intent.amount !== ctx.monthPrice) {
+        return "El segundo pago tiene que completar el mes";
+      }
+      return null;
+    }
+    if (ctx.monthlyClosed) {
+      return "El pago mensual se registra hasta la segunda sesión del mes";
+    }
+    if (intent.amount < ctx.monthPrice && intent.amount < MinPartialMonthly) {
+      return `Un pago parcial del mes no puede ser menor a $${MinPartialMonthly / 1000}k`;
+    }
+  }
+
+  return null;
+}

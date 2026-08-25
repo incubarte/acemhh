@@ -329,3 +329,106 @@ Deno.test("la bonificación discrecional del admin gana sobre todo", () => {
     );
     assertEquals(billable, [{ slot: slotKey(4, 23) }]);
 });
+
+// ////////////////////////////////////
+// QUÉ SE PUEDE REGISTRAR
+// ////////////////////////////////////
+
+import {
+    checkPayment,
+    type PaymentGuard,
+    weekStart,
+    withinWriteWindow,
+} from "../_shared/tokens.ts";
+
+const OPEN: PaymentGuard = {
+    closedDebt: 0,
+    monthlySlots: new Set(),
+    individualSlots: new Set(),
+    monthPrice: 100000,
+    monthlyPaid: 0,
+    monthlyClosed: false,
+};
+const pay = (concept: "monthly" | "session" | "debt settlement", amount: number) => ({
+    concept, amount, slot: S22,
+});
+
+Deno.test("la semana va de lunes a domingo", () => {
+    assertEquals(weekStart("2026-08-20"), "2026-08-17"); // jueves -> lunes
+    assertEquals(weekStart("2026-08-17"), "2026-08-17"); // lunes
+    assertEquals(weekStart("2026-08-23"), "2026-08-17"); // domingo
+});
+
+Deno.test("se escribe la semana actual y la anterior, no más atrás", () => {
+    const today = "2026-08-25"; // martes
+    assertEquals(withinWriteWindow("2026-08-25", today), true);
+    assertEquals(withinWriteWindow("2026-08-20", today), true); // jueves pasado
+    assertEquals(withinWriteWindow("2026-08-17", today), true); // lunes anterior
+    assertEquals(withinWriteWindow("2026-08-16", today), false);
+    assertEquals(withinWriteWindow("2026-08-13", today), false);
+});
+
+Deno.test("el cobro de la madrugada del viernes cae en la semana del jueves", () => {
+    // Un entrenamiento de jueves 23hs cobrado a la 1am del viernes: la ventana
+    // no puede cortar entre el entrenamiento y su cobro.
+    assertEquals(weekStart("2026-08-20"), weekStart("2026-08-21"));
+});
+
+Deno.test("la deuda cerrada bloquea todo menos el pago de deuda", () => {
+    const ctx = { ...OPEN, closedDebt: 60000 };
+    assertEquals(checkPayment(pay("session", 30000), ctx)?.includes("deuda"), true);
+    assertEquals(checkPayment(pay("monthly", 100000), ctx)?.includes("deuda"), true);
+    assertEquals(checkPayment(pay("debt settlement", 60000), ctx), null);
+});
+
+Deno.test("el pago de deuda no puede superar la deuda", () => {
+    const ctx = { ...OPEN, closedDebt: 60000 };
+    assertEquals(checkPayment(pay("debt settlement", 60001), ctx)?.includes("superar"), true);
+    assertEquals(checkPayment(pay("debt settlement", 25000), ctx), null);
+});
+
+Deno.test("no hay pago de deuda si no hay deuda", () => {
+    assertEquals(checkPayment(pay("debt settlement", 10000), OPEN), "No hay deuda para saldar");
+});
+
+Deno.test("no se mezcla mensual con individual en el mismo mes y horario", () => {
+    const conIndividual = { ...OPEN, individualSlots: new Set([S22]) };
+    assertEquals(checkPayment(pay("monthly", 100000), conIndividual)?.includes("sesión"), true);
+
+    const conMensual = { ...OPEN, monthlySlots: new Set([S22]) };
+    assertEquals(checkPayment(pay("session", 30000), conMensual)?.includes("mensual"), true);
+
+    // Otro horario no tiene nada que ver.
+    assertEquals(checkPayment({ ...pay("session", 30000), slot: S23 }, conMensual), null);
+});
+
+Deno.test("el mensual se puede pagar parcial, con un mínimo", () => {
+    assertEquals(checkPayment(pay("monthly", 40000), OPEN), null);
+    assertEquals(checkPayment(pay("monthly", 39999), OPEN)?.includes("menor"), true);
+    assertEquals(checkPayment(pay("monthly", 100000), OPEN), null);
+});
+
+Deno.test("un parcial se completa, no se extiende: no hay tercera cuota", () => {
+    const conParcial = { ...OPEN, monthlyPaid: 40000 };
+    assertEquals(checkPayment(pay("monthly", 60000), conParcial), null);
+    assertEquals(checkPayment(pay("monthly", 30000), conParcial)?.includes("completar"), true);
+});
+
+Deno.test("pasada la segunda sesión ya no se compra el mes", () => {
+    const tarde = { ...OPEN, monthlyClosed: true };
+    assertEquals(checkPayment(pay("monthly", 100000), tarde)?.includes("segunda sesión"), true);
+    // Pero completar un parcial que ya se empezó sí se puede.
+    assertEquals(checkPayment(pay("monthly", 60000), { ...tarde, monthlyPaid: 40000 }), null);
+});
+
+Deno.test("un horario sin entrenamientos este mes no tiene mes que vender", () => {
+    assertEquals(
+        checkPayment(pay("monthly", 100000), { ...OPEN, monthPrice: 0 })?.includes("entrenamientos"),
+        true,
+    );
+});
+
+Deno.test("el monto tiene que ser positivo", () => {
+    assertEquals(checkPayment(pay("session", 0), OPEN)?.includes("mayor a cero"), true);
+    assertEquals(checkPayment(pay("session", -1), OPEN)?.includes("mayor a cero"), true);
+});

@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { writableSession } from "./fixtures";
 
 // Real-touch regression for the attendance wheel. Mouse events skip the
 // browser's touch pipeline entirely (touch-action, scroll intent,
@@ -10,8 +11,10 @@ const SUPABASE_URL = process.env.SUPABASE_URL ?? "http://127.0.0.1:54321";
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ??
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
 
-const SESSION = "2026-08-20-22";
-const PREV_SESSION_STR = "2026-08-06 22hs";
+// Picked at run time: these specs mark attendance, and only the current week
+// and the previous one are writable.
+let SESSION: string;
+let PREV_SESSION_STR: string;
 const LAST = "Touchtest";
 
 function admin(): SupabaseClient {
@@ -49,6 +52,9 @@ test.describe("ruedita táctil real", () => {
   test.describe.configure({ mode: "serial" });
 
   test.beforeAll(async () => {
+    const fx = await writableSession(22);
+    SESSION = fx.session;
+    PREV_SESSION_STR = fx.prevStr;
     await cleanup();
     const s = admin();
     const { data: players, error } = await s.from("players")

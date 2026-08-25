@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { writableSession } from "./fixtures";
 
 // The redesigned attendance & payments screen: presence expressed by
 // sections, toggled by long-press + drag to the goal bar.
@@ -8,11 +9,12 @@ const SUPABASE_URL = process.env.SUPABASE_URL ?? "http://127.0.0.1:54321";
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ??
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
 
-// 2026-08-20 22hs: seeded slot (cat-a + cat-b). Its previous slot-group date
-// in the local DB is 2026-08-06.
-const SESSION = "2026-08-20-22";
-const SESSION_STR = "2026-08-20 22hs";
-const PREV_SESSION_STR = "2026-08-06 22hs";
+// The jue 22hs slot (cat-a + cat-b), picked at run time: these specs register
+// payments, and only the current week and the previous one are writable.
+let SESSION: string;
+let SESSION_STR: string;
+let PREV_SESSION_STR: string;
+let MONTH: string;
 const LAST = "Newscreen"; // shared test last name
 
 function admin(): SupabaseClient {
@@ -83,7 +85,7 @@ async function seed() {
       player_id: ids.get("Mensual")!,
       registered_by: "__test",
       concept: "monthly",
-      month: "2026-08",
+      month: MONTH,
       slot_weekday: 4,
       slot_hour: 22,
       amount: 75000,
@@ -97,7 +99,7 @@ async function seed() {
       slot_weekday: 4,
       slot_hour: 22,
       session: SESSION_STR,
-      month: "2026-08",
+      month: MONTH,
       amount: 30000,
       is_cash: true,
     },
@@ -108,7 +110,7 @@ async function seed() {
       player_id: ids.get("Otracategoria")!,
       registered_by: "__test",
       concept: "monthly",
-      month: "2026-08",
+      month: MONTH,
       slot_weekday: 4,
       slot_hour: 23,
       amount: 75000,
@@ -121,7 +123,7 @@ async function seed() {
       player_id: ids.get("Abonado")!,
       registered_by: "__test",
       concept: "monthly",
-      month: "2026-08",
+      month: MONTH,
       slot_weekday: 4,
       slot_hour: 22,
       amount: 75000,
@@ -136,7 +138,7 @@ async function seed() {
       slot_weekday: 4,
       slot_hour: 22,
       session: SESSION_STR,
-      month: "2026-08",
+      month: MONTH,
       amount: 30000,
       is_cash: true,
     },
@@ -207,6 +209,11 @@ async function slideWheel(page: Page, name: string, fraction: number) {
 test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async () => {
+  const fx = await writableSession(22);
+  SESSION = fx.session;
+  SESSION_STR = fx.sessionStr;
+  PREV_SESSION_STR = fx.prevStr;
+  MONTH = fx.month;
   await cleanup();
   await seed();
 });

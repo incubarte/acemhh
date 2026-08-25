@@ -23,6 +23,10 @@ export type LedgerExtras = {
   carryover_sessions: number;
   /** Pesos owed from months that already closed. */
   debt: number;
+  /** Of that, what is still outstanding once this month's debt payments are
+   * taken off. `debt` is the figure ENTERING the month, so on its own it never
+   * moves however much the player settles today. */
+  debt_outstanding: number;
   /** Which closed months are behind that debt. */
   debt_months: { month: string; charge: number; paid: number }[];
   /** What this screen's slot costs for the whole month, at the promotional
@@ -50,6 +54,7 @@ export type LedgerExtras = {
 export const LEDGER_DEFAULTS: LedgerExtras = {
   carryover_sessions: 0,
   debt: 0,
+  debt_outstanding: 0,
   debt_months: [],
   month_preset: null,
   session_preset: null,
@@ -288,9 +293,14 @@ export async function ledgerExtrasFor(
       .filter((p) => p.concept === "monthly" && p.slot === screenSlot)
       .reduce((sum, p) => sum + p.amount, 0);
 
+    const settledThisMonth = (payMonths.get(selectedMonth) ?? [])
+      .filter((p) => p.concept === "debt settlement")
+      .reduce((sum, p) => sum + p.amount, 0);
+
     extras.set(player.id, {
       carryover_sessions: state.carryover,
       debt: state.debt,
+      debt_outstanding: Math.max(0, state.debt - settledThisMonth),
       debt_months: debtMonths,
       // A full scholarship has nothing to charge: no preset, rather than a
       // button offering to collect $0.

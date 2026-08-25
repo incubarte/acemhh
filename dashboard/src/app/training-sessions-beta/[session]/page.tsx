@@ -690,12 +690,20 @@ function TrainingSessionBetaContent() {
    * the screen still until the admin actually stops. */
   const noteGestureEnd = useCallback(() => {
     lastGestureEndRef.current = performance.now();
-    if (applyTimerRef.current !== null) clearTimeout(applyTimerRef.current);
-    applyTimerRef.current = setTimeout(() => {
-      applyTimerRef.current = null;
-      if (pendingRef.current) applyRoster(pendingRef.current);
-    }, QuietAfterGesture);
-  }, [applyRoster]);
+    const arm = (delay: number) => {
+      if (applyTimerRef.current !== null) clearTimeout(applyTimerRef.current);
+      applyTimerRef.current = setTimeout(() => {
+        applyTimerRef.current = null;
+        // A finger may well be down on another row by now: this timer was
+        // armed by the PREVIOUS gesture, and firing regardless would reshuffle
+        // the list under the thumb that is marking right now.
+        const wait = quietIn();
+        if (wait > 0) return arm(wait);
+        if (pendingRef.current) applyRoster(pendingRef.current);
+      }, delay);
+    };
+    arm(QuietAfterGesture);
+  }, [applyRoster, quietIn]);
 
   /** Marks attendance right away and refreshes in the background: the row
    * moves on the spot, and whichever refresh lands last wins. */
