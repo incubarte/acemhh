@@ -365,6 +365,8 @@ export type PlayerBilling = {
 export function billableAttendances(
   rows: AttendanceRow[],
   player: PlayerBilling,
+  /** Whether the youth slot's month is paid: that is what buys the bonus. */
+  bonusPaid = false,
 ): { slot: SlotKey }[] {
   // The admin's call wins over everything.
   let kept = rows.filter((r) => !r.bonified);
@@ -393,7 +395,7 @@ export function billableAttendances(
     const free = new Set<AttendanceRow>();
     for (const [, sameDay] of byDate) {
       const anchor = sameDay.find((r) => r.categories.includes(BonusCategory));
-      if (!anchor) continue;
+      if (!anchor && !bonusPaid) continue;
       const extra = sameDay
         .filter((r) => r !== anchor)
         .sort((a, b) => a.slot.localeCompare(b.slot))[0];

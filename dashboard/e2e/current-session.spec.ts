@@ -185,7 +185,9 @@ test("header y cartel quedan fijos arriba, a todo el ancho y en orden", async ({
       .toBeGreaterThanOrEqual(warnBox.y + warnBox.height);
 
     // Both stay put while scrolling, and the header shrinks.
-    await page.mouse.wheel(0, 1200);
+    // scrollTo, not the wheel: the wheel needs the pointer over the
+    // scroller, and where it happens to be has made this flaky.
+    await page.evaluate(() => window.scrollTo(0, 1200));
     await page.waitForTimeout(400);
     expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(100);
     await expect(header).toHaveAttribute("data-compact", "true");
@@ -222,14 +224,24 @@ test("el ledger funciona en meses de 30 días", async ({ page }) => {
 
 test("el logo del header lleva al inicio, también con el header achicado", async ({ page }) => {
   await addSlot(today);
+  await addSlot(future);
   await page.request.post("/api/auth/dev");
   await page.setViewportSize({ width: 390, height: 640 });
 
-  await page.goto(`/training-sessions-beta/${today}-22`);
+  // A session that is not the current one: its warning bar is what makes the
+  // page tall enough to scroll at all. On today's, with an empty roster and no
+  // warning, there is nothing to scroll and the header never shrinks.
+  await page.goto(`/training-sessions-beta/${future}-22`);
+  // The roster is fetched after mount, so goto() returning is not enough: the
+  // page is still "Cargando...", nothing is tall enough to scroll, and the
+  // header never shrinks. This is what made the test flaky.
+  await expect(page.getByTestId("section-presentes")).toBeVisible();
   const logo = page.getByTestId("header-home");
 
   // Thumb-sized even once the header has shrunk the logo itself.
-  await page.mouse.wheel(0, 1200);
+  // scrollTo, not the wheel: the wheel needs the pointer over the
+  // scroller, and where it happens to be has made this flaky.
+  await page.evaluate(() => window.scrollTo(0, 1200));
   await expect(page.getByTestId("app-header")).toHaveAttribute("data-compact", "true");
   const box = (await logo.boundingBox())!;
   expect(box.height).toBeGreaterThanOrEqual(40);

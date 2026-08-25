@@ -257,8 +257,17 @@ export async function ledgerExtrasFor(
     const attMonths = attByPlayer.get(player.id) ?? new Map<string, AttendanceRow[]>();
     const payMonths = payByPlayer.get(player.id) ?? new Map<string, MonthPayment[]>();
 
+    /** The youth slot's month is paid: that is what buys the bonus. */
+    const bonusPaid = (month: string) =>
+      (payMonths.get(month) ?? []).some((p) =>
+        (p.concept === "monthly" || p.concept === "half month") &&
+        [...featuresAt.values()].some((f) =>
+          f.slot === p.slot && f.categories.includes("youth")
+        )
+      );
+
     const inputFor = (month: string, attendances: AttendanceRow[]): MonthInput => ({
-      attendances: billableAttendances(attendances, billing),
+      attendances: billableAttendances(attendances, billing, bonusPaid(month)),
       payments: payMonths.get(month) ?? [],
       sessionsPerSlot: sessionsPerSlot.get(month) ?? new Map(),
     });
@@ -306,7 +315,9 @@ export async function ledgerExtrasFor(
         .pending > 0;
 
     const prevMonth = monthBefore(selectedMonth);
-    const prevBillable = billableAttendances(attMonths.get(prevMonth) ?? [], billing);
+    const prevBillable = billableAttendances(
+      attMonths.get(prevMonth) ?? [], billing, bonusPaid(prevMonth),
+    );
     const prevPaid = (payMonths.get(prevMonth) ?? []).reduce((s, p) => s + p.amount, 0);
     const prevRow = debtMonths.find((d) => d.month === prevMonth);
 
@@ -347,7 +358,7 @@ export async function ledgerExtrasFor(
       prev_owed: prevRow ? prevRow.charge - prevRow.paid : 0,
       prev_attended: prevBillable.length,
       prev_paid: prevPaid,
-      cur_attended: billableAttendances(nowAttendances, billing).length,
+      cur_attended: billableAttendances(nowAttendances, billing, bonusPaid(selectedMonth)).length,
       cur_paid: (payMonths.get(selectedMonth) ?? []).reduce((s, p) => s + p.amount, 0),
     });
   }

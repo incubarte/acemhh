@@ -78,7 +78,9 @@ test("el switch queda entre el header y el cartel de sesión, a todo el ancho", 
   expect(Math.round(warnBox.y)).toBe(Math.round(toggleBox.y + toggleBox.height));
 
   // Pinned: it stays put while the page scrolls.
-  await page.mouse.wheel(0, 1200);
+  // scrollTo, not the wheel: the wheel needs the pointer over the
+  // scroller, and where it happens to be has made this flaky.
+  await page.evaluate(() => window.scrollTo(0, 1200));
   await page.waitForTimeout(300);
   expect((await toggle.boundingBox())!.y).toBeLessThan(headerBox.height + 40);
 });

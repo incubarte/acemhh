@@ -529,3 +529,42 @@ Deno.test("con el mes de las 21hs pago, el youth que dobla no debe nada", () => 
     );
     assertEquals(r.pending, 0);
 });
+
+Deno.test("el mes pago de las 21hs bonifica aunque ese día no haya ido a las 21", () => {
+    // El bonus lo compra el mes, no la asistencia: el youth que algún jueves
+    // va sólo a las 23hs no paga esa sesión aparte.
+    const soloOtro = billableAttendances(
+        [att(23, ["cat-c"])],
+        { goalkeeper: false, categories: ["youth", "cat-c"] },
+        true, // el mes de las 21hs está pago
+    );
+    assertEquals(soloOtro, []);
+
+    // Sin el mes pago y sin haber ido a la de youth, esa sesión se cobra.
+    const sinNada = billableAttendances(
+        [att(23, ["cat-c"])],
+        { goalkeeper: false, categories: ["youth", "cat-c"] },
+        false,
+    );
+    assertEquals(sinNada.length, 1);
+});
+
+Deno.test("yendo a las 21 sin pagar nada, la deuda es sólo por las 21", () => {
+    // El invariante que importa: asiste a su horario y además a otro, sin mes
+    // ni sesión paga. Debe UNA sesión, no dos.
+    const billable = billableAttendances(
+        [att(21, ["youth"], true), att(23, ["cat-c"])],
+        { goalkeeper: false, categories: ["youth", "cat-c"] },
+        false,
+    );
+    assertEquals(billable, [{ slot: slotKey(4, 21) }]);
+
+    const r = ledgerMonth(
+        EMPTY_STATE,
+        { attendances: billable, payments: [], sessionsPerSlot: new Map([[slotKey(4, 21), 4]]) },
+        PRICE,
+        false,
+        0,
+    );
+    assertEquals(r.pending, 30000);
+});
