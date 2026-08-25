@@ -6,13 +6,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
     ledgerStep,
     MinBundleTrainings,
+    periodMonths,
     priceFor,
     trainingsFor,
     type LedgerPrice,
     type SlotDay,
 } from "../_shared/ledger.ts";
 
-export { MinBundleTrainings, priceFor, trainingsFor };
+export { MinBundleTrainings, periodMonths, priceFor, trainingsFor };
 export type { LedgerPrice, SlotDay };
 
 // The activity agenda derives from training_sessions: a month is active when
@@ -84,31 +85,26 @@ export function currentMonthBA(now: Date = new Date()): string {
     }).format(now);
 }
 
-/** Every active month of the current semester up to currentMonth, ascending.
+/** Every active month of the current period up to currentMonth, ascending.
  * The ledger (carryover of credit and debt) accumulates over these. */
-export function semesterActiveMonths(
+export function periodActiveMonths(
     currentMonth: string,
     activeMonths: string[],
 ): string[] {
-    const [year, month] = currentMonth.split("-");
-    const semesterMonths = Number(month) <= 6
-        ? ["01", "02", "03", "04", "05", "06"]
-        : ["07", "08", "09", "10", "11", "12"];
-
+    const window = new Set(periodMonths(currentMonth));
     return activeMonths
-        .filter((m) => m <= currentMonth)
-        .filter((m) => m.startsWith(`${year}-`) && semesterMonths.includes(m.slice(5)))
+        .filter((m) => m <= currentMonth && window.has(m))
         .sort();
 }
 
-/** Last up-to-3 active months of the current semester, up to currentMonth —
+/** Last up-to-3 active months of the current period, up to currentMonth —
  * the part of the ledger the reply displays. Empty during months before the
  * semester's activity starts (e.g. July). */
 export function monthsWindow(
     currentMonth: string,
     activeMonths: string[],
 ): string[] {
-    return semesterActiveMonths(currentMonth, activeMonths).slice(-3);
+    return periodActiveMonths(currentMonth, activeMonths).slice(-3);
 }
 
 export type MonthStatus = {

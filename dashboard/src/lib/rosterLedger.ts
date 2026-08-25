@@ -4,6 +4,7 @@ import {
   LEDGER_FROM,
   ledgerStep,
   MinBundleTrainings,
+  periodStart,
   priceFor,
   runLedger,
   trainingsFor,
@@ -94,9 +95,8 @@ export async function ledgerExtrasFor(
   const extras = new Map<string, LedgerExtras>();
   if (selectedMonth < LEDGER_FROM || players.length === 0) return extras;
 
-  const [year, mm] = [selectedMonth.slice(0, 4), selectedMonth.slice(5, 7)];
-  const semStart = Number(mm) <= 6 ? `${year}-01` : `${year}-07`;
-  const carryFrom = semStart > LEDGER_FROM ? semStart : LEDGER_FROM;
+  const start = periodStart(selectedMonth);
+  const carryFrom = start > LEDGER_FROM ? start : LEDGER_FROM;
   const ids = players.map((p) => p.id);
 
   const [pricesRes, slotsRes, payRes, attRes] = await Promise.all([

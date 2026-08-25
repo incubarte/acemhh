@@ -263,8 +263,12 @@ matemática igual da bien.
 
 ### Bloqueos
 
-El bloqueo es **dirigido**: siempre se puede pagar lo que se debe, en la forma
-que corresponde; no se puede avanzar con otra cosa mientras tanto.
+El bloqueo lo aplica **el servicio, no sólo la UI**. Es una regla de plata: si
+vive únicamente en la pantalla, cualquier reintento, pestaña vieja o llamada
+directa la saltea.
+
+Es **dirigido**: siempre se puede pagar lo que se debe, en la forma que
+corresponde; no se puede avanzar con otra cosa mientras tanto.
 
 | Deuda | Bloquea | Habilita |
 |---|---|---|
@@ -313,12 +317,16 @@ su cobro, ni siquiera cuando se registra pasada la medianoche.
 
 ## Alcance temporal del cálculo
 
-El cálculo se clampea **dentro del semestre**: en octubre se calcula de julio a
-octubre; en junio, de enero a junio. Siempre dentro del mismo año.
+El cálculo se clampea **dentro del período**, y la deuda y el carryover no
+cruzan de un período al siguiente.
 
-Los análisis cruzando semestres son discrecionales y manuales.
+Los períodos **no son semestres**: el club entrena de **marzo a julio** y de
+**agosto a diciembre**. Son dos tramos de cinco meses.
 
-Esto **ya está implementado** en los dos runtimes.
+Enero y febrero son el receso: no hay entrenamientos, así que forman un período
+propio que siempre queda vacío.
+
+Los análisis cruzando períodos son discrecionales y manuales.
 
 ---
 

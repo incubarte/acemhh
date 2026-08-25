@@ -17,6 +17,7 @@ import {
     fetchTrainingSlots,
     formatMonthLine,
     monthsWindow,
+    periodMonths,
     priceFor,
     trainingsFor,
 } from "../whatsapp-webhook/status.ts";
@@ -43,11 +44,33 @@ Deno.test("monthsWindow: months without activity yield an empty window", () => {
     assertEquals(monthsWindow("2026-03", AGENDA_2026_S2), []);
 });
 
-Deno.test("monthsWindow: never crosses into the previous semester", () => {
+Deno.test("monthsWindow: never crosses into the previous period", () => {
     const agenda = ["2026-03", "2026-04", "2026-05", "2026-06", ...AGENDA_2026_S2];
-    // August only sees August, even with active months in the first semester.
+    // August only sees August, even with active months in the first period.
     assertEquals(monthsWindow("2026-08", agenda), ["2026-08"]);
     assertEquals(monthsWindow("2026-05", agenda), ["2026-03", "2026-04", "2026-05"]);
+});
+
+Deno.test("los períodos son marzo–julio y agosto–diciembre, no semestres", () => {
+    // The club trains in two five-month stretches, so the halves of the year
+    // are not where the line falls.
+    const first = ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07"];
+    assertEquals(periodMonths("2026-03"), first);
+    assertEquals(periodMonths("2026-07"), first);
+    assertEquals(periodMonths("2026-08"), AGENDA_2026_S2);
+    assertEquals(periodMonths("2026-12"), AGENDA_2026_S2);
+
+    // Summer break: a period of its own, and always empty — nobody trains.
+    assertEquals(periodMonths("2026-01"), ["2026-01", "2026-02"]);
+    assertEquals(periodMonths("2026-02"), ["2026-01", "2026-02"]);
+});
+
+Deno.test("monthsWindow: julio cierra el primer período y agosto abre el segundo", () => {
+    // Regression: July used to be bundled with August–December, so a debt from
+    // June vanished in July while July's followed the player into August.
+    const agenda = ["2026-06", "2026-07", "2026-08"];
+    assertEquals(monthsWindow("2026-07", agenda), ["2026-06", "2026-07"]);
+    assertEquals(monthsWindow("2026-08", agenda), ["2026-08"]);
 });
 
 Deno.test("priceFor picks the newest tariff at or before the month", () => {
@@ -459,6 +482,12 @@ Deno.test("computeLedger y runLedger dan lo mismo: una sola implementación", as
     // runLedger (months plus a price table). Both now sit on the same
     // ledgerStep — this is what stops the bot from telling a player one number
     // while the admin sees another.
+    //
+    // The scenario characterises the CURRENT model, not the one in
+    // docs/modelo-de-cobros.md: there, October's 150k could not be registered
+    // as one payment at all — 60k would settle September's debt first and the
+    // rest would be a partial month. Expect this test to change with tokens;
+    // what must not change is that both entry points agree.
     const { runLedger } = await import("../_shared/ledger.ts");
 
     const months = ["2026-08", "2026-09", "2026-10"];

@@ -22,7 +22,7 @@ import {
     fetchMonthStatuses,
     fetchPrices,
     fetchTrainingSlots,
-    semesterActiveMonths,
+    periodActiveMonths,
     trainingsFor,
 } from "./status.ts";
 
@@ -373,7 +373,7 @@ async function handleIncoming(incoming: Incoming) {
     // bonified sessions apply to the current one; the reply displays the last
     // three months plus the balance lines.
     const slots = players.length > 0 ? await fetchTrainingSlots(supabaseAdmin) : [];
-    const months = semesterActiveMonths(currentMonthBA(), activeMonths(slots));
+    const months = periodActiveMonths(currentMonthBA(), activeMonths(slots));
     if (months.length > 0) {
         const prices = await fetchPrices(supabaseAdmin);
         const reportFor = async (player: PlayerLink): Promise<string | null> => {

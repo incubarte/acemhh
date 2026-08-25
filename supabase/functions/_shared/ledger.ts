@@ -35,6 +35,29 @@ export type LedgerPrice = Rates & {
 // never existed.
 export const LEDGER_FROM = "2026-08";
 
+/**
+ * The club's activity periods, and the window every calculation is clamped to:
+ * debt and carryover accumulate inside a period and do not cross into the next
+ * one. Anything spanning periods is a discretionary, manual analysis.
+ *
+ * They are NOT calendar semesters: the club trains March through July, and
+ * August through December. January and February are the summer break — no
+ * training happens, so they get a period of their own that is always empty.
+ */
+export function periodMonths(month: string): string[] {
+  const year = month.slice(0, 4);
+  const m = Number(month.slice(5, 7));
+  const [from, to] = m >= 8 ? [8, 12] : m >= 3 ? [3, 7] : [1, 2];
+  const out: string[] = [];
+  for (let i = from; i <= to; i++) out.push(`${year}-${String(i).padStart(2, "0")}`);
+  return out;
+}
+
+/** First month of the period `month` belongs to, as YYYY-MM. */
+export function periodStart(month: string): string {
+  return periodMonths(month)[0];
+}
+
 /** The month admits a prepaid bundle only with at least 2 trainings. */
 export const MinBundleTrainings = 2;
 
