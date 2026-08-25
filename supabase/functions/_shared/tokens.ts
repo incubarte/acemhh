@@ -376,9 +376,15 @@ export function billableAttendances(
   }
 
   if (player.categories.includes(BonusCategory)) {
-    // Attending the session of their own category buys one other session that
-    // same day. Which one is dropped does not change the money — every
-    // session costs the same — so the earliest slot goes, deterministically.
+    // Going to the youth session buys one ADDITIONAL session that same day.
+    // The youth one is the anchor and always stays; what is free is the extra.
+    //
+    // Which one goes matters, and this used to get it wrong. A youth who is
+    // also cat-c anchors on either session if you only ask "does this slot
+    // match one of my categories" — and dropping the youth one leaves the
+    // cat-c session standing, uncovered, while the month they bought for the
+    // youth slot goes unused. Monthly tokens are locked to their slot, so the
+    // choice is worth real money.
     const byDate = new Map<string, AttendanceRow[]>();
     for (const r of kept) {
       if (!byDate.has(r.date)) byDate.set(r.date, []);
@@ -386,14 +392,12 @@ export function billableAttendances(
     }
     const free = new Set<AttendanceRow>();
     for (const [, sameDay] of byDate) {
-      const own = sameDay.find((r) =>
-        r.categories.some((c) => player.categories.includes(c))
-      );
-      if (!own) continue;
-      const other = sameDay
-        .filter((r) => r !== own)
+      const anchor = sameDay.find((r) => r.categories.includes(BonusCategory));
+      if (!anchor) continue;
+      const extra = sameDay
+        .filter((r) => r !== anchor)
         .sort((a, b) => a.slot.localeCompare(b.slot))[0];
-      if (other) free.add(other);
+      if (extra) free.add(extra);
     }
     kept = kept.filter((r) => !free.has(r));
   }

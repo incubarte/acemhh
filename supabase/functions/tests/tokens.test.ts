@@ -495,3 +495,37 @@ Deno.test("la deuda cerrada también bloquea el medio mes", () => {
     const conDeuda = { ...OPEN, firstOfPeriod: true, halfMonthPrice: 50000, closedDebt: 30000 };
     assertEquals(checkPayment(pay("half month", 50000), conDeuda)?.includes("deuda"), true);
 });
+
+Deno.test("el bonus de youth libera la sesión EXTRA, no la de youth", () => {
+    // Regresión: un youth que además es cat-c hacía match con las dos sesiones
+    // del día, y se bonificaba la de youth. Eso dejaba en pie la de cat-c —
+    // que su mes de las 21hs no cubre, porque los tokens del mes están atados
+    // a su slot — y le aparecía deuda con el mes pagado.
+    const youth = att(21, ["youth"], true);
+    const catC = att(23, ["cat-c"]);
+    const billable = billableAttendances([catC, youth], {
+        goalkeeper: false,
+        categories: ["youth", "cat-c"],
+    });
+    assertEquals(billable, [{ slot: slotKey(4, 21) }]);
+});
+
+Deno.test("con el mes de las 21hs pago, el youth que dobla no debe nada", () => {
+    // El caso real: paga el mes de su slot y entrena 21 y 23 el mismo día.
+    const S21 = slotKey(4, 21);
+    const r = ledgerMonth(
+        EMPTY_STATE,
+        {
+            attendances: billableAttendances(
+                [att(21, ["youth"], true), att(23, ["cat-c"])],
+                { goalkeeper: false, categories: ["youth", "cat-c"] },
+            ),
+            payments: [{ concept: "monthly", amount: 100000, slot: S21 }],
+            sessionsPerSlot: new Map([[S21, 4], [S23, 4]]),
+        },
+        PRICE,
+        false,
+        0,
+    );
+    assertEquals(r.pending, 0);
+});
