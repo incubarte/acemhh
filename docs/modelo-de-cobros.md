@@ -19,7 +19,8 @@ Tres palabras que el código actual usa mal y conviene fijar:
 | **Sesión** | Un entrenamiento concreto: fecha + hora. | `2026-08-20 22hs` |
 | **Features del slot** | Categorías y si entrenan arqueros. Pueden cambiar con el tiempo. | `{cat-a, cat-b}`, `goalies=false` |
 
-La tabla que hoy se llama `training_slots` guarda en realidad **sesiones**.
+La tabla que se llamaba `training_slots` guardaba en realidad **sesiones**, y
+ya fue renombrada a `training_sessions`.
 
 Y dos términos del modelo:
 
@@ -370,54 +371,51 @@ que depende plata.
 
 ## Impacto en el código
 
-### Esquema
+### Ya hecho
 
-1. Renombrar `training_slots` → `training_sessions` (guarda sesiones, no slots)
-2. Crear `training_slot_features`: `weekday`, `hour`, `valid_from`, `categories`,
-   `goalies`. Mismo patrón que `prices`: rige hasta la fila siguiente
-3. `prices`: agregar el precio de arquero, fechado como el resto
-4. `payments`: nuevo concepto de pago de deuda; `slot` como referencia real
-5. `attendances`: marca de bonificación discrecional
+**Sesiones separadas de features del slot.** `training_slots` pasó a
+`training_sessions`, y las categorías y el flag de arqueros viven en
+`training_slot_features`, versionada por `valid_from`. La vista
+`training_sessions_resolved` hace la resolución a la fecha de cada sesión, y
+`requireFeatures` corta cuando falta configuración.
 
-**El riesgo del punto 2**: las features tienen que resolverse **a la fecha de la
-sesión**, nunca "la config de hoy". Hoy cada fila lleva su configuración
-congelada, así que la historia es reproducible por accidente. Si al normalizar se
-resuelve mal, sumar una categoría a un slot cambiaría retroactivamente cuántos
-entrenamientos tuvo un mes cerrado.
+**Una sola calculadora.** Estaba escrita dos veces —dashboard y webhook— y dos
+copias de reglas de plata derivan: el bot le diría al jugador un número y el
+admin vería otro. Ahora vive en `supabase/functions/_shared/ledger.ts`, que el
+webhook importa por ruta relativa y el dashboard por el alias `@shared`. Queda
+sin imports propios para que los dos sistemas de módulos la consuman igual.
 
-### Duplicación entre dashboard y bot
+No se resolvió con una edge function llamada por HTTP: la pantalla de asistencia
+enriquece decenas de jugadores con acceso directo a la base, y un salto de red
+ahí es una regresión y un modo de falla nuevo. Lo que legítimamente difiere entre
+runtimes es cómo se traen los datos, no la aritmética.
 
-Hoy la calculadora está escrita dos veces: `dashboard/src/lib/ledger.ts` y
-`supabase/functions/whatsapp-webhook/status.ts`. Si se desincronizan, el bot le
-dice al jugador un número y el admin ve otro.
+**Los períodos.** Marzo–julio y agosto–diciembre, en el módulo compartido.
 
-**La calculadora no toca la base de datos**: es matemática pura. Lo que
-legítimamente difiere entre los dos runtimes es *cómo se traen los datos*.
-Alcanza con un archivo compartido en `supabase/functions/_shared/`, importado por
-los dos.
+### Falta
 
-**No conviene resolverlo con una edge function que el dashboard llame por HTTP**:
-la pantalla de asistencia enriquece decenas de jugadores y hoy tiene acceso
-directo a la base. Un salto de red ahí es una regresión real y un modo de falla
-nuevo.
-
-### Archivos
-
-| Archivo | Qué |
+| Qué | Dónde |
 |---|---|
-| `dashboard/src/lib/ledger.ts` | Reescribir a tokens; mover a `_shared/` |
-| `dashboard/src/lib/rosterLedger.ts` | Filtrar asistencias cobrables; presets por slot |
-| `supabase/functions/whatsapp-webhook/status.ts` | Reemplazar por el módulo compartido |
-| `.../[session]/payment/route.ts` | Conceptos nuevos, validaciones de bloqueo, ventana de escritura |
-| `.../[session]/attendance/route.ts` | Ventana de escritura, bonificación discrecional |
-| Las dos pantallas de asistencia | Popup de confirmación, opciones de cobro, "Otro..." con concepto |
+| Precio de arquero, fechado como el resto | migración a `prices` |
+| Concepto de pago de deuda; `slot` como referencia real | migración a `payments` |
+| Marca de bonificación discrecional | migración a `attendances` |
+| Reescribir la calculadora a tokens | `_shared/ledger.ts` |
+| Filtrar asistencias cobrables (arqueros, youth) | `_shared/ledger.ts` + `rosterLedger.ts` |
+| Presets por slot | `rosterLedger.ts` |
+| Conceptos nuevos, bloqueos por servicio, ventana de escritura | `.../payment/route.ts` |
+| Ventana de escritura, bonificación discrecional | `.../attendance/route.ts` |
+| Popup de confirmación, opciones de cobro, "Otro..." con concepto | las dos pantallas |
 
 ### Tests
 
 Hay **35 tests que codifican las reglas viejas** y van a fallar:
 
 - `dashboard/e2e/ledger.spec.ts` — 11 tests de matemática pura, 4 de carryover
-- `supabase/functions/tests/whatsapp-status.test.ts` — 24 tests espejados
+- `supabase/functions/tests/whatsapp-status.test.ts` — 27 tests, 12 de reglas
+
+Ya no están duplicados: los dos archivos ejercitan el mismo
+`_shared/ledger.ts`, por caminos distintos. Hay además un test que corre el
+mismo escenario por las dos puertas de entrada y verifica que coinciden.
 
 Es la mejor red que tenemos: **la lista de fallas es exactamente el diff de
 reglas**. Conviene correrlos antes de tocar nada y usar el resultado como
