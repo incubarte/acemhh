@@ -8,6 +8,7 @@ import SessionDateWarning from "../../components/SessionDateWarning";
 import ExperienceToggle from "../../components/ExperienceToggle";
 import { usePageTitle } from "../../components/PageTitleContext";
 import { paymentThresholdOverride } from "@/lib/thresholds";
+import type { PaymentConcept } from "@shared/tokens";
 
 type Player = {
   id: string;
@@ -74,7 +75,10 @@ function TrainingSessionDetailContent() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [expandedPlayerId, setExpandedPlayerId] = useState<string | null>(null);
-  const [pendingPayment, setPendingPayment] = useState<{ playerId: string; amount: number } | null>(null);
+  // The amount no longer says what a payment IS: the concept travels with it.
+  const [pendingPayment, setPendingPayment] = useState<
+    { playerId: string; amount: number; concept: PaymentConcept } | null
+  >(null);
   const [customAmountMode, setCustomAmountMode] = useState<string | null>(null);
   const [customAmount, setCustomAmount] = useState("");
   const [paymentProcessing, setPaymentProcessing] = useState(false);
@@ -176,7 +180,7 @@ function TrainingSessionDetailContent() {
   const confirmPayment = async () => {
     if (!pendingPayment) return;
 
-    const { playerId, amount } = pendingPayment;
+    const { playerId, amount, concept } = pendingPayment;
     setPaymentProcessing(true);
 
     try {
@@ -186,6 +190,7 @@ function TrainingSessionDetailContent() {
         body: JSON.stringify({
           player_id: playerId,
           amount,
+          concept,
         }),
       });
 
@@ -253,7 +258,13 @@ function TrainingSessionDetailContent() {
     if (amount < 1000) {
       amount = amount * 1000;
     }
-    setPendingPayment({ playerId, amount });
+    // A hand-typed amount is a session unless it is exactly the month's
+    // price. This screen is the legacy one and has no concept picker; the
+    // service refuses anything the model does not allow anyway.
+    const player = players.find((p) => p.id === playerId);
+    const concept: PaymentConcept =
+      player?.month_preset && amount === player.month_preset ? "monthly" : "session";
+    setPendingPayment({ playerId, amount, concept });
     setCustomAmountMode(null);
     setCustomAmount("");
   };
@@ -645,21 +656,30 @@ function TrainingSessionDetailContent() {
                     ? [
                       // The month's bundle for this player, carryover-adjusted.
                       ...(player.month_preset
-                        ? [{ label: `Mes ${formatArs(player.month_preset)}`, amount: player.month_preset }]
+                        ? [{
+                          label: `Mes ${formatArs(player.month_preset)}`,
+                          amount: player.month_preset,
+                          concept: "monthly" as const,
+                        }]
                         : []),
                       ...(player.session_preset
-                        ? [{ label: `Sesión ${formatArs(player.session_preset)}`, amount: player.session_preset }]
+                        ? [{
+                          label: `Sesión ${formatArs(player.session_preset)}`,
+                          amount: player.session_preset,
+                          concept: "session" as const,
+                        }]
                         : []),
                     ]
                     // Pre-ledger sessions keep the historical amounts.
                     : [100000, 75000, 50000, 30000].map((amount) => ({
                       label: formatArs(amount),
                       amount,
+                      concept: "session" as const,
                     }))
-                  ).map(({ label, amount }) => (
+                  ).map(({ label, amount, concept }) => (
                     <button
                       key={label}
-                      onClick={() => setPendingPayment({ playerId: player.id, amount })}
+                      onClick={() => setPendingPayment({ playerId: player.id, amount, concept })}
                       style={{
                         padding: "6px 10px",
                         borderRadius: 6,

@@ -3,9 +3,9 @@
 Las reglas de plata del club: qué se cobra, cómo se interpretan los pagos, cómo
 nace y cómo se salda la deuda.
 
-Este documento es la referencia del modelo **acordado**, no del implementado.
-Al momento de escribirlo el código sigue el modelo anterior (bundle mensual en
-pesos); ver [Qué cambia respecto de lo implementado](#qué-cambia-respecto-de-lo-implementado).
+Está **implementado**. La matemática vive en `supabase/functions/_shared/tokens.ts`,
+una sola vez para el dashboard y el bot, y sus reglas están una por una en
+`supabase/functions/tests/tokens.test.ts`.
 
 ---
 
@@ -369,79 +369,38 @@ que depende plata.
 
 ---
 
-## Impacto en el código
-
-### Ya hecho
-
-**Sesiones separadas de features del slot.** `training_slots` pasó a
-`training_sessions`, y las categorías y el flag de arqueros viven en
-`training_slot_features`, versionada por `valid_from`. La vista
-`training_sessions_resolved` hace la resolución a la fecha de cada sesión, y
-`requireFeatures` corta cuando falta configuración.
-
-**Una sola calculadora.** Estaba escrita dos veces —dashboard y webhook— y dos
-copias de reglas de plata derivan: el bot le diría al jugador un número y el
-admin vería otro. Ahora vive en `supabase/functions/_shared/ledger.ts`, que el
-webhook importa por ruta relativa y el dashboard por el alias `@shared`. Queda
-sin imports propios para que los dos sistemas de módulos la consuman igual.
-
-No se resolvió con una edge function llamada por HTTP: la pantalla de asistencia
-enriquece decenas de jugadores con acceso directo a la base, y un salto de red
-ahí es una regresión y un modo de falla nuevo. Lo que legítimamente difiere entre
-runtimes es cómo se traen los datos, no la aritmética.
-
-**Los períodos.** Marzo–julio y agosto–diciembre, en el módulo compartido.
-
-### Falta
+## Dónde vive cada cosa
 
 | Qué | Dónde |
 |---|---|
-| Precio de arquero, fechado como el resto | migración a `prices` |
-| Concepto de pago de deuda; `slot` como referencia real | migración a `payments` |
-| Marca de bonificación discrecional | migración a `attendances` |
-| Reescribir la calculadora a tokens | `_shared/ledger.ts` |
-| Filtrar asistencias cobrables (arqueros, youth) | `_shared/ledger.ts` + `rosterLedger.ts` |
-| Presets por slot | `rosterLedger.ts` |
-| Conceptos nuevos, bloqueos por servicio, ventana de escritura | `.../payment/route.ts` |
-| Ventana de escritura, bonificación discrecional | `.../attendance/route.ts` |
-| Popup de confirmación, opciones de cobro, "Otro..." con concepto | las dos pantallas |
+| La matemática: tokens, consumo, carryover, deuda, condonación | `supabase/functions/_shared/tokens.ts` |
+| Qué asistencias se cobran | idem, `billableAttendances` |
+| Qué se puede registrar y cuándo | idem, `checkPayment` y `withinWriteWindow` |
+| Las reglas, una por una | `supabase/functions/tests/tokens.test.ts` |
+| Enriquecer la lista de la pantalla | `dashboard/src/lib/rosterLedger.ts` |
+| El mensaje del bot | `supabase/functions/whatsapp-webhook/status.ts` |
+| Los bloqueos aplicados | las rutas de pago y asistencia |
 
-### Tests
+**Una sola implementación.** Estaba escrita dos veces y dos copias de reglas de
+plata derivan: el bot le diría al jugador un número y el admin vería otro. No se
+resolvió con una edge function llamada por HTTP — la pantalla de asistencia
+enriquece decenas de jugadores con acceso directo a la base, y un salto de red
+ahí es una regresión y un modo de falla nuevo. Lo que legítimamente difiere
+entre runtimes es cómo se traen los datos, no la aritmética.
 
-Hay **35 tests que codifican las reglas viejas** y van a fallar:
+**El archivo compartido no importa nada.** Deno pide extensión `.ts` en los
+imports y Next no; mientras el módulo no importe, los dos lo consumen igual.
 
-- `dashboard/e2e/ledger.spec.ts` — 11 tests de matemática pura, 4 de carryover
-- `supabase/functions/tests/whatsapp-status.test.ts` — 27 tests, 12 de reglas
+## Dos cosas que sorprenden en la práctica
 
-Ya no están duplicados: los dos archivos ejercitan el mismo
-`_shared/ledger.ts`, por caminos distintos. Hay además un test que corre el
-mismo escenario por las dos puertas de entrada y verifica que coinciden.
+**El mes casi nunca está disponible.** Se compra hasta un día después de la
+segunda sesión del slot, así que pasada la primera quincena la única opción es
+la sesión suelta. Es el diseño —el precio promocional se gana pagando por
+adelantado— pero conviene saberlo antes de que un admin pregunte.
 
-Es la mejor red que tenemos: **la lista de fallas es exactamente el diff de
-reglas**. Conviene correrlos antes de tocar nada y usar el resultado como
-checklist.
-
----
-
-## Decisiones tomadas
-
-**El escalón de la condonación se acepta.** El descuento se paga con un
-compromiso; cuando la condonación es grande, el club es generoso.
-
-**Los tokens promocionales se queman antes que los individuales.** Cambia
-números: con 4 promocionales de un slot donde el club canceló 2 sesiones, más 2
-individuales, y 2 asistencias, quemar promocionales primero deja **4** de
-carryover; al revés deja **2**.
-
-**El saldo del mes se muestra como deuda firme**, aunque pueda condonarse.
-
-**El multicategoría paga por sesión, no por día.** Un jugador que entrena a las
-22hs y a las 23hs el mismo jueves consume dos tokens. Hoy el código cuenta `n`
-por fechas y las asistencias por sesión, así que ya hay una inconsistencia viva:
-el arquero que va a las 21 y a las 22 suma 2 asistencias contra un mes que contó
-1 entrenamiento.
-
----
+**En el primer mes de un período no puede haber deuda cerrada.** La deuda son
+meses cerrados y el cálculo no cruza períodos, así que en marzo y en agosto el
+bloqueo por deuda no se activa nunca. Recién empieza a valer en el segundo mes.
 
 ## Sesiones extraordinarias
 
