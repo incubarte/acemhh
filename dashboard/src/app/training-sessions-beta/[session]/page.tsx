@@ -496,6 +496,34 @@ function DebtWarningModal({
   );
 }
 
+/** The "buscar" affordance at the foot of an absent section. */
+function SearchButton({
+  testId,
+  onClick,
+  children,
+}: {
+  testId: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      data-testid={testId}
+      onClick={onClick}
+      style={{
+        width: "100%",
+        padding: "10px",
+        border: "none",
+        background: "rgba(255,255,255,0.04)",
+        cursor: "pointer",
+        fontSize: "0.85rem",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 // ---- Payment modal ----
 
 function PaymentModal({
@@ -720,9 +748,16 @@ function TrainingSessionBetaContent() {
   const [busy, setBusy] = useState(false);
 
   // Search popup
-  const [searchOpen, setSearchOpen] = useState(false);
+  // Each section searches its own kind: "Buscar jugador" never turns up a
+  // goalkeeper, and "Buscar arquero" never turns up a field player.
+  const [searchOpen, setSearchOpen] = useState<"player" | "goalkeeper" | null>(null);
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{ id: string; name: string; last_name: string }[]>([]);
+  const openSearch = useCallback((kind: "player" | "goalkeeper") => {
+    setSearchOpen(kind);
+    setQuery("");
+    setSearchResults([]);
+  }, []);
 
   // Attendance wheels: per-row VISUAL state. The gesture itself lives only
   // from pointerdown to pointerup (gestureRef, one finger); everything after
@@ -1181,19 +1216,9 @@ function TrainingSessionBetaContent() {
             Más jugadores...
           </button>
         )}
-        <button
-          onClick={() => { setSearchOpen(true); setQuery(""); setSearchResults([]); }}
-          style={{
-            width: "100%",
-            padding: "10px",
-            border: "none",
-            background: "rgba(255,255,255,0.04)",
-            cursor: "pointer",
-            fontSize: "0.85rem",
-          }}
-        >
+        <SearchButton testId="search-player" onClick={() => openSearch("player")}>
           🔍 Buscar jugador
-        </button>
+        </SearchButton>
       </Section>
 
       <Section
@@ -1212,6 +1237,9 @@ function TrainingSessionBetaContent() {
         testId="section-arqueros-ausentes"
       >
         {renderRows(arquerosAusentes, "absent", "Sin arqueros")}
+        <SearchButton testId="search-goalkeeper" onClick={() => openSearch("goalkeeper")}>
+          🔍 Buscar arquero
+        </SearchButton>
       </Section>
 
       {confirmPlayer && (
@@ -1244,10 +1272,10 @@ function TrainingSessionBetaContent() {
       )}
 
       {/* Search popup: pick a player and mark them present. */}
-      {searchOpen && (
+      {searchOpen !== null && (
         <Overlay>
           <div
-            onClick={() => setSearchOpen(false)}
+            onClick={() => setSearchOpen(null)}
             style={{
               position: "fixed",
               inset: 0,
@@ -1279,7 +1307,10 @@ function TrainingSessionBetaContent() {
                   const q = e.target.value;
                   setQuery(q);
                   if (q.trim().length < 2) return setSearchResults([]);
-                  const res = await fetch(`/api/players?query=${encodeURIComponent(q.trim())}`);
+                  const res = await fetch(
+                    `/api/players?query=${encodeURIComponent(q.trim())}` +
+                      `&player_type=${searchOpen}`,
+                  );
                   if (res.ok) {
                     const data = await res.json();
                     setSearchResults(data.players ?? []);
@@ -1299,7 +1330,7 @@ function TrainingSessionBetaContent() {
                   <button
                     key={r.id}
                     onClick={async () => {
-                      setSearchOpen(false);
+                      setSearchOpen(null);
                       await setAttendance(r.id, true);
                     }}
                     style={{

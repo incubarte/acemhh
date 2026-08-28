@@ -45,10 +45,14 @@ export const GET = withPermission('api', '/api/players', 'GET', async (sess, req
 
     const s = supabaseAdmin();
     const like = `%${query}%`;
-    const { data, error } = await s
+    let search = s
       .from("players")
       .select("id,name,last_name")
-      .or(`name.ilike.${like},last_name.ilike.${like}`)
+      .or(`name.ilike.${like},last_name.ilike.${like}`);
+    // The attendance screen searches each kind from its own section, so a
+    // goalkeeper never turns up under "Buscar jugador" and the other way round.
+    if (playerType) search = search.eq("player_type", playerType);
+    const { data, error } = await search
       .order("last_name")
       .order("name")
       .limit(20);
