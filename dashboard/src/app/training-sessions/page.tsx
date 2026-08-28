@@ -6,6 +6,7 @@ import ProtectedPage from "../components/ProtectedPage";
 import { usePageTitle } from "../components/PageTitleContext";
 import type { TrainingDay } from "../api/training-slots/route";
 import { attendancePath, readExperience, type Experience } from "@/lib/experience";
+import { categoryLabel } from "@/lib/categories";
 
 function TrainingSessionsContent() {
   const router = useRouter();
@@ -51,16 +52,6 @@ function TrainingSessionsContent() {
       month: "short",
       day: "numeric"
     });
-  };
-
-  const getCategoryLabel = (cat: string) => {
-    switch (cat) {
-      case "cat-a": return "Categoría A";
-      case "cat-b": return "Categoría B";
-      case "cat-c": return "Categoría C";
-      case "youth": return "Juveniles";
-      default: return cat;
-    }
   };
 
   usePageTitle("Sesiones de Entrenamiento");
@@ -145,7 +136,7 @@ function TrainingSessionsContent() {
                 alignItems: "center"
               }}
             >
-              <span>{slot.categories.map(getCategoryLabel).join(" + ")}</span>
+              <span>{slot.categories.map(categoryLabel).join(" + ")}</span>
               <span style={{ opacity: 0.7 }}>{slot.hour}:00hs</span>
             </button>
           ))}

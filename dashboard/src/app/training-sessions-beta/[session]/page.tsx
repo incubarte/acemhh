@@ -8,6 +8,7 @@ import SessionDateWarning from "../../components/SessionDateWarning";
 import ExperienceToggle from "../../components/ExperienceToggle";
 import { usePageTitle } from "../../components/PageTitleContext";
 import type { PaymentConcept } from "@shared/tokens";
+import { categoryLabel } from "@/lib/categories";
 
 // Redesigned attendance & payments screen. Presence is expressed by the
 // section a player sits in, and toggled with a horizontal thumb-wheel on the
@@ -206,6 +207,7 @@ function withPayment(p: RosterPlayer, amount: number): RosterPlayer {
 
 type RosterResponse = {
   current_date?: string | null;
+  slot?: { categories: string[]; goalies: boolean } | null;
   players?: RosterPlayer[];
 };
 
@@ -496,6 +498,54 @@ function DebtWarningModal({
   );
 }
 
+/**
+ * Which training this is, before anything else on the screen. With three slots
+ * a night and a screen that looks the same for all of them, saying it out loud
+ * is what stops an admin marking attendance on the wrong one.
+ */
+function SessionHeading({
+  date,
+  hour,
+  slot,
+}: {
+  date: string;
+  hour: string;
+  slot: { categories: string[]; goalies: boolean } | null;
+}) {
+  const day = new Date(`${date}T12:00:00`).toLocaleDateString("es-AR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+
+  return (
+    <div
+      data-testid="session-heading"
+      style={{
+        marginTop: 12,
+        padding: "10px 12px",
+        borderRadius: 10,
+        border: rowBorder,
+        background: "rgba(255,255,255,0.04)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        {/* The day and the hour are what tell two sessions apart. */}
+        <strong style={{ fontSize: "1.05rem" }}>
+          {day.charAt(0).toUpperCase() + day.slice(1)}
+        </strong>
+        <span style={{ fontSize: "1.05rem", opacity: 0.75 }}>{hour}hs</span>
+      </div>
+      <div style={{ marginTop: 2, fontSize: "0.85rem", opacity: 0.75 }}>
+        {slot
+          ? slot.categories.map(categoryLabel).join(" + ") +
+            (slot.goalies ? " · arqueros" : "")
+          : "\u00a0"}
+      </div>
+    </div>
+  );
+}
+
 /** The "buscar" affordance at the foot of an absent section. */
 function SearchButton({
   testId,
@@ -738,6 +788,8 @@ function TrainingSessionBetaContent() {
   const [players, setPlayers] = useState<RosterPlayer[]>([]);
   /** The date the club is working on, to flag browsing a different session. */
   const [currentDate, setCurrentDate] = useState<string | null>(null);
+  /** What this slot is: the categories that train here, and whether goalies do. */
+  const [slot, setSlot] = useState<{ categories: string[]; goalies: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [expandedAbsent, setExpandedAbsent] = useState(false);
@@ -822,6 +874,7 @@ function TrainingSessionBetaContent() {
   const applyRoster = useCallback((data: RosterResponse) => {
     pendingRef.current = null;
     setCurrentDate(data.current_date ?? null);
+    setSlot(data.slot ?? null);
     // Reuse the existing object for players whose data did not change, so
     // React skips re-rendering their (memoized) rows entirely.
     setPlayers((prev) => {
@@ -1165,6 +1218,8 @@ function TrainingSessionBetaContent() {
     <div style={{ paddingBottom: 60 }}>
       <ExperienceToggle session={session} current="nueva" />
       <SessionDateWarning sessionDate={sessionDate} currentDate={currentDate} />
+
+      <SessionHeading date={sessionDate} hour={sessionHour} slot={slot} />
 
       {deudores.length > 0 && (
         <Section title="Deben" tone="debt" count={deudores.length} testId="section-deudores">

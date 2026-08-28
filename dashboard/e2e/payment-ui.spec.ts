@@ -192,3 +192,33 @@ test("cada sección busca lo suyo: arqueros por un lado, jugadores por el otro",
     page.getByTestId("section-arqueros-presentes").locator(`[data-player-row="${gkId}"]`),
   ).toBeVisible();
 });
+
+test("la pantalla dice primero qué entrenamiento es", async ({ page }) => {
+  await open(page);
+
+  // Con tres slots por noche y una pantalla idéntica para todos, decir cuál es
+  // es lo que evita marcar asistencia en el equivocado.
+  const heading = page.getByTestId("session-heading");
+  await expect(heading).toBeVisible();
+  await expect(heading).toContainText("22hs");
+  await expect(heading).toContainText("Categoría A + Categoría B");
+  // El día escrito, no la fecha ISO: "Jueves, 27 de agosto".
+  await expect(heading).toContainText(/\d{1,2} de [a-záéíóú]+/i);
+  await expect(heading).not.toContainText(fx.date);
+
+  // Y antes de cualquier sección.
+  const headingY = (await heading.boundingBox())!.y;
+  const firstSection = page.locator("[data-testid^='section-']").first();
+  expect(headingY).toBeLessThan((await firstSection.boundingBox())!.y);
+});
+
+test("el slot de arqueros lo dice", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  const { data } = await admin().from("training_sessions")
+    .select("date").eq("hour", 21).lte("date", new Date().toISOString().slice(0, 10))
+    .order("date", { ascending: false }).limit(1);
+  test.skip(!data?.length, "la agenda no tiene un entrenamiento de 21hs");
+
+  await page.goto(`/training-sessions-beta/${data![0].date}-21`);
+  await expect(page.getByTestId("session-heading")).toContainText("arqueros");
+});
