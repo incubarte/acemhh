@@ -237,6 +237,7 @@ export const GET = withPermission('api', '/api/training-sessions', 'GET', async 
         categories: p.categories as string[],
         player_type: p.player_type as string,
         scholarship: Number(p.scholarship) || 0,
+        invitee: Boolean(p.invitee),
       })),
       // The ledger needs the SESSION, not just its month: the payment presets
       // and "did this month's slot get bought" are per slot.

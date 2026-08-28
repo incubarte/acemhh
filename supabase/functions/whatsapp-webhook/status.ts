@@ -13,6 +13,7 @@ import {
     type MonthInput,
     type MonthPayment,
     periodMonths,
+    type PlayerBilling,
     priceFor,
     ratesFor,
     type SlotDay,
@@ -76,7 +77,11 @@ export type Price = LedgerPrice;
 export async function fetchPrices(supabase: SupabaseClient): Promise<Price[]> {
     const { data, error } = await supabase
         .from("prices")
-        .select("valid_from,session_price,prepaid_session_price,goalkeeper_session_price")
+        // One literal: split across a concatenation, supabase-js cannot infer
+        // the row type and every field comes back as unknown.
+        .select(
+            "valid_from,session_price,prepaid_session_price,goalkeeper_session_price,goalkeeper_invitee_session_price",
+        )
         .order("valid_from");
     if (error) throw new Error("prices: " + error.message);
     return (data ?? []).map((p) => ({
@@ -84,6 +89,7 @@ export async function fetchPrices(supabase: SupabaseClient): Promise<Price[]> {
         session_price: Number(p.session_price),
         prepaid_session_price: Number(p.prepaid_session_price),
         goalkeeper_session_price: Number(p.goalkeeper_session_price),
+        goalkeeper_invitee_session_price: Number(p.goalkeeper_invitee_session_price),
     }));
 }
 
@@ -145,7 +151,7 @@ export async function fetchMonthStatuses(
     months: string[],
     prices: LedgerPrice[],
     slots: TrainingSlotRow[],
-    player: { goalkeeper: boolean; categories: string[]; scholarship: number },
+    player: PlayerBilling,
 ): Promise<MonthStatus[]> {
     const [payments, attendances] = await Promise.all([
         supabase.from("payments")
@@ -201,8 +207,7 @@ export async function fetchMonthStatuses(
             month,
             attended: billableAttendances(rows, player).length,
             totalPaid: monthPayments.reduce((sum, p) => sum + Number(p.amount), 0),
-            sessionPrice: ratesFor(priceFor(prices, month), player.goalkeeper, player.scholarship)
-                .individual,
+            sessionPrice: ratesFor(priceFor(prices, month), player).individual,
             input: {
                 attendances: billableAttendances(rows, player),
                 payments: monthPayments
@@ -237,7 +242,7 @@ export type LedgerMonth = MonthStatus & {
 export function computeLedger(
     statuses: MonthStatus[],
     prices: LedgerPrice[],
-    player: { goalkeeper: boolean; scholarship: number },
+    player: PlayerBilling,
 ): LedgerMonth[] {
     let state: LedgerState = EMPTY_STATE;
 
@@ -246,8 +251,7 @@ export function computeLedger(
             state,
             s.input,
             priceFor(prices, s.month),
-            player.goalkeeper,
-            player.scholarship,
+            player,
         );
         const row = {
             ...s,

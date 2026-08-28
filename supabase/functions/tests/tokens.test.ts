@@ -14,8 +14,20 @@ import {
 const PRICE: Rates = {
     session_price: 30000,
     prepaid_session_price: 25000,
-    goalkeeper_session_price: 25000,
+    goalkeeper_session_price: 20000,
+    goalkeeper_invitee_session_price: 25000,
 };
+
+/** A club player unless told otherwise. */
+function who(opts: Partial<PlayerBilling> = {}): PlayerBilling {
+    return {
+        goalkeeper: false,
+        invitee: false,
+        scholarship: 0,
+        categories: ["cat-b"],
+        ...opts,
+    };
+}
 
 const S22 = slotKey(4, 22);
 const S23 = slotKey(4, 23);
@@ -51,8 +63,8 @@ function month(
     return { attendances, payments, sessionsPerSlot };
 }
 
-function run(state: LedgerState, input: MonthInput, goalkeeper = false, scholarship = 0) {
-    return ledgerMonth(state, input, PRICE, goalkeeper, scholarship);
+function run(state: LedgerState, input: MonthInput, player: Partial<PlayerBilling> = {}) {
+    return ledgerMonth(state, input, PRICE, who(player));
 }
 
 // ////////////////////////////////////
@@ -60,13 +72,25 @@ function run(state: LedgerState, input: MonthInput, goalkeeper = false, scholars
 // ////////////////////////////////////
 
 Deno.test("el arquero paga la misma tarifa suelta que por mes", () => {
-    assertEquals(ratesFor(PRICE, true, 0), { individual: 25000, promo: 25000 });
-    assertEquals(ratesFor(PRICE, false, 0), { individual: 30000, promo: 25000 });
+    assertEquals(ratesFor(PRICE, who({ goalkeeper: true })), { individual: 20000, promo: 20000 });
+    assertEquals(ratesFor(PRICE, who()), { individual: 30000, promo: 25000 });
+});
+
+Deno.test("el arquero invitado paga más que el del club", () => {
+    assertEquals(
+        ratesFor(PRICE, who({ goalkeeper: true, invitee: true })),
+        { individual: 25000, promo: 25000 },
+    );
+    // Y para un jugador de campo, ser invitado no cambia nada.
+    assertEquals(ratesFor(PRICE, who({ invitee: true })), { individual: 30000, promo: 25000 });
 });
 
 Deno.test("la beca descuenta las dos tarifas", () => {
-    assertEquals(ratesFor(PRICE, false, 50), { individual: 15000, promo: 12500 });
-    assertEquals(ratesFor(PRICE, true, 100), { individual: 0, promo: 0 });
+    assertEquals(ratesFor(PRICE, who({ scholarship: 50 })), { individual: 15000, promo: 12500 });
+    assertEquals(
+        ratesFor(PRICE, who({ goalkeeper: true, scholarship: 100 })),
+        { individual: 0, promo: 0 },
+    );
 });
 
 // ////////////////////////////////////
@@ -249,12 +273,20 @@ Deno.test("la deuda de meses cerrados se acumula", () => {
 
 Deno.test("el mes de un arquero es su tarifa por las sesiones de su slot", () => {
     // 4 sesiones a 25k: sin descuento, porque no hay descuento que dar.
-    const r = run(EMPTY_STATE, month({ held: 4, attended: 4, monthly: 100000 }), true);
+    const r = run(EMPTY_STATE, month({ held: 4, attended: 4, monthly: 100000 }), { goalkeeper: true });
     assertEquals(r.pending, 0);
 });
 
-Deno.test("al arquero una asistencia sin token le cuesta 25k, no 30k", () => {
-    const r = run(EMPTY_STATE, month({ held: 4, attended: 1 }), true);
+Deno.test("al arquero del club una asistencia sin token le cuesta 20k, no 30k", () => {
+    const r = run(EMPTY_STATE, month({ held: 4, attended: 1 }), { goalkeeper: true });
+    assertEquals(r.pending, 20000);
+});
+
+Deno.test("al arquero invitado, la misma asistencia le cuesta 25k", () => {
+    const r = run(EMPTY_STATE, month({ held: 4, attended: 1 }), {
+        goalkeeper: true,
+        invitee: true,
+    });
     assertEquals(r.pending, 25000);
 });
 
@@ -273,59 +305,44 @@ const A22 = att(22, ["cat-a", "cat-b"]);
 const A23 = att(23, ["cat-c"]);
 
 Deno.test("al arquero sólo se le cobra el slot de arqueros", () => {
-    const billable = billableAttendances([A21, A22, A23], {
-        goalkeeper: true,
-        categories: ["youth"],
-    });
+    const billable = billableAttendances([A21, A22, A23], who({ goalkeeper: true, categories: ["youth"] }));
     assertEquals(billable, [{ slot: slotKey(4, 21) }]);
 });
 
 Deno.test("el youth tiene una sesión adicional bonificada el mismo día", () => {
     // Va a las 21 (la suya), 22 y 23: una de las otras dos es gratis.
-    const billable = billableAttendances([A21, A22, A23], {
-        goalkeeper: false,
-        categories: ["youth"],
-    });
+    const billable = billableAttendances([A21, A22, A23], who({ goalkeeper: false, categories: ["youth"] }));
     assertEquals(billable.length, 2);
     assertEquals(billable.some((b) => b.slot === slotKey(4, 21)), true);
 });
 
 Deno.test("el youth que no va a la suya no bonifica nada", () => {
-    const billable = billableAttendances([A22, A23], {
-        goalkeeper: false,
-        categories: ["youth"],
-    });
+    const billable = billableAttendances([A22, A23], who({ goalkeeper: false, categories: ["youth"] }));
     assertEquals(billable.length, 2);
 });
 
 Deno.test("la bonificación de youth es por día, no por mes", () => {
     const otherDay = { ...A22, date: "2026-08-27" };
     const ownOtherDay = { ...A21, date: "2026-08-27" };
-    const billable = billableAttendances([A21, A22, ownOtherDay, otherDay], {
-        goalkeeper: false,
-        categories: ["youth"],
-    });
+    const billable = billableAttendances([A21, A22, ownOtherDay, otherDay], who({ goalkeeper: false, categories: ["youth"] }));
     // Dos días, una bonificada en cada uno: quedan las dos propias.
     assertEquals(billable.length, 2);
 });
 
 Deno.test("un jugador común paga todas las sesiones que asiste, incluso el mismo día", () => {
-    const billable = billableAttendances([A21, A22, A23], {
-        goalkeeper: false,
-        categories: ["cat-b"],
-    });
+    const billable = billableAttendances([A21, A22, A23], who({ goalkeeper: false, categories: ["cat-b"] }));
     assertEquals(billable.length, 3);
 });
 
 Deno.test("las categorías no deciden qué se cobra: el que se cuelga en otro horario paga", () => {
-    const billable = billableAttendances([A23], { goalkeeper: false, categories: ["cat-b"] });
+    const billable = billableAttendances([A23], who());
     assertEquals(billable, [{ slot: slotKey(4, 23) }]);
 });
 
 Deno.test("la bonificación discrecional del admin gana sobre todo", () => {
     const billable = billableAttendances(
         [{ ...A22, bonified: true }, A23],
-        { goalkeeper: false, categories: ["cat-b"] },
+        who(),
     );
     assertEquals(billable, [{ slot: slotKey(4, 23) }]);
 });
@@ -338,6 +355,7 @@ import {
     checkPayment,
     type PaymentConcept,
     type PaymentGuard,
+    type PlayerBilling,
     weekStart,
     withinWriteWindow,
 } from "../_shared/tokens.ts";
@@ -503,10 +521,7 @@ Deno.test("el bonus de youth libera la sesión EXTRA, no la de youth", () => {
     // a su slot — y le aparecía deuda con el mes pagado.
     const youth = att(21, ["youth"], true);
     const catC = att(23, ["cat-c"]);
-    const billable = billableAttendances([catC, youth], {
-        goalkeeper: false,
-        categories: ["youth", "cat-c"],
-    });
+    const billable = billableAttendances([catC, youth], who({ goalkeeper: false, categories: ["youth", "cat-c"] }));
     assertEquals(billable, [{ slot: slotKey(4, 21) }]);
 });
 
@@ -518,14 +533,13 @@ Deno.test("con el mes de las 21hs pago, el youth que dobla no debe nada", () => 
         {
             attendances: billableAttendances(
                 [att(21, ["youth"], true), att(23, ["cat-c"])],
-                { goalkeeper: false, categories: ["youth", "cat-c"] },
+                who({ categories: ["youth", "cat-c"] }),
             ),
             payments: [{ concept: "monthly", amount: 100000, slot: S21 }],
             sessionsPerSlot: new Map([[S21, 4], [S23, 4]]),
         },
         PRICE,
-        false,
-        0,
+        who({ categories: ["youth", "cat-c"] }),
     );
     assertEquals(r.pending, 0);
 });
@@ -535,7 +549,7 @@ Deno.test("el mes pago de las 21hs bonifica aunque ese día no haya ido a las 21
     // va sólo a las 23hs no paga esa sesión aparte.
     const soloOtro = billableAttendances(
         [att(23, ["cat-c"])],
-        { goalkeeper: false, categories: ["youth", "cat-c"] },
+        who({ categories: ["youth", "cat-c"] }),
         true, // el mes de las 21hs está pago
     );
     assertEquals(soloOtro, []);
@@ -543,7 +557,7 @@ Deno.test("el mes pago de las 21hs bonifica aunque ese día no haya ido a las 21
     // Sin el mes pago y sin haber ido a la de youth, esa sesión se cobra.
     const sinNada = billableAttendances(
         [att(23, ["cat-c"])],
-        { goalkeeper: false, categories: ["youth", "cat-c"] },
+        who({ categories: ["youth", "cat-c"] }),
         false,
     );
     assertEquals(sinNada.length, 1);
@@ -554,7 +568,7 @@ Deno.test("yendo a las 21 sin pagar nada, la deuda es sólo por las 21", () => {
     // ni sesión paga. Debe UNA sesión, no dos.
     const billable = billableAttendances(
         [att(21, ["youth"], true), att(23, ["cat-c"])],
-        { goalkeeper: false, categories: ["youth", "cat-c"] },
+        who({ categories: ["youth", "cat-c"] }),
         false,
     );
     assertEquals(billable, [{ slot: slotKey(4, 21) }]);
@@ -563,8 +577,7 @@ Deno.test("yendo a las 21 sin pagar nada, la deuda es sólo por las 21", () => {
         EMPTY_STATE,
         { attendances: billable, payments: [], sessionsPerSlot: new Map([[slotKey(4, 21), 4]]) },
         PRICE,
-        false,
-        0,
+        who({ categories: ["youth", "cat-c"] }),
     );
     assertEquals(r.pending, 30000);
 });

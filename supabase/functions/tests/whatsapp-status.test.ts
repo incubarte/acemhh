@@ -77,8 +77,8 @@ Deno.test("monthsWindow: julio cierra el primer período y agosto abre el segund
 
 Deno.test("priceFor picks the newest tariff at or before the month", () => {
     const prices = [
-        { valid_from: "2026-01-01", session_price: 25000, prepaid_session_price: 20000, goalkeeper_session_price: 20000 },
-        { valid_from: "2026-09-01", session_price: 30000, prepaid_session_price: 25000, goalkeeper_session_price: 25000 },
+        { valid_from: "2026-01-01", session_price: 25000, prepaid_session_price: 20000, goalkeeper_session_price: 20000, goalkeeper_invitee_session_price: 20000 },
+        { valid_from: "2026-09-01", session_price: 30000, prepaid_session_price: 25000, goalkeeper_session_price: 25000, goalkeeper_invitee_session_price: 25000 },
     ];
     assertEquals(priceFor(prices, "2026-08").session_price, 25000);
     assertEquals(priceFor(prices, "2026-09").session_price, 30000);
@@ -98,9 +98,15 @@ const PRICES = [{
     valid_from: "2026-01-01",
     session_price: 30000,
     prepaid_session_price: 25000,
-    goalkeeper_session_price: 25000,
+    goalkeeper_session_price: 20000,
+    goalkeeper_invitee_session_price: 25000,
 }];
-const PLAYER = { goalkeeper: false, scholarship: 0 };
+const PLAYER = {
+    goalkeeper: false,
+    invitee: false,
+    scholarship: 0,
+    categories: ["cat-b"],
+};
 const SLOT = slotKey(4, 22);
 
 /** A month of one slot: `trainings` sessions held, `attended` of them
@@ -327,7 +333,12 @@ Deno.test("fetchMonthStatuses aggregates payments and attendance per month", asy
         // reply builds them.
         const prices = await fetchPrices(admin);
         const slots = await fetchTrainingSlots(admin);
-        const billing = { goalkeeper: false, categories: ["cat-b"], scholarship: 0 };
+        const billing = {
+            goalkeeper: false,
+            invitee: false,
+            categories: ["cat-b"],
+            scholarship: 0,
+        };
         const statuses = await fetchMonthStatuses(
             admin,
             playerId,

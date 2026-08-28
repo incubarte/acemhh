@@ -44,7 +44,8 @@ el momento de la venta:
 | Mensual (promocional) | 25.000 |
 | Medio mes (promocional) | 25.000 |
 | Individual | 30.000 |
-| Cualquiera, para arqueros | 25.000 |
+| Cualquiera, para el arquero del club | 20.000 |
+| Cualquiera, para el arquero invitado | 25.000 |
 
 Un pago mensual para el slot S en el mes M compra `n(S, M)` tokens, donde
 `n(S, M)` es la cantidad de sesiones que tiene ese slot ese mes. Su precio
@@ -111,6 +112,9 @@ No toda asistencia consume un token.
 **Arqueros.** Sólo se les cobran las sesiones de slots con `goalies = true`. Un
 arquero que va a las 22hs o a las 23hs no paga esa sesión. No se marca nada:
 sale del flag del slot.
+
+El arquero **invitado** paga más que el del club, y esa es la única cosa que el
+flag `invitee` cambia — para un jugador de campo no cambia nada.
 
 **Youth.** Un jugador de la categoría youth que asiste a la sesión de su propia
 categoría un día dado tiene **una** asistencia adicional bonificada ese mismo

@@ -4,10 +4,10 @@
 // Production is read-only here, and the script refuses to write anywhere that
 // is not localhost. Local is wiped and replaced.
 //
-// Production still has the pre-split schema (training_slots carrying its own
-// categories), so the agenda is imported by deriving training_slot_features the
-// same way the migration does, and then verified: every session must resolve
-// back to exactly the features production had on it.
+// Production now carries the same shape as local, so the agenda is a straight
+// copy. What is still checked afterwards is that no session resolves to NULL
+// features — that would mean a slot with no configuration in force, which the
+// ledger refuses to price.
 //
 //   deno run --allow-net --allow-env --allow-read scripts/import-prod-2026.ts
 
@@ -86,20 +86,15 @@ async function insert(table: string, rows: Record<string, unknown>[]) {
     console.log(`  ${table}: ${rows.length}`);
 }
 
-/** ISO weekday (1 = Monday .. 7 = Sunday). */
-function isoWeekday(date: string): number {
-    const d = new Date(`${date}T12:00:00Z`).getUTCDay();
-    return d === 0 ? 7 : d;
-}
-
 console.log(`Leyendo producción (${prodUrl.replace(/https:\/\/([^.]{6}).*/, "https://$1….")})`);
 
-const [users, players, prices, slots, attendances, payments, expenses, handoffs] =
+const [users, players, prices, features, sessions, attendances, payments, expenses, handoffs] =
     await Promise.all([
         readAll(prod, "users"),
         readAll(prod, "players"),
         readAll(prod, "prices"),
-        readAll(prod, "training_slots", (q) =>
+        readAll(prod, "training_slot_features"),
+        readAll(prod, "training_sessions", (q) =>
             // deno-lint-ignore no-explicit-any
             (q as any).gte("date", `${YEAR}-01-01`).lte("date", `${YEAR}-12-31`)),
         readAll(prod, "attendances", (q) =>
@@ -112,25 +107,6 @@ const [users, players, prices, slots, attendances, payments, expenses, handoffs]
         readAll(prod, "cash_handoffs"),
     ]);
 
-// --- The agenda: sessions say when, features say what.
-const sessions = slots.map((s) => ({ id: s.id, date: s.date, hour: s.hour }));
-
-const eras = new Map<string, Record<string, unknown>>();
-for (const s of slots) {
-    const key = `${isoWeekday(String(s.date))}|${s.hour}|${JSON.stringify(s.categories)}|${s.goalies}`;
-    const existing = eras.get(key);
-    if (!existing || String(s.date) < String(existing.valid_from)) {
-        eras.set(key, {
-            weekday: isoWeekday(String(s.date)),
-            hour: s.hour,
-            valid_from: s.date,
-            categories: s.categories,
-            goalies: s.goalies,
-        });
-    }
-}
-const features = [...eras.values()];
-
 console.log("Escribiendo local");
 // Children first: every one of these points at users or players.
 for (const t of [
@@ -141,14 +117,25 @@ for (const t of [
 
 await insert("users", users);
 await insert("players", players);
-// Local's schema runs ahead of production: the goalkeeper rate does not exist
-// there yet. Today it equals the prepaid rate, which is the honest default for
-// rows that predate the column — they are kept apart precisely so changing one
-// does not move the other from here on.
-await insert("prices", prices.map((p) => ({
-    ...p,
-    goalkeeper_session_price: p.goalkeeper_session_price ?? p.prepaid_session_price,
-})));
+// Local's schema can run ahead of production, and then the imported row would
+// silently undo a migration — which is exactly what happened with the
+// goalkeeper price. Where a column does not exist there yet, the import
+// replays what the migration did to it.
+const CLUB_GOALKEEPER_PRICE = 20000; // 20260828100000_goalkeeper_invitee_price
+await insert("prices", prices.map((p) => {
+    // Before the split there was one goalkeeper price and it held the GUEST
+    // one; the club's is the value the migration introduced.
+    const hasSplit = p.goalkeeper_invitee_session_price !== undefined;
+    return {
+        ...p,
+        goalkeeper_session_price: hasSplit
+            ? p.goalkeeper_session_price
+            : CLUB_GOALKEEPER_PRICE,
+        goalkeeper_invitee_session_price: hasSplit
+            ? p.goalkeeper_invitee_session_price
+            : (p.goalkeeper_session_price ?? p.prepaid_session_price),
+    };
+}));
 await insert("training_slot_features", features);
 await insert("training_sessions", sessions);
 // attendances.id is a sequence, and nothing references it — the real key is
@@ -156,50 +143,28 @@ await insert("training_sessions", sessions);
 // assign fresh ones, instead of leaving it behind production's numbering and
 // colliding on the very next insert.
 await insert("attendances", attendances.map(({ id: _id, ...rest }) => rest));
-// Production still stores the slot as a locale-formatted string; local wants
-// the pair that identifies it. Membership dues belong to no slot.
-const WEEKDAY_ES: Record<string, number> = {
-    lun: 1, mar: 2, "mié": 3, mie: 3, jue: 4, vie: 5, "sáb": 6, sab: 6, dom: 7,
-};
-await insert("payments", payments.map(({ slot, ...rest }) => {
-    if (!slot) return { ...rest, slot_weekday: null, slot_hour: null };
-    const [day, hour] = String(slot).split(" ");
-    const weekday = WEEKDAY_ES[day.toLowerCase()];
-    const h = Number(String(hour).replace(/\D/g, ""));
-    if (!weekday || !Number.isFinite(h)) {
-        throw new Error(`No pude interpretar el slot "${slot}" del pago ${rest.id}`);
-    }
-    return { ...rest, slot_weekday: weekday, slot_hour: h };
-}));
+await insert("payments", payments);
 await insert("expenses", expenses);
 await insert("cash_handoffs", handoffs);
 
-// --- Verify the split did not change a single session's features.
+// --- A session whose slot has no features in force cannot be priced: the
+// ledger refuses it rather than guessing, so it must not exist.
 const resolved = await readAll(local, "training_sessions_resolved");
-const byKey = new Map(
-    resolved.map((r) => [`${r.date}|${r.hour}`, r]),
-);
-let mismatches = 0;
-for (const s of slots) {
-    const got = byKey.get(`${s.date}|${s.hour}`);
-    const same = got &&
-        JSON.stringify(got.categories) === JSON.stringify(s.categories) &&
-        got.goalies === s.goalies;
-    if (!same) {
-        mismatches++;
-        if (mismatches <= 5) {
-            console.error(`  ✗ ${s.date} ${s.hour}hs: prod ${JSON.stringify(s.categories)}/${s.goalies}, local ${JSON.stringify(got?.categories)}/${got?.goalies}`);
-        }
-    }
+const orphans = resolved.filter((r) => r.categories === null);
+for (const o of orphans.slice(0, 5)) {
+    console.error(`  ✗ ${o.date} ${o.hour}hs sin configuración de slot`);
 }
 
 console.log(`\n${features.length} configuraciones de slot para ${sessions.length} sesiones`);
-for (const f of features.sort((a, b) => `${a.hour}${a.valid_from}`.localeCompare(`${b.hour}${b.valid_from}`))) {
+for (
+    const f of (features as { hour: number; valid_from: string; categories: string[]; goalies: boolean }[])
+        .sort((a, b) => `${a.hour}${a.valid_from}`.localeCompare(`${b.hour}${b.valid_from}`))
+) {
     console.log(`  ${f.hour}hs desde ${f.valid_from}: ${JSON.stringify(f.categories)} goalies=${f.goalies}`);
 }
 
-if (mismatches > 0) {
-    console.error(`\n✗ ${mismatches} sesiones resuelven distinto de lo que tenía producción`);
+if (orphans.length > 0) {
+    console.error(`\n✗ ${orphans.length} sesiones sin configuración de slot`);
     Deno.exit(1);
 }
-console.log(`\n✓ las ${slots.length} sesiones resuelven exactamente lo que tenía producción`);
+console.log(`\n✓ las ${resolved.length} sesiones resuelven su configuración`);

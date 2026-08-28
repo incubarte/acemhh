@@ -16,9 +16,11 @@ export type Rates = {
   session_price: number;
   /** A session bought as part of a month, paid upfront. */
   prepaid_session_price: number;
-  /** Goalkeepers pay this either way — their month is just this times the
-   * sessions of their slot, with no discount to give. */
+  /** The club's own goalkeepers pay this either way — their month is just
+   * this times the sessions of their slot, with no discount to give. */
   goalkeeper_session_price: number;
+  /** A guest goalkeeper pays more. */
+  goalkeeper_invitee_session_price: number;
 };
 
 export type LedgerPrice = Rates & { valid_from: string };
@@ -147,21 +149,26 @@ export type MonthResult = {
   carryoverOut: number;
 };
 
-/** The rates a player actually pays. Goalkeepers have one price that serves as
+/** The rates a player actually pays. A goalkeeper has one price that serves as
  * both, so the promotional month gives them no discount — just the convenience
- * of paying once. */
-export function ratesFor(price: Rates, goalkeeper: boolean, scholarship: number): {
+ * of paying once — and a guest goalkeeper's is higher than a member's. */
+export function ratesFor(price: Rates, player: PlayerBilling): {
   individual: number;
   promo: number;
 } {
-  const k = (100 - scholarship) / 100;
-  const gk = Math.round(price.goalkeeper_session_price * k);
-  return goalkeeper
-    ? { individual: gk, promo: gk }
-    : {
-      individual: Math.round(price.session_price * k),
-      promo: Math.round(price.prepaid_session_price * k),
-    };
+  const k = (100 - player.scholarship) / 100;
+  if (player.goalkeeper) {
+    const gk = Math.round(
+      (player.invitee
+        ? price.goalkeeper_invitee_session_price
+        : price.goalkeeper_session_price) * k,
+    );
+    return { individual: gk, promo: gk };
+  }
+  return {
+    individual: Math.round(price.session_price * k),
+    promo: Math.round(price.prepaid_session_price * k),
+  };
 }
 
 /**
@@ -177,10 +184,9 @@ export function ledgerMonth(
   state: LedgerState,
   input: MonthInput,
   price: Rates,
-  goalkeeper: boolean,
-  scholarship: number,
+  player: PlayerBilling,
 ): MonthResult {
-  const { individual, promo } = ratesFor(price, goalkeeper, scholarship);
+  const { individual, promo } = ratesFor(price, player);
 
   // --- What each slot's monthly payments bought.
   //
@@ -347,8 +353,12 @@ export type AttendanceRow = {
   bonified: boolean;
 };
 
+/** Everything about a player that changes what they are charged. */
 export type PlayerBilling = {
   goalkeeper: boolean;
+  /** A guest, not a member of the club. Only changes a goalkeeper's rate. */
+  invitee: boolean;
+  scholarship: number;
   categories: string[];
 };
 

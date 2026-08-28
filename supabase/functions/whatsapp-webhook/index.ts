@@ -382,6 +382,7 @@ async function handleIncoming(incoming: Incoming) {
             // what they paid at which slot.
             const billing = {
                 goalkeeper: player.goalkeeper,
+                invitee: player.invitee,
                 categories: player.categories,
                 scholarship: player.scholarship,
             };

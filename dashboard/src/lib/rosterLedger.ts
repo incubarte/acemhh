@@ -81,6 +81,8 @@ type RosterPlayer = {
   categories?: string[] | null;
   player_type?: string | null;
   scholarship?: number | null;
+  /** A guest, not a member. Only changes a goalkeeper's rate. */
+  invitee?: boolean | null;
   /** Whether they are currently marked present at the session being viewed. */
   attendedThisSession?: boolean;
 };
@@ -133,7 +135,11 @@ export async function ledgerExtrasFor(
 
   const [pricesRes, sessionsRes, payRes, attRes] = await Promise.all([
     s.from("prices")
-      .select("valid_from,session_price,prepaid_session_price,goalkeeper_session_price")
+      // One literal: split across a concatenation, supabase-js cannot infer
+      // the row type and every field comes back as unknown.
+      .select(
+        "valid_from,session_price,prepaid_session_price,goalkeeper_session_price,goalkeeper_invitee_session_price",
+      )
       .order("valid_from"),
     s.from("training_sessions_resolved")
       .select("date,hour,categories,goalies")
@@ -166,6 +172,7 @@ export async function ledgerExtrasFor(
     session_price: Number(p.session_price),
     prepaid_session_price: Number(p.prepaid_session_price),
     goalkeeper_session_price: Number(p.goalkeeper_session_price),
+    goalkeeper_invitee_session_price: Number(p.goalkeeper_invitee_session_price),
   }));
 
   // The agenda, indexed two ways: what each session was, and how many sessions
@@ -248,10 +255,10 @@ export async function ledgerExtrasFor(
   const history = monthsUpTo(monthBefore(selectedMonth));
 
   for (const player of players) {
-    const scholarship = Number(player.scholarship) || 0;
-    const goalkeeper = player.player_type === "goalkeeper";
     const billing = {
-      goalkeeper,
+      goalkeeper: player.player_type === "goalkeeper",
+      invitee: Boolean(player.invitee),
+      scholarship: Number(player.scholarship) || 0,
       categories: (player.categories ?? []) as string[],
     };
     const attMonths = attByPlayer.get(player.id) ?? new Map<string, AttendanceRow[]>();
@@ -281,8 +288,7 @@ export async function ledgerExtrasFor(
         state,
         inputFor(month, attMonths.get(month) ?? []),
         priceFor(prices, month),
-        goalkeeper,
-        scholarship,
+        billing,
       );
       const added = r.next.debt - before;
       if (added > 0) {
@@ -293,10 +299,10 @@ export async function ledgerExtrasFor(
     }
 
     const price = priceFor(prices, selectedMonth);
-    const rates = ratesFor(price, goalkeeper, scholarship);
+    const rates = ratesFor(price, billing);
     const nowAttendances = attMonths.get(selectedMonth) ?? [];
     const now = ledgerMonth(
-      state, inputFor(selectedMonth, nowAttendances), price, goalkeeper, scholarship,
+      state, inputFor(selectedMonth, nowAttendances), price, billing,
     );
 
     // The same month with this session's attendance forced on and off.
@@ -311,8 +317,7 @@ export async function ledgerExtrasFor(
       bonified: false,
     };
     const owesWith = (attendances: AttendanceRow[]) =>
-      ledgerMonth(state, inputFor(selectedMonth, attendances), price, goalkeeper, scholarship)
-        .pending > 0;
+      ledgerMonth(state, inputFor(selectedMonth, attendances), price, billing).pending > 0;
 
     const prevMonth = monthBefore(selectedMonth);
     const prevBillable = billableAttendances(
