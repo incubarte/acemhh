@@ -116,6 +116,29 @@ test("solo la cuota anual completa cuenta como al día", async ({ page }) => {
   await expect(dotOf("Completo")).toHaveCount(0);
 });
 
+test("la credencial muestra la fecha de nacimiento, cuando la hay", async ({ page }) => {
+  const s = admin();
+  // Uno con fecha y otro sin ella: el bloque aparece o no aparece, no muestra
+  // un hueco.
+  const { data } = await s.from("players").select("id,name").eq("last_name", LAST);
+  const ids = new Map((data ?? []).map((p) => [p.name, p.id]));
+  await s.from("players").update({ fecha_nac: "1990-07-05" }).eq("id", ids.get("Parcial")!);
+  await s.from("players").update({ fecha_nac: null }).eq("id", ids.get("Nada")!);
+
+  await page.goto("/credencial");
+  await page.getByPlaceholder("Nombre o apellido").fill("Parcial");
+  await page.getByRole("button", { name: `${LAST}, Parcial` }).click();
+  await expect(page.getByText("NACIMIENTO")).toBeVisible();
+  // Formato de acá, no ISO — y sin correrse un día por zona horaria.
+  await expect(page.getByText("05/07/1990")).toBeVisible();
+
+  await page.goto("/credencial");
+  await page.getByPlaceholder("Nombre o apellido").fill("Nada");
+  await page.getByRole("button", { name: `${LAST}, Nada` }).click();
+  await expect(page.getByText("DNI")).toBeVisible();
+  await expect(page.getByText("NACIMIENTO")).toHaveCount(0);
+});
+
 test("la credencial del pagador parcial muestra sus cuotas y el saldo faltante", async ({ page }) => {
   await page.goto("/credencial");
   await page.getByPlaceholder("Nombre o apellido").fill("Parcial");

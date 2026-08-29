@@ -16,6 +16,7 @@ type CredentialData = {
     name: string;
     last_name: string;
     dni: string | null;
+    fecha_nac: string | null;
     categories: string[];
     invitee: boolean;
   };
@@ -32,6 +33,17 @@ function formatArs(amount: number) {
     parts.unshift(s.substring(Math.max(0, i - 3), i));
   }
   return parts.join(".");
+}
+
+/** dd/mm/aaaa. Parsed at midday: a bare YYYY-MM-DD is UTC midnight, which in
+ * Buenos Aires is the day before. */
+function formatBirthDate(date: string): string {
+  const d = new Date(`${date.slice(0, 10)}T12:00:00`);
+  return d.toLocaleDateString("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -294,6 +306,16 @@ function CredencialContent() {
                     </div>
                     <div style={{ fontSize: "0.85rem", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
                       {player.dni}
+                    </div>
+                  </div>
+                )}
+                {player.fecha_nac && (
+                  <div>
+                    <div style={{ fontSize: "0.55rem", opacity: 0.45, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 2 }}>
+                      Nacimiento
+                    </div>
+                    <div style={{ fontSize: "0.85rem", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+                      {formatBirthDate(player.fecha_nac)}
                     </div>
                   </div>
                 )}
