@@ -80,7 +80,7 @@ export async function fetchPrices(supabase: SupabaseClient): Promise<Price[]> {
         // One literal: split across a concatenation, supabase-js cannot infer
         // the row type and every field comes back as unknown.
         .select(
-            "valid_from,session_price,prepaid_session_price,goalkeeper_session_price,goalkeeper_invitee_session_price",
+            "valid_from,session_price,prepaid_session_price,goalkeeper_session_price,goalkeeper_invitee_session_price,sibling_session_discount",
         )
         .order("valid_from");
     if (error) throw new Error("prices: " + error.message);
@@ -90,6 +90,7 @@ export async function fetchPrices(supabase: SupabaseClient): Promise<Price[]> {
         prepaid_session_price: Number(p.prepaid_session_price),
         goalkeeper_session_price: Number(p.goalkeeper_session_price),
         goalkeeper_invitee_session_price: Number(p.goalkeeper_invitee_session_price),
+        sibling_session_discount: Number(p.sibling_session_discount) || 0,
     }));
 }
 

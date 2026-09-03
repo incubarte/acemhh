@@ -39,17 +39,36 @@ sesiones específicas: compran tokens.
 **El precio del token depende de cómo el admin lo venda**, y queda congelado en
 el momento de la venta:
 
-| Concepto | Precio por token |
+| Concepto | Precio por token (desde sept. 2026) |
 |---|---|
-| Mensual (promocional) | 25.000 |
-| Medio mes (promocional) | 25.000 |
-| Individual | 30.000 |
+| Mensual (promocional) | 27.500 |
+| Medio mes (promocional) | 27.500 |
+| Individual | 35.000 |
 | Cualquiera, para el arquero del club | 20.000 |
 | Cualquiera, para el arquero invitado | 25.000 |
 
+Los números viven en la tabla `prices`, una fila por cambio de tarifa; el resto
+del documento usa la tarifa anterior (25.000 / 30.000) en los ejemplos.
+
 Un pago mensual para el slot S en el mes M compra `n(S, M)` tokens, donde
 `n(S, M)` es la cantidad de sesiones que tiene ese slot ese mes. Su precio
-sugerido es `n(S, M) × 25.000`.
+sugerido es `n(S, M) × 27.500`.
+
+### Hermanos
+
+El segundo hermano de una familia paga la sesión **promocional** 5.000 más
+barata, el tercero 10.000, el cuarto 15.000 (`prices.sibling_session_discount`
+por cada hermano anterior; `players.sibling_rank` dice cuál es). Es un monto
+fijo y no un porcentaje porque es lo que deja redondo el mes de 4 sesiones con
+cualquier tarifa: 90.000, 70.000 y 50.000 hoy; 80.000, 60.000 y 40.000 con la
+tarifa anterior.
+
+No toca la individual, que vale lo mismo para todos, ni al arquero, que no
+tiene tarifa promocional. Un mes de 5 sesiones descuenta 5 veces, porque el
+descuento es por sesión, como todo lo demás.
+
+`scholarship` es otra cosa: la beca, un porcentaje sobre las dos tarifas. Al
+100% el jugador no paga nada.
 
 Los tokens **valen únicamente en el mes en que se compraron**. Lo que sobra
 puede pasar al mes siguiente vía [carryover](#carryover), no por ser tokens.

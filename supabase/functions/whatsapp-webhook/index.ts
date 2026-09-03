@@ -67,6 +67,8 @@ type PlayerLink = {
     goalkeeper: boolean;
     /** 0-100; at 100 the player pays nothing and only attendance is reported. */
     scholarship: number;
+    /** 1 = first or only sibling; 2, 3, 4 get the prepaid sibling discount. */
+    siblingRank: number;
     /** "self" when it is the player's own phone, "guardian" when it is their tutor's. */
     relation: "self" | "guardian";
 };
@@ -293,7 +295,7 @@ async function lookupPlayers(waId: string): Promise<PlayerLink[]> {
     // waId is all digits (Meta strips the +), so it is safe inside the filter.
     const { data, error } = await supabaseAdmin
         .from("players")
-        .select("id,name,last_name,categories,invitee,player_type,scholarship,phone,guardian_phone")
+        .select("id,name,last_name,categories,invitee,player_type,scholarship,sibling_rank,phone,guardian_phone")
         .or(`phone.eq.${waId},guardian_phone.eq.${waId}`);
 
     if (error) {
@@ -309,6 +311,7 @@ async function lookupPlayers(waId: string): Promise<PlayerLink[]> {
         invitee: p.invitee,
         goalkeeper: p.player_type === "goalkeeper",
         scholarship: p.scholarship ?? 0,
+        siblingRank: p.sibling_rank ?? 1,
         relation: p.phone === waId ? "self" as const : "guardian" as const,
     }));
 }
@@ -385,6 +388,7 @@ async function handleIncoming(incoming: Incoming) {
                 invitee: player.invitee,
                 categories: player.categories,
                 scholarship: player.scholarship,
+                siblingRank: player.siblingRank,
             };
             const statuses = await fetchMonthStatuses(
                 supabaseAdmin,

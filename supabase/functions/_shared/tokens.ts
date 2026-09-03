@@ -21,6 +21,10 @@ export type Rates = {
   goalkeeper_session_price: number;
   /** A guest goalkeeper pays more. */
   goalkeeper_invitee_session_price: number;
+  /** What each sibling after the first takes off a PREPAID session. A fixed
+   * amount, not a percentage: 4 x (27.500 - 5.000) is the round 90.000 the
+   * club wants to charge, and no whole percentage of 110.000 is. */
+  sibling_session_discount: number;
 };
 
 export type LedgerPrice = Rates & { valid_from: string };
@@ -151,7 +155,11 @@ export type MonthResult = {
 
 /** The rates a player actually pays. A goalkeeper has one price that serves as
  * both, so the promotional month gives them no discount — just the convenience
- * of paying once — and a guest goalkeeper's is higher than a member's. */
+ * of paying once — and a guest goalkeeper's is higher than a member's.
+ *
+ * The sibling discount only touches the prepaid rate: a second sibling pays
+ * the month cheaper, but a session bought on its own costs the same as
+ * anyone's. Goalkeepers have no prepaid rate, so it does not reach them. */
 export function ratesFor(price: Rates, player: PlayerBilling): {
   individual: number;
   promo: number;
@@ -165,9 +173,14 @@ export function ratesFor(price: Rates, player: PlayerBilling): {
     );
     return { individual: gk, promo: gk };
   }
+  const siblingsBefore = Math.max(0, (player.siblingRank ?? 1) - 1);
+  const prepaid = Math.max(
+    0,
+    price.prepaid_session_price - siblingsBefore * price.sibling_session_discount,
+  );
   return {
     individual: Math.round(price.session_price * k),
-    promo: Math.round(price.prepaid_session_price * k),
+    promo: Math.round(prepaid * k),
   };
 }
 
@@ -359,6 +372,9 @@ export type PlayerBilling = {
   /** A guest, not a member of the club. Only changes a goalkeeper's rate. */
   invitee: boolean;
   scholarship: number;
+  /** Which sibling of the family this is: 1 pays in full, 2 gets the sibling
+   * discount once, 3 twice, and so on. Absent means 1. */
+  siblingRank?: number;
   categories: string[];
 };
 

@@ -16,6 +16,7 @@ const PRICE: Rates = {
     prepaid_session_price: 25000,
     goalkeeper_session_price: 20000,
     goalkeeper_invitee_session_price: 25000,
+    sibling_session_discount: 5000,
 };
 
 /** A club player unless told otherwise. */
@@ -91,6 +92,30 @@ Deno.test("la beca descuenta las dos tarifas", () => {
         ratesFor(PRICE, who({ goalkeeper: true, scholarship: 100 })),
         { individual: 0, promo: 0 },
     );
+});
+
+Deno.test("el descuento por hermanos es un monto fijo por sesión prepaga", () => {
+    // Segundo, tercero y cuarto hermano: 5.000 menos por cada uno anterior.
+    // Es lo que hace redondos los meses de 4 sesiones con cualquier tarifa.
+    assertEquals(ratesFor(PRICE, who({ siblingRank: 2 })), { individual: 30000, promo: 20000 });
+    assertEquals(ratesFor(PRICE, who({ siblingRank: 3 })), { individual: 30000, promo: 15000 });
+    assertEquals(ratesFor(PRICE, who({ siblingRank: 4 })), { individual: 30000, promo: 10000 });
+
+    const SEPT: Rates = { ...PRICE, session_price: 35000, prepaid_session_price: 27500 };
+    assertEquals(ratesFor(SEPT, who({ siblingRank: 2 })), { individual: 35000, promo: 22500 });
+    assertEquals(ratesFor(SEPT, who({ siblingRank: 3 })), { individual: 35000, promo: 17500 });
+    assertEquals(ratesFor(SEPT, who({ siblingRank: 4 })), { individual: 35000, promo: 12500 });
+});
+
+Deno.test("el descuento por hermanos no toca la individual, al arquero, ni al primero", () => {
+    assertEquals(ratesFor(PRICE, who({ siblingRank: 1 })), { individual: 30000, promo: 25000 });
+    assertEquals(ratesFor(PRICE, who()), { individual: 30000, promo: 25000 });
+    assertEquals(
+        ratesFor(PRICE, who({ goalkeeper: true, siblingRank: 3 })),
+        { individual: 20000, promo: 20000 },
+    );
+    // Nunca queda negativo por más hermanos que haya.
+    assertEquals(ratesFor(PRICE, who({ siblingRank: 9 })), { individual: 30000, promo: 0 });
 });
 
 // ////////////////////////////////////

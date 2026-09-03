@@ -81,6 +81,8 @@ type RosterPlayer = {
   categories?: string[] | null;
   player_type?: string | null;
   scholarship?: number | null;
+  /** 1 = first or only sibling; 2, 3, 4 get the prepaid sibling discount. */
+  sibling_rank?: number | null;
   /** A guest, not a member. Only changes a goalkeeper's rate. */
   invitee?: boolean | null;
   /** Whether they are currently marked present at the session being viewed. */
@@ -138,7 +140,7 @@ export async function ledgerExtrasFor(
       // One literal: split across a concatenation, supabase-js cannot infer
       // the row type and every field comes back as unknown.
       .select(
-        "valid_from,session_price,prepaid_session_price,goalkeeper_session_price,goalkeeper_invitee_session_price",
+        "valid_from,session_price,prepaid_session_price,goalkeeper_session_price,goalkeeper_invitee_session_price,sibling_session_discount",
       )
       .order("valid_from"),
     s.from("training_sessions_resolved")
@@ -173,6 +175,7 @@ export async function ledgerExtrasFor(
     prepaid_session_price: Number(p.prepaid_session_price),
     goalkeeper_session_price: Number(p.goalkeeper_session_price),
     goalkeeper_invitee_session_price: Number(p.goalkeeper_invitee_session_price),
+    sibling_session_discount: Number(p.sibling_session_discount) || 0,
   }));
 
   // The agenda, indexed two ways: what each session was, and how many sessions
@@ -259,6 +262,7 @@ export async function ledgerExtrasFor(
       goalkeeper: player.player_type === "goalkeeper",
       invitee: Boolean(player.invitee),
       scholarship: Number(player.scholarship) || 0,
+      siblingRank: Number(player.sibling_rank) || 1,
       categories: (player.categories ?? []) as string[],
     };
     const attMonths = attByPlayer.get(player.id) ?? new Map<string, AttendanceRow[]>();

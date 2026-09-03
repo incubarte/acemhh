@@ -75,7 +75,7 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
     // only existed in the UI.
     const { data: player, error: playerError } = await s
       .from("players")
-      .select("id,categories,player_type,scholarship,invitee")
+      .select("id,categories,player_type,scholarship,sibling_rank,invitee")
       .eq("id", body.player_id)
       .maybeSingle();
     if (playerError || !player) {

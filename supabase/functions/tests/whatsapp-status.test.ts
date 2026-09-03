@@ -77,8 +77,8 @@ Deno.test("monthsWindow: julio cierra el primer período y agosto abre el segund
 
 Deno.test("priceFor picks the newest tariff at or before the month", () => {
     const prices = [
-        { valid_from: "2026-01-01", session_price: 25000, prepaid_session_price: 20000, goalkeeper_session_price: 20000, goalkeeper_invitee_session_price: 20000 },
-        { valid_from: "2026-09-01", session_price: 30000, prepaid_session_price: 25000, goalkeeper_session_price: 25000, goalkeeper_invitee_session_price: 25000 },
+        { valid_from: "2026-01-01", session_price: 25000, prepaid_session_price: 20000, goalkeeper_session_price: 20000, goalkeeper_invitee_session_price: 20000, sibling_session_discount: 5000 },
+        { valid_from: "2026-09-01", session_price: 30000, prepaid_session_price: 25000, goalkeeper_session_price: 25000, goalkeeper_invitee_session_price: 25000, sibling_session_discount: 5000 },
     ];
     assertEquals(priceFor(prices, "2026-08").session_price, 25000);
     assertEquals(priceFor(prices, "2026-09").session_price, 30000);
@@ -100,6 +100,7 @@ const PRICES = [{
     prepaid_session_price: 25000,
     goalkeeper_session_price: 20000,
     goalkeeper_invitee_session_price: 25000,
+    sibling_session_discount: 5000,
 }];
 const PLAYER = {
     goalkeeper: false,
