@@ -173,6 +173,9 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
   // Ordered by priority: the first selected category is the player's main one.
   const [categories, setCategories] = useState<string[]>(defaultCategory ? [defaultCategory] : []);
   const [playerType, setPlayerType] = useState<"player" | "goalkeeper">(defaultPlayerType || "player");
+  // Which sibling of the family: the second, third and fourth pay the month
+  // cheaper. Members only; a guest pays no month.
+  const [siblingRank, setSiblingRank] = useState<1 | 2 | 3 | 4>(1);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [duplicates, setDuplicates] = useState<DuplicatePlayer[] | null>(null);
@@ -227,6 +230,7 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
         categories,
         invitee,
         player_type: playerType,
+        sibling_rank: invitee ? 1 : siblingRank,
         // Sent in E.164 with the leading +, so the API can tell a foreign number
         // from a local one instead of re-parsing it as Argentine.
         phone: phone || null,
@@ -372,6 +376,44 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
             ))}
           </div>
         </div>
+
+        {!invitee && playerType === "player" && (
+          <div>
+            <span style={{ fontSize: "0.85rem", opacity: 0.7 }}>
+              Hermanos en el club (el segundo, tercero y cuarto pagan el mes con descuento)
+            </span>
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              {([
+                { value: 1, label: "Único / 1º" },
+                { value: 2, label: "2º" },
+                { value: 3, label: "3º" },
+                { value: 4, label: "4º" },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setSiblingRank(opt.value)}
+                  style={{
+                    flex: 1,
+                    padding: "10px 0",
+                    borderRadius: 8,
+                    border: siblingRank === opt.value
+                      ? "2px solid var(--acemhh-green-3)"
+                      : "1px solid rgba(255,255,255,0.15)",
+                    background: siblingRank === opt.value
+                      ? "rgba(36, 179, 91, 0.15)"
+                      : "rgba(255,255,255,0.05)",
+                    cursor: "pointer",
+                    fontSize: "0.9rem",
+                    fontWeight: siblingRank === opt.value ? 600 : 400,
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {duplicates ? (

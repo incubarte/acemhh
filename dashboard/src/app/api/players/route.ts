@@ -80,6 +80,8 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
       categories: string[];
       invitee?: boolean;
       player_type: 'player' | 'goalkeeper';
+      /** 1 = first or only sibling; 2, 3, 4 get the prepaid sibling discount. */
+      sibling_rank?: number | null;
       phone?: string | null;
       guardian_phone?: string | null;
       emergency_contact_name?: string | null;
@@ -125,6 +127,12 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
 
     const emergencyName = (body.emergency_contact_name ?? "").trim() || null;
 
+    // A guest pays no month, so there is nothing for the discount to touch.
+    const siblingRank = body.invitee ? 1 : Number(body.sibling_rank) || 1;
+    if (!Number.isInteger(siblingRank) || siblingRank < 1 || siblingRank > 4) {
+      return new NextResponse("Orden de hermano inválido", { status: 400 });
+    }
+
     const s = supabaseAdmin();
 
     // Guard against the same person being registered twice under a slightly
@@ -162,6 +170,7 @@ export const POST = withPermission('api', '/api/players', 'POST', async (sess, r
           invitee: body.invitee || false,
           player_type: body.player_type,
           trains: !body.invitee,
+          sibling_rank: siblingRank,
           phone,
           guardian_phone: guardianPhone,
           emergency_contact_name: emergencyName,
