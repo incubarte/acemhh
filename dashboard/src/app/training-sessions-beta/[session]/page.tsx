@@ -9,6 +9,7 @@ import ExperienceToggle from "../../components/ExperienceToggle";
 import { usePageTitle } from "../../components/PageTitleContext";
 import type { PaymentConcept } from "@shared/tokens";
 import { categoryLabel } from "@/lib/categories";
+import DebtBreakdown from "../../components/DebtBreakdown";
 
 // Redesigned attendance & payments screen. Presence is expressed by the
 // section a player sits in, and toggled with a horizontal thumb-wheel on the
@@ -58,6 +59,7 @@ const MONTH_NAMES_ES = [
 function monthNameEs(month: string) {
   return MONTH_NAMES_ES[Number(month.slice(5)) - 1] ?? month;
 }
+
 
 function formatArs(amount: number) {
   if (amount >= 1000 && amount % 1000 === 0) return `${amount / 1000}k`;
@@ -163,6 +165,11 @@ function Section({
   );
 }
 
+/** Anything owed at all, closed months or this one: what opens the detail. */
+function owesAnything(p: RosterPlayer) {
+  return (p.debt_outstanding ?? 0) > 0 || p.owed_now > 0;
+}
+
 /** Attended sessions of this month left unpaid, or what last month left
  * unpaid. Older debt is not what this screen chases. */
 function isDebtor(p: RosterPlayer) {
@@ -238,7 +245,7 @@ const PlayerRow = React.memo(function PlayerRow({
   tone: SectionTone;
 }) {
   const p = player;
-  const hasDebt = (p.debt ?? 0) > 0;
+  const hasDebt = owesAnything(p);
   // Annual dues still owed. It no longer paints the row — the row's colour
   // belongs to its section — so it is a marker beside the name instead.
   const duesDot: string | null = p.invitee
@@ -1440,18 +1447,9 @@ function TrainingSessionBetaContent() {
                 {debtModalPlayer.last_name}, {debtModalPlayer.name}
               </p>
               <p style={{ marginTop: 8, fontSize: "1.2rem", fontWeight: 700, color: "#f87171" }}>
-                Debe ${formatArs(debtModalPlayer.debt)}
+                Debe ${formatArs(debtModalPlayer.debt_outstanding + debtModalPlayer.owed_now)}
               </p>
-              <div style={{ marginTop: 10, fontSize: "0.85rem", opacity: 0.85 }}>
-                {debtModalPlayer.debt_months.map((d) => (
-                  <div key={d.month} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
-                    <span>{monthNameEs(d.month)}</span>
-                    <span style={{ fontVariantNumeric: "tabular-nums" }}>
-                      pagó ${formatArs(d.paid)} de ${formatArs(d.charge)}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <DebtBreakdown player={debtModalPlayer} month={session.slice(0, 7)} pesos={(n) => `$${formatArs(n)}`} />
               <button onClick={() => setDebtModalPlayer(null)} style={{ marginTop: 12, width: "100%" }}>
                 Cerrar
               </button>

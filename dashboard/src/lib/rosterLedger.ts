@@ -368,7 +368,11 @@ export async function ledgerExtrasFor(
       prev_attended: prevBillable.length,
       prev_paid: prevPaid,
       cur_attended: billableAttendances(nowAttendances, billing, bonusPaid(selectedMonth)).length,
-      cur_paid: (payMonths.get(selectedMonth) ?? []).reduce((s, p) => s + p.amount, 0),
+      // What was paid FOR this month: a debt settlement registered this month
+      // pays for an earlier one, and belongs to it.
+      cur_paid: (payMonths.get(selectedMonth) ?? [])
+        .filter((p) => p.concept !== "debt settlement")
+        .reduce((s, p) => s + p.amount, 0),
     });
   }
 

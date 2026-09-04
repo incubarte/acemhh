@@ -8,6 +8,7 @@ import SessionDateWarning from "../../components/SessionDateWarning";
 import ExperienceToggle from "../../components/ExperienceToggle";
 import { usePageTitle } from "../../components/PageTitleContext";
 import { paymentThresholdOverride } from "@/lib/thresholds";
+import DebtBreakdown from "../../components/DebtBreakdown";
 import type { PaymentConcept } from "@shared/tokens";
 
 type Player = {
@@ -30,7 +31,13 @@ type PlayerWithAttendance = Player & {
   carryover_sessions: number;
   /** Accumulated unpaid pesos from earlier months. */
   debt: number;
+  /** Of that, what is still outstanding after this month's debt payments. */
+  debt_outstanding: number;
   debt_months: { month: string; charge: number; paid: number }[];
+  /** Pesos this month is still waiting for, right now. */
+  owed_now: number;
+  cur_attended: number;
+  cur_paid: number;
   /** This month's bundle for the player, carryover-adjusted; null = no bundle. */
   month_preset: number | null;
   session_preset: number | null;
@@ -38,15 +45,6 @@ type PlayerWithAttendance = Player & {
   owes_now: boolean | null;
   section: "jugadores" | "invitados" | "arqueros";
 };
-
-const MONTH_NAMES_ES = [
-  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
-];
-
-function monthNameEs(month: string) {
-  return MONTH_NAMES_ES[Number(month.slice(5)) - 1] ?? month;
-}
 
 const ALL_CATEGORIES = ["youth", "cat-c", "cat-b", "cat-a"];
 
@@ -395,7 +393,7 @@ function TrainingSessionDetailContent() {
   const renderPlayerRow = (player: PlayerWithAttendance, bgColor: string, hidePayment = false) => {
     const owes = playerOwes(player);
     const statusIcon = owes ? "💸" : player.scholarship > 0 ? "🏦" : "💰";
-    const hasDebt = (player.debt ?? 0) > 0;
+    const hasDebt = (player.debt_outstanding ?? 0) > 0 || (player.owed_now ?? 0) > 0;
     // Money owed to the club. Annual dues: settled (no highlight), partially
     // paid (dark amber) and unpaid (red) — training-ledger debt also paints
     // red. The debt one opens a detail modal on tap.
@@ -1182,21 +1180,9 @@ function TrainingSessionDetailContent() {
                 {debtModalPlayer.last_name}, {debtModalPlayer.name}
               </p>
               <p style={{ marginTop: 8, fontSize: "1.2rem", fontWeight: 700, color: "#f87171" }}>
-                Debe {formatArs(debtModalPlayer.debt)}
+                Debe {formatArs(debtModalPlayer.debt_outstanding + debtModalPlayer.owed_now)}
               </p>
-              <div style={{ marginTop: 10, fontSize: "0.85rem", opacity: 0.85 }}>
-                {debtModalPlayer.debt_months.map((d) => (
-                  <div key={d.month} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
-                    <span>{monthNameEs(d.month)}</span>
-                    <span style={{ fontVariantNumeric: "tabular-nums" }}>
-                      pagó {formatArs(d.paid)} de {formatArs(d.charge)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              <p style={{ marginTop: 10, fontSize: "0.75rem", opacity: 0.55 }}>
-                La deuda se descuenta automáticamente cuando el pago del mes supera el cargo.
-              </p>
+              <DebtBreakdown player={debtModalPlayer} month={dateStr.slice(0, 7)} pesos={formatArs} />
               <button onClick={() => setDebtModalPlayer(null)} style={{ marginTop: 12, width: "100%" }}>
                 Cerrar
               </button>
