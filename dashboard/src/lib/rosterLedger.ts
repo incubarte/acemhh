@@ -28,8 +28,16 @@ export type LedgerExtras = {
    * taken off. `debt` is the figure ENTERING the month, so on its own it never
    * moves however much the player settles today. */
   debt_outstanding: number;
-  /** Which closed months are behind that debt. */
-  debt_months: { month: string; charge: number; paid: number }[];
+  /** Which closed months are behind that debt: what each charged, what was
+   * paid within it, what this month's debt payments settled of it (oldest
+   * month first), and what is still outstanding. */
+  debt_months: {
+    month: string;
+    charge: number;
+    paid: number;
+    settled: number;
+    outstanding: number;
+  }[];
   /** What this screen's slot costs for the whole month, at the promotional
    * rate. Null when the slot holds no sessions this month. */
   month_preset: number | null;
@@ -285,7 +293,7 @@ export async function ledgerExtrasFor(
 
     // Closed months, in order: they are what "debt" means.
     let state: LedgerState = EMPTY_STATE;
-    const debtMonths: LedgerExtras["debt_months"] = [];
+    const unpaidMonths: { month: string; charge: number; paid: number }[] = [];
     for (const month of history) {
       const before = state.debt;
       const r = ledgerMonth(
@@ -297,10 +305,23 @@ export async function ledgerExtrasFor(
       const added = r.next.debt - before;
       if (added > 0) {
         const paid = (payMonths.get(month) ?? []).reduce((sum, p) => sum + p.amount, 0);
-        debtMonths.push({ month, charge: added + paid, paid });
+        unpaidMonths.push({ month, charge: added + paid, paid });
       }
       state = r.next;
     }
+
+    // A debt payment made this month is not tied to a month; it settles the
+    // oldest debt first, so what is still outstanding is the newest.
+    const settledThisMonth = (payMonths.get(selectedMonth) ?? [])
+      .filter((p) => p.concept === "debt settlement")
+      .reduce((sum, p) => sum + p.amount, 0);
+    let unsettled = settledThisMonth;
+    const debtMonths: LedgerExtras["debt_months"] = unpaidMonths.map((d) => {
+      const owed = d.charge - d.paid;
+      const settled = Math.min(owed, unsettled);
+      unsettled -= settled;
+      return { ...d, settled, outstanding: owed - settled };
+    });
 
     const price = priceFor(prices, selectedMonth);
     const rates = ratesFor(price, billing);
@@ -339,10 +360,6 @@ export async function ledgerExtrasFor(
       .filter((p) => p.concept === "monthly" && p.slot === screenSlot)
       .reduce((sum, p) => sum + p.amount, 0);
 
-    const settledThisMonth = (payMonths.get(selectedMonth) ?? [])
-      .filter((p) => p.concept === "debt settlement")
-      .reduce((sum, p) => sum + p.amount, 0);
-
     extras.set(player.id, {
       carryover_sessions: state.carryover,
       debt: state.debt,
@@ -364,9 +381,11 @@ export async function ledgerExtrasFor(
       bought_month: heldThisMonth > 0 && monthlyPaid >= Math.round(heldThisMonth * rates.promo),
       owes_if_present: owesWith([...withoutThis, thisOne]),
       owes_if_absent: owesWith(withoutThis),
-      prev_owed: prevRow ? prevRow.charge - prevRow.paid : 0,
+      // Net of what this month's debt payments already settled: a month paid
+      // off today is not owed, whatever it looked like when the month opened.
+      prev_owed: prevRow?.outstanding ?? 0,
       prev_attended: prevBillable.length,
-      prev_paid: prevPaid,
+      prev_paid: prevPaid + (prevRow?.settled ?? 0),
       cur_attended: billableAttendances(nowAttendances, billing, bonusPaid(selectedMonth)).length,
       // What was paid FOR this month: a debt settlement registered this month
       // pays for an earlier one, and belongs to it.

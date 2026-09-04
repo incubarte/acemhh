@@ -33,7 +33,7 @@ type PlayerWithAttendance = Player & {
   debt: number;
   /** Of that, what is still outstanding after this month's debt payments. */
   debt_outstanding: number;
-  debt_months: { month: string; charge: number; paid: number }[];
+  debt_months: { month: string; charge: number; paid: number; settled: number; outstanding: number }[];
   /** Pesos this month is still waiting for, right now. */
   owed_now: number;
   cur_attended: number;

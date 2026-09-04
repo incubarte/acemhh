@@ -34,7 +34,7 @@ type RosterPlayer = {
   recent_attendance: boolean;
   carryover_sessions: number;
   debt: number;
-  debt_months: { month: string; charge: number; paid: number }[];
+  debt_months: { month: string; charge: number; paid: number; settled: number; outstanding: number }[];
   month_preset: number | null;
   session_preset: number | null;
   half_month_preset: number | null;
@@ -191,7 +191,20 @@ function debtorStats(p: RosterPlayer): string {
  * Classification mirrors the API — up to one session's price is a session,
  * more than that is the month.
  */
-function withPayment(p: RosterPlayer, amount: number): RosterPlayer {
+function withPayment(p: RosterPlayer, amount: number, concept: PaymentConcept): RosterPlayer {
+  // A debt payment buys nothing this month: it takes the closed months'
+  // figures down, newest last, and leaves the current month as it was.
+  if (concept === "debt settlement") {
+    const outstanding = Math.max(0, p.debt_outstanding - amount);
+    return {
+      ...p,
+      payments: p.payments + amount,
+      payment_amounts: [...p.payment_amounts, amount],
+      debt_outstanding: outstanding,
+      prev_owed: Math.min(p.prev_owed, outstanding),
+      prev_paid: p.prev_paid + (p.prev_owed - Math.min(p.prev_owed, outstanding)),
+    };
+  }
   const isSession = p.session_preset !== null && amount <= p.session_preset;
   const buysMonth = p.month_preset !== null && amount >= p.month_preset;
   return {
@@ -1164,7 +1177,7 @@ function TrainingSessionBetaContent() {
     }
     setPayModalPlayer(null);
     // Show it right away — the refresh that follows only confirms it.
-    setPlayers((prev) => prev.map((p) => p.id === playerId ? withPayment(p, amount) : p));
+    setPlayers((prev) => prev.map((p) => p.id === playerId ? withPayment(p, amount, concept) : p));
     reload();
   }, [session, reload]);
 

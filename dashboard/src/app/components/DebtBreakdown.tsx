@@ -22,7 +22,13 @@ export default function DebtBreakdown({ player, month, pesos }: {
   player: {
     debt: number;
     debt_outstanding: number;
-    debt_months: { month: string; charge: number; paid: number }[];
+    debt_months: {
+      month: string;
+      charge: number;
+      paid: number;
+      settled: number;
+      outstanding: number;
+    }[];
     owed_now: number;
     cur_attended: number;
     cur_paid: number;
@@ -31,7 +37,8 @@ export default function DebtBreakdown({ player, month, pesos }: {
   month: string;
   pesos: (n: number) => string;
 }) {
-  const settled = Math.max(0, player.debt - player.debt_outstanding);
+  // A month already paid off is not part of the debt, however it got there.
+  const closed = player.debt_months.filter((d) => d.outstanding > 0);
   const row: React.CSSProperties = {
     display: "flex",
     justifyContent: "space-between",
@@ -48,23 +55,17 @@ export default function DebtBreakdown({ player, month, pesos }: {
   };
   return (
     <div style={{ fontSize: "0.85rem", opacity: 0.9 }}>
-      {player.debt_months.length > 0 && (
+      {closed.length > 0 && (
         <>
           <div style={heading}>Meses cerrados</div>
-          {player.debt_months.map((d) => (
+          {closed.map((d) => (
             <div key={d.month} style={row}>
               <span>{monthNameEs(d.month)}</span>
               <span style={num}>
-                pagó {pesos(d.paid)} de {pesos(d.charge)} · debe {pesos(d.charge - d.paid)}
+                pagó {pesos(d.paid + d.settled)} de {pesos(d.charge)} · debe {pesos(d.outstanding)}
               </span>
             </div>
           ))}
-          {settled > 0 && (
-            <div style={{ ...row, opacity: 0.7 }}>
-              <span>Saldado este mes</span>
-              <span style={num}>−{pesos(settled)}</span>
-            </div>
-          )}
         </>
       )}
       {player.owed_now > 0 && (
