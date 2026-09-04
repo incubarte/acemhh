@@ -37,7 +37,37 @@ export type Fixture = {
   /** The month after the session's, and the one after that. */
   nextMonth: string;
   monthAfterNext: string;
+  /** What a session bought on its own costs on that date. Read from the
+   * tariff table, so a price change does not leave the specs paying last
+   * season's money. */
+  sessionPrice: number;
 };
+
+/** The tariff in force on `date`: the newest row at or before it. */
+export async function tariffAt(date: string): Promise<{ session: number; prepaid: number }> {
+  const { data, error } = await admin().from("prices")
+    .select("session_price,prepaid_session_price")
+    .lte("valid_from", date).order("valid_from", { ascending: false }).limit(1).single();
+  if (error) throw new Error(JSON.stringify(error));
+  return { session: Number(data.session_price), prepaid: Number(data.prepaid_session_price) };
+}
+
+export async function sessionPriceAt(date: string): Promise<number> {
+  return (await tariffAt(date)).session;
+}
+
+/** Pesos the way the screens abbreviate them: 30000 reads "30k". */
+export function k(amount: number): string {
+  if (amount >= 1000 && amount % 1000 === 0) return `${amount / 1000}k`;
+  return new Intl.NumberFormat("es-AR").format(amount);
+}
+
+/** One day after `date` (YYYY-MM-DD). */
+export function dayAfter(date: string): string {
+  const d = new Date(`${date}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
 
 function shiftMonth(month: string, by: number): string {
   const [y, m] = month.split("-").map(Number);
@@ -69,6 +99,7 @@ export async function writableSession(hour = 22): Promise<Fixture> {
     month,
     nextMonth: shiftMonth(month, 1),
     monthAfterNext: shiftMonth(month, 2),
+    sessionPrice: await sessionPriceAt(date),
   };
 }
 
@@ -88,9 +119,15 @@ export async function sessionIn(month: string, hour = 22): Promise<string> {
  * payment — the window closes a day after the slot's second session. Pre-paying
  * a coming month is exactly what it is for.
  */
-export async function futureSession(hour = 22): Promise<{ session: string; month: string }> {
+export async function futureSession(
+  hour = 22,
+  /** Earliest month (YYYY-MM) to consider. Early in a month the coming
+   * sessions are this month's own; a spec that needs a LATER month says so. */
+  fromMonth?: string,
+): Promise<{ session: string; month: string }> {
+  const from = fromMonth && `${fromMonth}-01` > todayBA() ? `${fromMonth}-01` : todayBA();
   const { data } = await admin().from("training_sessions")
-    .select("date").eq("hour", hour).gt("date", todayBA())
+    .select("date").eq("hour", hour).gt("date", from)
     .order("date").limit(20);
   const dates = (data ?? []).map((r) => String(r.date));
   // The first date of a month that still has at least two trainings ahead.

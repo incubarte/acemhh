@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { sessionIn, writableSession } from "./fixtures";
+import { k, sessionIn, writableSession } from "./fixtures";
 
 // How the redesigned screen reads at a glance: what each section says about
 // the rows in it, what the debtors list spells out, and the gesture that
@@ -15,6 +15,8 @@ const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ??
 // writable.
 let SESSION: string;
 let SESSION_STR: string;
+/** What a session costs on SESSION's date. */
+let PRICE: number;
 let NEXT_MONTH_SESSION: string;
 let MONTH_AFTER_NEXT_SESSION: string;
 const LAST = "Secciones";
@@ -64,7 +66,8 @@ async function seed() {
   );
   if (attError) throw new Error(JSON.stringify(attError));
 
-  // Alcorriente paid the session they attended; Moroso paid nothing.
+  // Alcorriente paid the session they attended, at what it costs on that
+  // date; Moroso paid nothing.
   const { error: payError } = await s.from("payments").insert([{
     id: crypto.randomUUID(),
     player_id: ids.get("Alcorriente")!,
@@ -74,7 +77,7 @@ async function seed() {
     slot_hour: 22,
     session: SESSION_STR,
     month: SESSION.slice(0, 7),
-    amount: 30000,
+    amount: PRICE,
     is_cash: true,
   }]);
   if (payError) throw new Error(JSON.stringify(payError));
@@ -98,6 +101,7 @@ test.beforeAll(async () => {
   const fx = await writableSession(22);
   SESSION = fx.session;
   SESSION_STR = fx.sessionStr;
+  PRICE = fx.sessionPrice;
   NEXT_MONTH_SESSION = await sessionIn(fx.nextMonth);
   MONTH_AFTER_NEXT_SESSION = await sessionIn(fx.monthAfterNext);
   await cleanup();
@@ -346,12 +350,12 @@ test("una respuesta vieja no pisa un cambio que ya está en pantalla", async ({ 
   // Alcorriente first: its refresh snapshots a server that knows nothing of
   // the payment Moroso is about to make.
   await pay("Alcorriente");
-  await expect(rowIn(page, "section-presentes", "Alcorriente").getByText(/\(30k, 30k\)/))
+  await expect(rowIn(page, "section-presentes", "Alcorriente").getByText(`(${k(PRICE)}, ${k(PRICE)})`))
     .toBeVisible();
 
   await pay("Moroso");
   const moroso = rowIn(page, "section-presentes", "Moroso");
-  await expect(moroso.getByText(/\(30k\)/)).toBeVisible();
+  await expect(moroso.getByText(`(${k(PRICE)})`)).toBeVisible();
 
   await expect.poll(() => gates.length).toBe(2);
 
@@ -360,9 +364,9 @@ test("una respuesta vieja no pisa un cambio que ya está en pantalla", async ({ 
   // rather than applied — otherwise the payment vanishes from the row.
   gates[0]();
   await page.waitForTimeout(600);
-  await expect(moroso.getByText(/\(30k\)/)).toBeVisible();
+  await expect(moroso.getByText(`(${k(PRICE)})`)).toBeVisible();
 
   // The up-to-date one only confirms what is already on screen.
   gates[1]();
-  await expect(moroso.getByText(/\(30k\)/)).toBeVisible();
+  await expect(moroso.getByText(`(${k(PRICE)})`)).toBeVisible();
 });

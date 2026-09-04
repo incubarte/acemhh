@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { confirmDebtWarning, writableSession } from "./fixtures";
+import { confirmDebtWarning, k, writableSession } from "./fixtures";
 
 // The redesigned attendance & payments screen: presence expressed by
 // sections, toggled by long-press + drag to the goal bar.
@@ -13,6 +13,8 @@ const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ??
 // payments, and only the current week and the previous one are writable.
 let SESSION: string;
 let SESSION_STR: string;
+/** What a session costs on SESSION's date. */
+let PRICE: number;
 let PREV_SESSION_STR: string;
 let MONTH: string;
 const LAST = "Newscreen"; // shared test last name
@@ -100,7 +102,7 @@ async function seed() {
       slot_hour: 22,
       session: SESSION_STR,
       month: MONTH,
-      amount: 30000,
+      amount: PRICE,
       is_cash: true,
     },
     // Otracategoria paid their OWN slot's month bundle: that belongs to
@@ -139,7 +141,7 @@ async function seed() {
       slot_hour: 22,
       session: SESSION_STR,
       month: MONTH,
-      amount: 30000,
+      amount: PRICE,
       is_cash: true,
     },
   ]);
@@ -213,6 +215,7 @@ test.beforeAll(async () => {
   const fx = await writableSession(22);
   SESSION = fx.session;
   SESSION_STR = fx.sessionStr;
+  PRICE = fx.sessionPrice;
   PREV_SESSION_STR = fx.prevStr;
   MONTH = fx.month;
   await cleanup();
@@ -348,13 +351,13 @@ test("el modal de cobro ofrece sesión, mes y otro, y confirma con el detalle", 
   // session is being paid.
   await modal.getByText(/Sesión individual/).click();
   await expect(modal.getByText(/Sesión del/)).toBeVisible();
-  await expect(modal.getByText("$30k")).toBeVisible();
+  await expect(modal.getByText(`$${k(PRICE)}`)).toBeVisible();
 
   await modal.getByRole("button", { name: "Confirmar" }).click();
   await expect(modal).toHaveCount(0);
 
   // The payment shows next to the name, and settles them.
-  await expect(row.getByText(/\(30k\)/)).toBeVisible();
+  await expect(row.getByText(`(${k(PRICE)})`)).toBeVisible();
 });
 
 test("el pago aparece entre paréntesis sin esperar el refresh", async ({ page }) => {
@@ -377,9 +380,9 @@ test("el pago aparece entre paréntesis sin esperar el refresh", async ({ page }
 
   // Registered in the previous test plus this one: both amounts are listed
   // while the refresh is still blocked.
-  await expect(row.getByText(/\(30k, 30k\)/)).toBeVisible();
+  await expect(row.getByText(`(${k(PRICE)}, ${k(PRICE)})`)).toBeVisible();
 
   // Letting the refresh through confirms rather than contradicts it.
   releaseRefresh();
-  await expect(row.getByText(/\(30k, 30k\)/)).toBeVisible();
+  await expect(row.getByText(`(${k(PRICE)}, ${k(PRICE)})`)).toBeVisible();
 });

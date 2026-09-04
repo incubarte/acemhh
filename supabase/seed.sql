@@ -20,6 +20,15 @@ INSERT INTO training_sessions (date, hour)
 VALUES ('2026-08-06', 22)
 ON CONFLICT (date, hour) DO NOTHING;
 
+-- And what that slot was on that date. The features migration derives its
+-- rows from the sessions that exist when it runs, which on a fresh database
+-- is only the agenda from 2026-08-20 on — so the seeded session above has no
+-- configuration, and every ledger that looks back into August (from
+-- September on, all of them) refuses to price it.
+INSERT INTO training_slot_features (weekday, hour, valid_from, categories, goalies)
+VALUES (4, 22, '2026-08-06', ARRAY['cat-a', 'cat-b'], false)
+ON CONFLICT (weekday, hour, valid_from) DO NOTHING;
+
 -- Contact backfill for local development.
 -- Regenerate with:
 --   deno run --allow-read --allow-env --allow-net scripts/backfill-phones.ts \

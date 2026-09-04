@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { futureSession, writableSession, type Fixture } from "./fixtures";
+import { dayAfter, futureSession, tariffAt, todayBA, writableSession, type Fixture } from "./fixtures";
 
 // The rules that say what may be registered, enforced by the SERVICE. They are
 // money rules: a stale tab, a retry or a direct call has to hit the same wall
@@ -91,6 +91,17 @@ test("no se mezcla mensual con individual en el mismo mes y horario", async ({ p
 });
 
 test("pasada la segunda sesión del mes ya no se compra el mes", async ({ page }) => {
+  // The month closes for monthly payments one day after the slot's second
+  // training. Early in a month that has not happened yet, and there is
+  // nothing late about buying it — so the rule can only be seen later on.
+  const { data } = await admin().from("training_sessions").select("date")
+    .eq("hour", 22).gte("date", `${fx.month}-01`).lte("date", fx.date).order("date");
+  const second = (data ?? []).map((r) => String(r.date))[1];
+  test.skip(
+    second === undefined || todayBA() <= dayAfter(second),
+    "el mes todavía no pasó su segunda sesión",
+  );
+
   await page.request.post("/api/auth/dev");
   // fx is the latest training already held, so its month is well under way.
   const late = await pay(page, "monthly", 100000);
@@ -109,7 +120,8 @@ test("un parcial mensual tiene mínimo, y el segundo pago completa el mes", asyn
     .select("date").eq("hour", 22)
     .gte("date", `${ahead.month}-01`).lt("date", nextMonth);
   if (heldError) throw new Error(JSON.stringify(heldError));
-  const monthPrice = (held ?? []).length * 25000;
+  const { prepaid } = await tariffAt(`${ahead.month}-01`);
+  const monthPrice = (held ?? []).length * prepaid;
   expect(monthPrice).toBeGreaterThan(40000);
 
   const tooLittle = await pay(page, "monthly", 39999, ahead.session);
@@ -135,23 +147,26 @@ test("la deuda cerrada bloquea cobrar cualquier otra cosa", async ({ page }) => 
   // from one period into the next.
   await admin().from("attendances")
     .insert({ player_id: playerId, session: fx.sessionStr, attended: true });
+  // `ahead` may still be this same month early on; the debt only exists
+  // from the next one.
+  const later = await futureSession(22, fx.nextMonth);
 
-  const blocked = await pay(page, "session", 30000, ahead.session);
+  const blocked = await pay(page, "session", 30000, later.session);
   expect(blocked.status(), await blocked.text()).toBe(409);
   expect(await blocked.text()).toContain("deuda de meses anteriores");
 
   // Even the monthly, whose own window is still open for that month.
-  const monthly = await pay(page, "monthly", 100000, ahead.session);
+  const monthly = await pay(page, "monthly", 100000, later.session);
   expect(monthly.status()).toBe(409);
 
   // The debt payment is capped at the debt itself.
-  const tooMuch = await pay(page, "debt settlement", 999999, ahead.session);
+  const tooMuch = await pay(page, "debt settlement", 999999, later.session);
   expect(tooMuch.status()).toBe(409);
   expect(await tooMuch.text()).toContain("superar");
 
-  // Settling it unblocks the rest.
-  expect((await pay(page, "debt settlement", 30000, ahead.session)).status()).toBe(200);
-  const after = await pay(page, "session", 30000, ahead.session);
+  // Settling it — one session at that date's price — unblocks the rest.
+  expect((await pay(page, "debt settlement", fx.sessionPrice, later.session)).status()).toBe(200);
+  const after = await pay(page, "session", 30000, later.session);
   expect(after.status(), await after.text()).toBe(200);
 
   await admin().from("attendances").delete().eq("player_id", playerId);
@@ -198,7 +213,8 @@ test("medio mes cobra lo que queda, y sólo como primer pago del período", asyn
   // Registered at the SECOND session: it buys that one and everything after,
   // never the one already gone.
   const second = `${dates[1]}-22`;
-  const expected = (dates.length - 1) * 25000;
+  const { prepaid } = await tariffAt(dates[1]);
+  const expected = (dates.length - 1) * prepaid;
 
   const roster = await (await page.request.get(`/api/training-sessions-beta/${second}`)).json();
   const row = roster.players.find((p: { id: string }) => p.id === playerId);
