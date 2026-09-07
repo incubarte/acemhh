@@ -10,6 +10,7 @@ const BUTTONS = [
   { href: "/players/new", label: "🧑🏻‍🦽‍➡️ Nuevo Jugador" },
   { href: "/payments", label: "🏛️ Cuota Social" },
   { href: "/caja", label: "💰 Caja" },
+  { href: "/analisis", label: "📈 Análisis" },
   { href: "/credencial", label: "🪪 Credencial de Socio" },
 ];
 

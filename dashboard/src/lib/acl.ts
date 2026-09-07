@@ -33,6 +33,8 @@ const rootPermissions: Permission[] = [
   ...wheelPermissions,
   { type: 'api', resource: '/api/payments/dues', method: 'POST' },
   { type: 'page', resource: '/payments' },
+  { type: 'api', resource: '/api/analisis', method: 'GET' },
+  { type: 'page', resource: '/analisis' },
 ] as const;
 
 export const GROUPS: Record<string, Group> = {
