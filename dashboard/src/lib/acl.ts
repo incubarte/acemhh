@@ -22,6 +22,8 @@ const wheelPermissions: Permission[] = [
   { type: 'api', resource: '/api/handoffs/accept', method: 'POST' },
   { type: 'page', resource: '/' },
   { type: 'page', resource: '/caja' },
+  { type: 'api', resource: '/api/analisis', method: 'GET' },
+  { type: 'page', resource: '/analisis' },
   { type: 'page', resource: '/players/new' },
   { type: 'page', resource: '/training-sessions' },
   { type: 'page', resource: '/training-sessions/*' },
@@ -33,8 +35,6 @@ const rootPermissions: Permission[] = [
   ...wheelPermissions,
   { type: 'api', resource: '/api/payments/dues', method: 'POST' },
   { type: 'page', resource: '/payments' },
-  { type: 'api', resource: '/api/analisis', method: 'GET' },
-  { type: 'page', resource: '/analisis' },
 ] as const;
 
 export const GROUPS: Record<string, Group> = {
