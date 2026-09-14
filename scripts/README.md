@@ -240,8 +240,10 @@ deno run --allow-net --allow-env --allow-read scripts/tournament-roster.ts \
 ```
 
 Columnas: `equipo,categoria,apellido,nombre,designacion,dni,player_id`.
-`designacion` (C capitán, A alterno, GK arquero) es informativa y no se guarda.
-Todos entran como titulares.
+`designacion` (C capitán, A alterno, GK arquero) no se guarda, pero decide el
+rol junto con el orden de la lista: los primeros 12 jugadores de campo de cada
+equipo son titulares, del 13 en adelante suplentes, y los arqueros (que van al
+final) titulares.
 
 **El DNI manda.** El nombre sólo explica lo que el DNI no resuelve:
 

@@ -17,8 +17,10 @@
 //
 // Columnas del CSV: equipo,categoria,apellido,nombre,designacion,dni,player_id.
 //
-// - `designacion` (C = capitán, A = alterno, GK = arquero) es informativa: no
-//   se guarda. Todos entran como titulares; el suplente se marca después a mano.
+// - `designacion` (C = capitán, A = alterno, GK = arquero) no se guarda, pero
+//   decide el rol junto con el orden de la lista: los primeros 12 jugadores de
+//   campo son titulares y del 13 en adelante suplentes; los arqueros van al
+//   final de la lista y entran como titulares.
 // - `player_id` es opcional y es la forma de confirmar a mano a quién se
 //   refiere una fila cuando el nombre no coincide exacto ("Chevallier" vs
 //   "Chevalier"). Con el id, la migración le carga el DNI de la lista si no
@@ -98,6 +100,22 @@ if (!args[0]) {
     Deno.exit(1);
 }
 const rows = parseCsv(Deno.readTextFileSync(args[0]));
+
+/** Titular o suplente, por el lugar en la lista de su equipo. */
+const Starters = 12;
+const roleOf = new Map<Row, "starter" | "substitute">();
+{
+    const seen = new Map<string, number>();
+    for (const r of rows) {
+        if (r.designation === "GK") {
+            roleOf.set(r, "starter");
+            continue;
+        }
+        const n = (seen.get(r.team) ?? 0) + 1;
+        seen.set(r.team, n);
+        roleOf.set(r, n <= Starters ? "starter" : "substitute");
+    }
+}
 
 const prod = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"), {
     auth: { autoRefreshToken: false, persistSession: false },
@@ -200,7 +218,8 @@ if (mode === "report") {
         }
         const who = `${row.last_name}, ${row.name}`.padEnd(28);
         const tag = row.designation ? ` [${row.designation}]` : "";
-        const head = `${who} ${row.dni}${tag}`;
+        const sub = roleOf.get(row) === "substitute" ? " (suplente)" : "";
+        const head = `${who} ${row.dni}${tag}${sub}`;
         switch (res.kind) {
             case "ok":
                 console.log(`  ✓ ${head}`);
@@ -287,7 +306,8 @@ out.push(`-- demás. Que en producción hayan entrado todos lo confirma`);
 out.push(`--   scripts/tournament-roster.ts <csv> --verify`);
 out.push(`-- después del db push.`);
 out.push(`--`);
-out.push(`-- Todos entran como titulares; los suplentes se marcan después a mano.`);
+out.push(`-- Los primeros ${Starters} jugadores de campo de cada lista son titulares, del`);
+out.push(`-- ${Starters + 1} en adelante suplentes; los arqueros, titulares.`);
 out.push(``);
 if (fills.length) {
     out.push(`-- Jugadores que estaban cargados sin DNI. Se los identifica por id (el de`);
@@ -313,13 +333,13 @@ out.push(`  JOIN tournament_categories c ON c.tournament_id = t.id AND c.name = 
 out.push(`  RETURNING id, name`);
 out.push(`)`);
 out.push(`INSERT INTO team_players (team_id, player_id, role)`);
-out.push(`SELECT nt.id, p.id, 'starter'`);
+out.push(`SELECT nt.id, p.id, m.role`);
 out.push(`FROM (VALUES`);
 // La coma va antes del comentario: después de él ya es comentario también.
 out.push(rows.map((r, i) =>
-    `  (${q(r.team)}, ${q(r.dni)})${i < rows.length - 1 ? "," : ""}  -- ${r.last_name}, ${r.name}${r.designation ? ` [${r.designation}]` : ""}`
+    `  (${q(r.team)}, ${q(r.dni)}, ${q(roleOf.get(r)!)})${i < rows.length - 1 ? "," : ""}  -- ${r.last_name}, ${r.name}${r.designation ? ` [${r.designation}]` : ""}`
 ).join("\n"));
-out.push(`) AS m(team, dni)`);
+out.push(`) AS m(team, dni, role)`);
 out.push(`JOIN new_teams nt ON nt.name = m.team`);
 out.push(`JOIN players p ON p.dni = m.dni;`);
 out.push(``);
