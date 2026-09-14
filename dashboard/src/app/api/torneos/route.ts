@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
 import { todayBA } from "@/lib/trainingDay";
 import { feeStanding, type Installment } from "@/lib/tournamentFees";
-import { memberKey, paymentsByMember, paymentsForTeams } from "@/lib/tournaments";
+import { isFeeExempt, memberKey, paymentsByMember, paymentsForTeams } from "@/lib/tournaments";
 
 export type TeamSummary = {
   id: string;
@@ -11,7 +11,9 @@ export type TeamSummary = {
   players: number;
   starters: number;
   substitutes: number;
-  /** Cuántos no deben nada de lo ya vencido. */
+  /** Arqueros: integran el equipo pero no pagan la cuota. */
+  exempt: number;
+  /** Cuántos de los que pagan no deben nada de lo ya vencido. */
   upToDate: number;
   /** Lo cobrado entre todos, y lo que entre todos deberían llevar pagado. */
   collected: number;
@@ -67,7 +69,7 @@ export const GET = withPermission('api', '/api/torneos', 'GET', async () => {
       ? s.from("tournament_installments").select("category_id,month,amount").in("category_id", catIds)
       : Promise.resolve({ data: [], error: null }),
     teamIds.length
-      ? s.from("team_players").select("team_id,player_id,role").in("team_id", teamIds)
+      ? s.from("team_players").select("team_id,player_id,role,players(player_type)").in("team_id", teamIds)
       : Promise.resolve({ data: [], error: null }),
     paymentsForTeams(s, teamIds),
   ]);
@@ -86,11 +88,22 @@ export const GET = withPermission('api', '/api/torneos', 'GET', async () => {
     c.upfront_price === null ? null : Number(c.upfront_price),
   ]));
 
-  const membersByTeam = new Map<string, { player_id: string; role: string }[]>();
-  for (const m of membersRes.data ?? []) {
+  type MemberRow = {
+    team_id: string;
+    player_id: string;
+    role: string;
+    players: { player_type: string } | { player_type: string }[] | null;
+  };
+  const membersByTeam = new Map<string, { player_id: string; role: string; exempt: boolean }[]>();
+  for (const m of (membersRes.data as unknown as MemberRow[]) ?? []) {
     const k = String(m.team_id);
     const list = membersByTeam.get(k) ?? [];
-    list.push({ player_id: String(m.player_id), role: String(m.role) });
+    const p = Array.isArray(m.players) ? m.players[0] : m.players;
+    list.push({
+      player_id: String(m.player_id),
+      role: String(m.role),
+      exempt: isFeeExempt(p?.player_type),
+    });
     membersByTeam.set(k, list);
   }
   const byMember = paymentsByMember(payments);
@@ -108,11 +121,13 @@ export const GET = withPermission('api', '/api/torneos', 'GET', async () => {
       players: members.length,
       starters: members.filter((m) => m.role === "starter").length,
       substitutes: members.filter((m) => m.role === "substitute").length,
+      exempt: members.filter((m) => m.exempt).length,
       upToDate: 0,
       collected: 0,
       dueSoFar: 0,
     };
     for (const m of members) {
+      if (m.exempt) continue;
       const standing = feeStanding(
         installments,
         upfront,

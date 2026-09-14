@@ -114,8 +114,10 @@ function standingLine(s: FeeStanding): { text: string; color?: string } {
 
 // ---- La fila ----
 
+const ExemptLine = "arquero · no paga cuota";
+
 function PlayerRow({ p, onOpen }: { p: TeamPlayer; onOpen: (p: TeamPlayer) => void }) {
-  const line = standingLine(p.standing);
+  const line = p.exempt ? { text: ExemptLine, color: undefined } : standingLine(p.standing);
   return (
     <div
       data-testid="player-row"
@@ -146,7 +148,7 @@ function PlayerRow({ p, onOpen }: { p: TeamPlayer; onOpen: (p: TeamPlayer) => vo
           {line.text}
         </div>
       </div>
-      <FeeDots standing={p.standing} />
+      {!p.exempt && <FeeDots standing={p.standing} />}
     </div>
   );
 }
@@ -197,6 +199,12 @@ function PlayerSheet({ p, onClose, onPay }: {
             <span className="badge">{RoleLabels[p.role]}</span>
           </div>
 
+          {p.exempt ? (
+            <p data-testid="exempt-note" style={{ marginTop: 14 }}>
+              Los arqueros no pagan la cuota del torneo.
+            </p>
+          ) : (
+          <>
           <div style={{ marginTop: 14, display: "flex", justifyContent: "center" }}>
             <FeeDots standing={s} size={22} labels />
           </div>
@@ -233,6 +241,8 @@ function PlayerSheet({ p, onClose, onPay }: {
               </p>
             )}
           </div>
+          </>
+          )}
 
           <div style={heading}>Pagos</div>
           {p.payments.length === 0 ? (
@@ -257,14 +267,16 @@ function PlayerSheet({ p, onClose, onPay }: {
 
           <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
             <button onClick={onClose} style={{ flex: 1 }}>Cerrar</button>
-            <button
-              data-testid="register-payment"
-              className="btnPrimary"
-              style={{ flex: 2 }}
-              onClick={onPay}
-            >
-              Registrar pago
-            </button>
+            {!p.exempt && (
+              <button
+                data-testid="register-payment"
+                className="btnPrimary"
+                style={{ flex: 2 }}
+                onClick={onPay}
+              >
+                Registrar pago
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -494,9 +506,12 @@ function TeamContent() {
   const selected = detail.players.find((p) => p.id === selectedId) ?? null;
   const starters = detail.players.filter((p) => p.role === "starter");
   const substitutes = detail.players.filter((p) => p.role === "substitute");
-  const upToDate = detail.players.filter((p) => p.standing.outstandingNow === 0).length;
-  const collected = detail.players.reduce((acc, p) => acc + p.standing.paid, 0);
-  const dueSoFar = detail.players.reduce((acc, p) => acc + p.standing.dueSoFar, 0);
+  // Los arqueros no pagan: el resumen habla de los que sí.
+  const payers = detail.players.filter((p) => !p.exempt);
+  const exempt = detail.players.length - payers.length;
+  const upToDate = payers.filter((p) => p.standing.outstandingNow === 0).length;
+  const collected = payers.reduce((acc, p) => acc + p.standing.paid, 0);
+  const dueSoFar = payers.reduce((acc, p) => acc + p.standing.dueSoFar, 0);
 
   const confirm = async (choice: Choice, isCash: boolean) => {
     if (!selected) return;
@@ -542,9 +557,10 @@ function TeamContent() {
       </p>
       {detail.players.length > 0 && (
         <p data-testid="team-summary" style={{ margin: "4px 0 0", fontSize: "0.85rem" }}>
-          {detail.players.length} {detail.players.length === 1 ? "jugador" : "jugadores"} ·{" "}
+          {payers.length} {payers.length === 1 ? "jugador paga" : "jugadores pagan"} ·{" "}
           <strong>{upToDate}</strong> al día · cobrado{" "}
           <strong>${formatArs(collected)}</strong> de ${formatArs(dueSoFar)} a la fecha
+          {exempt > 0 && ` · ${exempt} ${exempt === 1 ? "arquero" : "arqueros"} sin cuota`}
         </p>
       )}
 

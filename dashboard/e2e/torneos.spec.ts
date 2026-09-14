@@ -57,8 +57,8 @@ test.beforeAll(async () => {
   const s = admin();
   const month = todayBA().slice(0, 7);
 
-  const mk = (name: string, dni: string) => ({
-    name, last_name: LAST, dni, categories: ["cat-a"], player_type: "player", trains: false, invitee: false,
+  const mk = (name: string, dni: string, player_type = "player") => ({
+    name, last_name: LAST, dni, categories: ["cat-a"], player_type, trains: false, invitee: false,
   });
   const { data: ps, error: pErr } = await s.from("players").insert([
     mk("Nada", "99002001"),
@@ -67,6 +67,7 @@ test.beforeAll(async () => {
     mk("Suplente", "99002004"),
     mk("Moroso", "99002005"),
     mk("Mitad", "99002006"),
+    mk("Arquero", "99002007", "goalkeeper"),
   ]).select("id,name");
   if (pErr) throw new Error(JSON.stringify(pErr));
   for (const p of ps!) players.set(p.name, p.id);
@@ -106,6 +107,7 @@ test.beforeAll(async () => {
     member(TEAM_NEW, "Parcial", "starter"),
     member(TEAM_NEW, "Adelantado", "starter"),
     member(TEAM_NEW, "Suplente", "substitute"),
+    member(TEAM_NEW, "Arquero", "starter"),
     member(TEAM_OLD, "Moroso", "starter"),
     member(TEAM_OLD, "Mitad", "starter"),
   ]);
@@ -165,8 +167,8 @@ test("la lista agrupa los equipos por categoría y dice cuántos deben", async (
   const nueva = page.locator('[data-testid="category-section"][data-category="Nueva"]');
   const cardNew = nueva.getByTestId("team-card").filter({ hasText: TEAM_NEW });
   await expect(cardNew).toBeVisible();
-  await expect(cardNew).toContainText("3 titulares · 1 suplente");
-  // Nadie completó la cuota de este mes todavía.
+  await expect(cardNew).toContainText("4 titulares · 1 suplente");
+  // Nadie completó la cuota de este mes todavía; el arquero no cuenta.
   await expect(cardNew.getByTestId("team-up-to-date")).toHaveText("4 deben");
   await expect(cardNew).toContainText("$30k de $240k");
 
@@ -191,7 +193,7 @@ test("los puntos: un mes entero y el 40% del siguiente es verde, amarillo, gris,
 
 test("titulares y suplentes van en secciones distintas", async ({ page }) => {
   await page.goto(`/torneos/equipos/${teams.get(TEAM_NEW)}`);
-  await expect(page.getByTestId("section-titulares").getByTestId("player-row")).toHaveCount(3);
+  await expect(page.getByTestId("section-titulares").getByTestId("player-row")).toHaveCount(4);
   const subs = page.getByTestId("section-suplentes").getByTestId("player-row");
   await expect(subs).toHaveCount(1);
   await expect(subs.first()).toContainText(`${LAST}, Suplente`);
@@ -270,6 +272,27 @@ test("el torneo anticipado deja todo en verde y queda como transferencia", async
     slot_weekday: null,
     session: null,
   });
+});
+
+test("el arquero integra el equipo pero no paga: sin puntos, sin botón, y el servicio lo rechaza", async ({ page }) => {
+  await page.goto(`/torneos/equipos/${teams.get(TEAM_NEW)}`);
+  const row = page.locator(`[data-player-row="${players.get("Arquero")}"]`);
+  await expect(row).toBeVisible();
+  await expect(row.getByTestId("fee-dot")).toHaveCount(0);
+  await expect(standingOf(page, "Arquero")).toHaveText("arquero · no paga cuota");
+  await expect(page.getByTestId("team-summary")).toContainText("4 jugadores pagan");
+  await expect(page.getByTestId("team-summary")).toContainText("1 arquero sin cuota");
+
+  await row.click();
+  const sheet = page.getByTestId("player-sheet");
+  await expect(sheet.getByTestId("exempt-note")).toBeVisible();
+  await expect(sheet.getByTestId("register-payment")).toHaveCount(0);
+
+  const res = await page.request.post(`/api/torneos/equipos/${teams.get(TEAM_NEW)}/pago`, {
+    data: { player_id: players.get("Arquero"), amount: 10000 },
+  });
+  expect(res.status()).toBe(409);
+  expect(await res.text()).toContain("arqueros");
 });
 
 test("el servicio no deja pasar un anticipado fuera de regla", async ({ page }) => {

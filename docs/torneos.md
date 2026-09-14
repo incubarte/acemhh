@@ -30,6 +30,10 @@ categorías sin tocar código.
 equipo y queda atado a él (`payments.team_id`). Quien juega en dos equipos
 tiene dos cuotas.
 
+**Los arqueros no pagan.** Sale de `players.player_type = 'goalkeeper'`, no de
+la lista: integran el equipo, pero no tienen puntos, no cuentan como al día ni
+como deudores, y el servicio rechaza registrarles un pago.
+
 **Cada mes es una cuota, y los pagos no dicen a qué mes van.** Se admite
 cualquier monto — puede pagar menos o más que una cuota — y lo pagado se aplica
 a las cuotas en orden. Lo que importa es cuánto lleva pagado contra cuánto
@@ -95,9 +99,12 @@ Los equipos y sus jugadores entran con una migración propia, generada por
 `scripts/tournament-roster.ts` a partir de `backfill/interclubes-clausura-2026.csv`
 (ver `scripts/README.md`): `20260914110000_clausura_2026_teams.sql`. El torneo,
 sus categorías y sus equipos llevan ids fijos para que local y producción
-coincidan y el import de producción copie `team_players` tal cual. Los
-jugadores del equipo D suman además la categoría `cat-d`
-(`20260914120000_rookies_cat_d.sql`).
+coincidan y el import de producción copie `team_players` tal cual.
+
+Con el torneo nació la categoría de entrenamiento `cat-d`
+(`20260914120000_rookies_cat_d.sql`): los jugadores del equipo D cambian
+`cat-c` por `cat-d` y conservan `youth` si la tenían, y el horario de las 23hs
+admite `cat-d` además de `cat-c`.
 
 ## Pantallas
 

@@ -20,8 +20,10 @@ const heading: React.CSSProperties = {
 };
 
 function TeamCard({ team }: { team: TeamSummary }) {
-  const owing = team.players - team.upToDate;
-  const allGood = team.players > 0 && owing === 0;
+  // Los arqueros no pagan: no cuentan ni como al día ni como deudores.
+  const payers = team.players - team.exempt;
+  const owing = payers - team.upToDate;
+  const allGood = payers > 0 && owing === 0;
   const roles = [
     team.starters > 0 ? `${team.starters} ${team.starters === 1 ? "titular" : "titulares"}` : null,
     team.substitutes > 0 ? `${team.substitutes} ${team.substitutes === 1 ? "suplente" : "suplentes"}` : null,
@@ -53,7 +55,7 @@ function TeamCard({ team }: { team: TeamSummary }) {
             {team.players === 0 ? "Sin jugadores cargados" : roles}
           </div>
         </div>
-        {team.players > 0 && (
+        {payers > 0 && (
           <div style={{ textAlign: "right", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
             <div
               data-testid="team-up-to-date"

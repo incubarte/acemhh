@@ -57,6 +57,12 @@ export function paymentsByMember(rows: TeamPaymentRow[]): Map<string, TeamPaymen
   return out;
 }
 
+/** Los arqueros integran el equipo pero no pagan la cuota del torneo. Sale
+ * del tipo de jugador, no de la lista: es lo que el club ya sabe de él. */
+export function isFeeExempt(playerType: string | null | undefined): boolean {
+  return playerType === "goalkeeper";
+}
+
 /** El mismo texto que firman los otros cobros. */
 export function registeredBy(sess: AuthSession): string {
   const name = `${sess.first_name}${sess.last_name ? ` ${sess.last_name}` : ""}`.trim();

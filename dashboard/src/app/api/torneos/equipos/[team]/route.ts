@@ -3,13 +3,15 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
 import { todayBA } from "@/lib/trainingDay";
 import { feeStanding, type FeeStanding, type Installment } from "@/lib/tournamentFees";
-import { loadTeam, memberKey, paymentsByMember, paymentsForTeams, type TeamPaymentRow } from "@/lib/tournaments";
+import { isFeeExempt, loadTeam, memberKey, paymentsByMember, paymentsForTeams, type TeamPaymentRow } from "@/lib/tournaments";
 
 export type TeamPlayer = {
   id: string;
   name: string;
   last_name: string;
   role: "starter" | "substitute";
+  /** Arquero: no paga la cuota. Su standing viene vacío. */
+  exempt: boolean;
   standing: FeeStanding;
   payments: Omit<TeamPaymentRow, "player_id" | "team_id">[];
 };
@@ -40,7 +42,7 @@ export const GET = withPermission('api', '/api/torneos/equipos', 'GET', async (_
 
     const [membersRes, payments] = await Promise.all([
       s.from("team_players")
-        .select("player_id,role,players(id,name,last_name)")
+        .select("player_id,role,players(id,name,last_name,player_type)")
         .eq("team_id", teamId),
       paymentsForTeams(s, [teamId]),
     ]);
@@ -52,18 +54,23 @@ export const GET = withPermission('api', '/api/torneos/equipos', 'GET', async (_
     type MemberRow = {
       player_id: string;
       role: string;
-      players: { id: string; name: string; last_name: string } | { id: string; name: string; last_name: string }[] | null;
+      players: PlayerCols | PlayerCols[] | null;
     };
+    type PlayerCols = { id: string; name: string; last_name: string; player_type: string };
     const players: TeamPlayer[] = (membersRes.data as unknown as MemberRow[] ?? [])
       .map((m) => {
         const p = Array.isArray(m.players) ? m.players[0] : m.players;
         const mine = byMember.get(memberKey(teamId, String(m.player_id))) ?? [];
+        const exempt = isFeeExempt(p?.player_type);
         return {
           id: String(m.player_id),
           name: p?.name ?? "?",
           last_name: p?.last_name ?? "?",
           role: (m.role === "substitute" ? "substitute" : "starter") as TeamPlayer["role"],
-          standing: feeStanding(head.category.installments, head.category.upfront_price, mine, today),
+          exempt,
+          standing: exempt
+            ? feeStanding([], null, mine, today)
+            : feeStanding(head.category.installments, head.category.upfront_price, mine, today),
           payments: mine.map(({ id, amount, concept, is_cash, created_at, registered_by }) => ({
             id, amount, concept, is_cash, created_at, registered_by,
           })),
