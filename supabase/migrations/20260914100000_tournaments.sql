@@ -111,17 +111,22 @@ GRANT ALL ON TABLE tournaments, tournament_categories, tournament_installments,
 -- Las tarifas se acordaron como A/B/C/D; acá quedan mapeadas en el orden de
 -- las categorías del torneo (A=Elite, B=Master, C=Senior, D=Rookies). Si el
 -- mapeo es otro, es un UPDATE sobre estas filas.
+-- Ids fijos, no generados: la base local y producción tienen que compartir el
+-- torneo y sus categorías para que los equipos (que llegan por migración con
+-- ids fijos también) y el import de producción calcen sin traducir nada.
 WITH t AS (
-  INSERT INTO tournaments (name) VALUES ('Interclubes Clausura 2026') RETURNING id
+  INSERT INTO tournaments (id, name)
+  VALUES ('6b1f2c3a-0001-4c26-9a11-000000000001', 'Interclubes Clausura 2026')
+  RETURNING id
 ), cats AS (
-  INSERT INTO tournament_categories (tournament_id, name, position, upfront_price)
-  SELECT t.id, c.name, c.position, c.upfront_price
+  INSERT INTO tournament_categories (id, tournament_id, name, position, upfront_price)
+  SELECT c.id::uuid, t.id, c.name, c.position, c.upfront_price
   FROM t CROSS JOIN (VALUES
-    ('Elite',   1, 178000),
-    ('Master',  2, 282000),
-    ('Senior',  3, 232000),
-    ('Rookies', 4, 151000)
-  ) AS c(name, position, upfront_price)
+    ('6b1f2c3a-0002-4c26-9a11-000000000001', 'Elite',   1, 178000),
+    ('6b1f2c3a-0002-4c26-9a11-000000000002', 'Master',  2, 282000),
+    ('6b1f2c3a-0002-4c26-9a11-000000000003', 'Senior',  3, 232000),
+    ('6b1f2c3a-0002-4c26-9a11-000000000004', 'Rookies', 4, 151000)
+  ) AS c(id, name, position, upfront_price)
   RETURNING id, name
 )
 INSERT INTO tournament_installments (category_id, month, amount)

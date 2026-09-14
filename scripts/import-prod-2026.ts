@@ -67,6 +67,7 @@ async function readAll(
 /** PostgREST refuses an unfiltered delete, so each table names a column that is
  * never null to stand in for "everything". */
 const WIPE_KEY: Record<string, string> = {
+    team_players: "team_id",
     whatsapp_login_tokens: "token_hash",
     training_slot_features: "weekday",
     prices: "valid_from",
@@ -107,16 +108,35 @@ const [users, players, prices, features, sessions, attendances, payments, expens
         readAll(prod, "cash_handoffs"),
     ]);
 
+// Los equipos de torneo y sus jugadores. Producción puede no tener las tablas
+// todavía (la migración de torneos corre antes en local que allá): entonces
+// no hay nada que copiar. El torneo y sus categorías no se copian porque vienen
+// por migración con ids fijos, los mismos que los equipos referencian.
+async function readIfExists(table: string): Promise<Record<string, unknown>[]> {
+    const { error } = await prod.from(table).select("*").limit(1);
+    if (error) {
+        console.log(`  ${table}: producción no tiene la tabla todavía, se saltea`);
+        return [];
+    }
+    return readAll(prod, table);
+}
+const teams = await readIfExists("teams");
+const teamPlayers = teams.length ? await readIfExists("team_players") : [];
+
 console.log("Escribiendo local");
 // Children first: every one of these points at users or players.
 for (const t of [
     "payments", "attendances", "whatsapp_login_tokens", "cash_handoffs",
     "expenses", "training_sessions", "training_slot_features", "prices",
-    "players", "users",
+    "team_players", "teams", "players", "users",
 ]) await wipe(t);
 
 await insert("users", users);
 await insert("players", players);
+// Local ya tiene los equipos de la migración; con los de producción, que son
+// los mismos ids, la lista queda completa (el seed sólo trae parte del roster).
+await insert("teams", teams);
+await insert("team_players", teamPlayers);
 // Local's schema can run ahead of production, and then the imported row would
 // silently undo a migration — which is exactly what happened with the
 // goalkeeper price. Where a column does not exist there yet, the import
