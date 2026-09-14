@@ -222,3 +222,41 @@ propias categorías), así que el script deriva `training_slot_features` igual q
 la migración **y lo verifica**: cada sesión tiene que resolver exactamente las
 features que producción tenía en ella. Hoy son cinco configuraciones para 105
 sesiones — las categorías de las 21hs y las 22hs cambiaron el 2026-05-07.
+
+## `tournament-roster.ts` — la lista de un torneo contra producción
+
+Cruza la lista de equipos y jugadores de un torneo (CSV en `backfill/`) contra
+producción por DNI, y cuando todo resuelve emite la migración que carga los
+equipos. Producción sólo se lee.
+
+```sh
+deno run --allow-net --allow-env --allow-read scripts/tournament-roster.ts \
+  backfill/interclubes-clausura-2026.csv            # reporte
+deno run --allow-net --allow-env --allow-read scripts/tournament-roster.ts \
+  backfill/interclubes-clausura-2026.csv --sql \
+  > supabase/migrations/<timestamp>_clausura_2026_teams.sql
+deno run --allow-net --allow-env --allow-read scripts/tournament-roster.ts \
+  backfill/interclubes-clausura-2026.csv --verify   # después del db push
+```
+
+Columnas: `equipo,categoria,apellido,nombre,designacion,dni,player_id`.
+`designacion` (C capitán, A alterno, GK arquero) es informativa y no se guarda.
+Todos entran como titulares.
+
+**El DNI manda.** El nombre sólo explica lo que el DNI no resuelve:
+
+| Marca | Qué pasó | Qué hacer |
+|---|---|---|
+| `✓` | Está, por DNI | nada |
+| `✓ … está sin DNI` | Mismo nombre letra por letra, sin DNI cargado | nada: la migración le carga el DNI |
+| `?` | No hay ese DNI; hay alguien parecido | si es la misma persona, poner su `player_id` en el CSV |
+| `✗ … ese DNI es de` | El DNI de la fila es de otra persona | corregir el CSV |
+| `✗ … no está` | No hay nadie parecido | darlo de alta y volver a correr |
+
+Un `player_id` confirma a la persona; si producción ya le tiene otro DNI real,
+el script lo marca y no genera SQL hasta que alguien corrija uno de los dos.
+
+`--sql` se niega mientras haya filas sin resolver. La migración que emite
+referencia jugadores por DNI, carga el DNI a los que no lo tenían, y **no
+falla si faltan jugadores**: en la base local antes del import de producción
+sólo está el seed. Que en producción hayan entrado todos lo dice `--verify`.

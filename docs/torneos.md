@@ -91,8 +91,11 @@ Las tarifas se acordaron como A/B/C/D y acá están mapeadas en el orden de las
 categorías. **Si el mapeo es otro, es un UPDATE sobre esas filas**, no un
 cambio de código.
 
-Los equipos y sus jugadores entran con una migración propia cuando estén las
-listas.
+Los equipos y sus jugadores entran con una migración propia, generada por
+`scripts/tournament-roster.ts` a partir de `backfill/interclubes-clausura-2026.csv`
+(ver `scripts/README.md`). El torneo, sus categorías y sus equipos llevan ids
+fijos para que local y producción coincidan y el import de producción copie
+`team_players` tal cual.
 
 ## Pantallas
 
