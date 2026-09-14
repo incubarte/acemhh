@@ -4,6 +4,7 @@ const LABELS: Record<string, string> = {
   "cat-a": "Categoría A",
   "cat-b": "Categoría B",
   "cat-c": "Categoría C",
+  "cat-d": "Categoría D",
   youth: "Juveniles",
 };
 

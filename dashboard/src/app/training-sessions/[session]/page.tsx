@@ -46,7 +46,7 @@ type PlayerWithAttendance = Player & {
   section: "jugadores" | "invitados" | "arqueros";
 };
 
-const ALL_CATEGORIES = ["youth", "cat-c", "cat-b", "cat-a"];
+const ALL_CATEGORIES = ["youth", "cat-d", "cat-c", "cat-b", "cat-a"];
 
 // How faded the attendance face is when a player did not attend. Low enough to read
 // as "off" at a glance on a phone, high enough to stay visible on the dark theme.
@@ -55,6 +55,7 @@ const AbsentOpacity = 0.3;
 const CATEGORY_SHORT_LABELS: Record<string, string> = {
   "u-14": "Menores",
   "youth": "Juv",
+  "cat-d": "Cat D",
   "cat-c": "Cat C",
   "cat-b": "Cat B",
   "cat-a": "Cat A",

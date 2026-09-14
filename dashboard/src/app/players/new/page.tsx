@@ -183,6 +183,7 @@ function NewPlayerForm({ returnTo, invitee, defaultCategory, defaultPlayerType }
 
   const categoryOptions = useMemo(() => [
     { value: "youth", label: "Juveniles" },
+    { value: "cat-d", label: "Categoría D" },
     { value: "cat-c", label: "Categoría C" },
     { value: "cat-b", label: "Categoría B" },
     { value: "cat-a", label: "Categoría A" },

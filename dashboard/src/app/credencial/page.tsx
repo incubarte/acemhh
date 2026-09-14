@@ -48,6 +48,7 @@ function formatBirthDate(date: string): string {
 
 const CATEGORY_LABELS: Record<string, string> = {
   "youth": "Juv.",
+  "cat-d": "Cat. D",
   "cat-c": "Cat. C",
   "cat-b": "Cat. B",
   "cat-a": "Cat. A",
