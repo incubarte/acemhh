@@ -32,10 +32,20 @@ export type IncomePayment = {
    * and never reach the caja anyway (they go to the bank). */
   slot_weekday: number | null;
   slot_hour: number | null;
+  /** Tournament fees are collected at no slot either, but they are not
+   * "slotless" money: the caja says what they are. */
+  concept?: string;
 };
 
 /** What a group without a slot is called on screen. */
 export const NoSlotLabel = "sin slot";
+
+/** What tournament fee income is called on screen. */
+export const TournamentLabel = "torneo";
+
+function isTournament(concept: string | undefined): boolean {
+  return concept === "tournament" || concept === "tournament upfront";
+}
 
 export type IncomeGroup = {
   user_id: string;
@@ -56,7 +66,9 @@ export function groupIncomeByDay(payments: IncomePayment[]): IncomeGroup[] {
 
   for (const p of [...payments].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
     const day = collectionDay(p.created_at);
-    const slot = p.slot_weekday !== null && p.slot_hour !== null
+    const slot = isTournament(p.concept)
+      ? TournamentLabel
+      : p.slot_weekday !== null && p.slot_hour !== null
       ? slotLabel(p.slot_weekday, p.slot_hour)
       : NoSlotLabel;
     const key = `${p.user_id}|${day}|${slot}`;
