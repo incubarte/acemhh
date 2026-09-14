@@ -93,9 +93,11 @@ cambio de código.
 
 Los equipos y sus jugadores entran con una migración propia, generada por
 `scripts/tournament-roster.ts` a partir de `backfill/interclubes-clausura-2026.csv`
-(ver `scripts/README.md`). El torneo, sus categorías y sus equipos llevan ids
-fijos para que local y producción coincidan y el import de producción copie
-`team_players` tal cual.
+(ver `scripts/README.md`): `20260914110000_clausura_2026_teams.sql`. El torneo,
+sus categorías y sus equipos llevan ids fijos para que local y producción
+coincidan y el import de producción copie `team_players` tal cual. Los
+jugadores del equipo D suman además la categoría `cat-d`
+(`20260914120000_rookies_cat_d.sql`).
 
 ## Pantallas
 
