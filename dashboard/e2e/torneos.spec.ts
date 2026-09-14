@@ -244,7 +244,7 @@ test("un monto libre se registra tal cual, y 45 quiere decir 45k", async ({ page
   await expect(standingOf(page, "Nada")).toHaveText("debe $15k");
 });
 
-test("el torneo anticipado deja todo en verde y va a la cuenta, no a la caja", async ({ page }) => {
+test("el torneo anticipado deja todo en verde", async ({ page }) => {
   await page.goto(`/torneos/equipos/${teams.get(TEAM_NEW)}`);
   await page.locator(`[data-player-row="${players.get("Adelantado")}"]`).click();
   await page.getByTestId("register-payment").click();
@@ -266,7 +266,7 @@ test("el torneo anticipado deja todo en verde y va a la cuenta, no a la caja", a
   expect({ ...data![0], amount: Number(data![0].amount) }).toEqual({
     concept: "tournament upfront",
     amount: UPFRONT,
-    is_cash: false,
+    is_cash: true,
     team_id: teams.get(TEAM_NEW),
     slot_weekday: null,
     session: null,
@@ -346,29 +346,13 @@ test("el servicio no deja pasar un anticipado fuera de regla", async ({ page }) 
   expect(count).toBe(0);
 });
 
-test("la cuota va a la cuenta: no toca la caja; si alguna vez entra en efectivo, la caja la llama torneo", async ({ page }) => {
-  // Lo registrado desde la pantalla es transferencia y no suma a ninguna caja.
+test("la cuota es efectivo: suma a la caja de quien la registra, y la caja la llama torneo", async ({ page }) => {
   const { data: fromScreen } = await admin().from("payments")
     .select("is_cash")
     .in("player_id", [players.get("Parcial")!, players.get("Nada")!, players.get("Adelantado")!])
     .not("registered_by_user_id", "is", null);
   expect(fromScreen!.length).toBeGreaterThan(0);
-  expect(fromScreen!.every((p) => p.is_cash === false)).toBe(true);
-
-  // Un pago de torneo en efectivo (cargado a mano) sí llega, y con su nombre.
-  const me = await (await page.request.get("/api/me")).json() as { id: string };
-  const { error } = await admin().from("payments").insert({
-    id: crypto.randomUUID(),
-    player_id: players.get("Moroso")!,
-    team_id: teams.get(TEAM_OLD)!,
-    registered_by: "__test",
-    registered_by_user_id: me.id,
-    concept: "tournament",
-    month: todayBA().slice(0, 7),
-    amount: 5000,
-    is_cash: true,
-  });
-  if (error) throw new Error(JSON.stringify(error));
+  expect(fromScreen!.every((p) => p.is_cash === true)).toBe(true);
 
   const res = await page.request.get("/api/caja");
   expect(res.ok()).toBeTruthy();

@@ -497,9 +497,9 @@ function TeamContent() {
           player_id: selected.id,
           amount: choice.amount,
           concept: choice.concept,
-          // La cuota del torneo va a la cuenta del club, como la cuota social:
-          // no pasa por la caja de quien la registra.
-          is_cash: false,
+          // La cuota del torneo se cobra siempre en efectivo: suma a la caja
+          // de quien la registra, y la caja la lista como "torneo".
+          is_cash: true,
         }),
       });
       if (!res.ok) {

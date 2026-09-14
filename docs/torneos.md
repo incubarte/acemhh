@@ -74,7 +74,7 @@ plata y no puede vivir sólo en el botón.
 | `team_id` | El equipo. Obligatorio para estos conceptos, nulo para el resto. |
 | `month` | Cuándo se cobró, no a qué cuota va. La columna es obligatoria para todo concepto. |
 | `slot_weekday`, `slot_hour`, `session` | Nulos: el torneo no pertenece a ningún entrenamiento. |
-| `is_cash` | `false` desde la pantalla: la cuota va a la cuenta del club, como la cuota social, y no toca la caja de nadie. La ruta acepta `true` por si alguna vez se cobra en efectivo; la caja lo lista como "torneo". |
+| `is_cash` | Siempre `true`: la cuota se cobra en efectivo, suma a la caja de quien la registra, y la caja la lista como "torneo". |
 
 Todo lo que lee `payments` filtra por lista de conceptos, así que los pagos de
 torneo no entran al ledger de entrenamientos, al análisis ni a la credencial.
