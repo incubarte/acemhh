@@ -35,6 +35,7 @@ npm run dev
 - `/login` Telegram login
 - `/dues` Register dues payment
 - `/players/new` New player form
+- `/torneos` Tournaments: teams by category, and per-team fee collection (`/torneos/equipos/<team>`)
 
 ## API
 
@@ -44,3 +45,6 @@ npm run dev
 - `GET /api/players?id=...` get player by id
 - `POST /api/players` create player
 - `POST /api/payments/dues` register payment
+- `GET /api/torneos` active tournaments with their teams and how each is doing with the fee
+- `GET /api/torneos/equipos/<team>` a team's players, their fee standing and payments
+- `POST /api/torneos/equipos/<team>/pago` register a tournament fee payment

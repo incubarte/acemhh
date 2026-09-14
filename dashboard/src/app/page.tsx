@@ -7,6 +7,7 @@ import { usePageTitle } from "./components/PageTitleContext";
 
 const BUTTONS = [
   { href: "/training-sessions", label: "📋 Asistencia y Pagos" },
+  { href: "/torneos", label: "🏆 Torneos" },
   { href: "/players/new", label: "🧑🏻‍🦽‍➡️ Nuevo Jugador" },
   { href: "/payments", label: "🏛️ Cuota Social" },
   { href: "/caja", label: "💰 Caja" },
