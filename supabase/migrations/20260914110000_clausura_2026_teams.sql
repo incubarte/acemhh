@@ -11,20 +11,8 @@
 -- después del db push.
 --
 -- Los primeros 12 jugadores de campo de cada lista son titulares, del
--- 13 en adelante suplentes; los arqueros, titulares.
-
--- Jugadores que estaban cargados sin DNI. Se los identifica por id (el de
--- producción; en local la fila no existe hasta el import y el UPDATE no
--- toca nada) y sólo se escribe donde no había un DNI real.
-UPDATE players SET dni = '44996832'
-  WHERE id = '9c9f36db-7b39-4899-a410-5ea2d2852ca7' AND (dni IS NULL OR length(dni) < 6)
-  AND NOT EXISTS (SELECT 1 FROM players WHERE dni = '44996832'); -- Chevallier, Jose
-UPDATE players SET dni = '32266699'
-  WHERE id = '1860b51f-b150-4898-9fe5-9d3ef30239df' AND (dni IS NULL OR length(dni) < 6)
-  AND NOT EXISTS (SELECT 1 FROM players WHERE dni = '32266699'); -- Vespignani, Malena
-UPDATE players SET dni = '43820812'
-  WHERE id = 'ffcfdf9a-4438-430a-86c0-77fe5a770ea3' AND (dni IS NULL OR length(dni) < 6)
-  AND NOT EXISTS (SELECT 1 FROM players WHERE dni = '43820812'); -- Morgan, Thomas
+-- 13 en adelante suplentes; los arqueros, titulares. Salvo donde la lista
+-- dice otra cosa (columna rol).
 
 WITH t AS (
   SELECT id FROM tournaments WHERE name = 'Interclubes Clausura 2026'
@@ -33,12 +21,12 @@ WITH t AS (
   SELECT v.id::uuid, t.id, c.id, v.team
   FROM t
   CROSS JOIN (VALUES
-    ('7676370c-176a-450d-9cd3-029e71cea463', 'ACEMHH A', 'Elite'),
-    ('c4c13bbc-ab2d-44b1-b700-737e652756f0', 'ACEMHH B Linces', 'Master'),
-    ('9ebe0666-55d0-4c46-a673-52622e5f1c33', 'ACEMHH B', 'Master'),
-    ('f7a1f360-0d7f-45df-9a16-72c75432bb5b', 'ACEMHH C1', 'Senior'),
-    ('bbace017-fada-499d-8e64-5c963793b906', 'ACEMHH C2', 'Senior'),
-    ('b456cf2f-7907-4785-bfcc-3237be3d826b', 'ACEMHH D', 'Rookies')
+    ('550ecc8e-0684-4c36-8bc1-61cc87528d1a', 'ACEMHH A', 'Elite'),
+    ('f3be9f9f-b7e3-4a30-8246-1dbce85817cd', 'ACEMHH B Linces', 'Master'),
+    ('a7c56b35-6caa-4edb-ba61-0ad320c2bd70', 'ACEMHH B', 'Master'),
+    ('877af798-ac30-499f-8912-2790eddc7a96', 'ACEMHH C1', 'Senior'),
+    ('ce14d510-b81c-4b4a-b841-8e3453e55177', 'ACEMHH C2', 'Senior'),
+    ('a819a1aa-3c6b-4e55-af52-67865214790e', 'ACEMHH D', 'Rookies')
   ) AS v(id, team, category)
   JOIN tournament_categories c ON c.tournament_id = t.id AND c.name = v.category
   RETURNING id, name
@@ -66,8 +54,8 @@ FROM (VALUES
   ('ACEMHH B Linces', '37406659', 'starter'),  -- Tibaudin, Sacha
   ('ACEMHH B Linces', '39919457', 'starter'),  -- Zorrilla, Nahuel
   ('ACEMHH B Linces', '40394940', 'starter'),  -- Naredo, Luciano
-  ('ACEMHH B Linces', '25846735', 'starter'),  -- Barrio, Ariel
-  ('ACEMHH B Linces', '46026135', 'starter'),  -- Thompson, Luca
+  ('ACEMHH B Linces', '25846735', 'substitute'),  -- Barrio, Ariel
+  ('ACEMHH B Linces', '46026135', 'substitute'),  -- Thompson, Luca
   ('ACEMHH B Linces', '42662568', 'starter'),  -- Tubio, Damian [GK]
   ('ACEMHH B Linces', '50701847', 'starter'),  -- Parodi, Juan Cruz [GK]
   ('ACEMHH B', '45481386', 'starter'),  -- Mamani, Nazareno
@@ -79,7 +67,7 @@ FROM (VALUES
   ('ACEMHH B', '40231173', 'starter'),  -- Fornari, Mariano
   ('ACEMHH B', '49302545', 'starter'),  -- Marquez, Noah
   ('ACEMHH B', '41586780', 'starter'),  -- Suez, Tomás
-  ('ACEMHH B', '40785302', 'starter'),  -- Ataniya, Ivan
+  ('ACEMHH B', '40785302', 'substitute'),  -- Ataniya, Ivan
   ('ACEMHH B', '30592884', 'starter'),  -- Augier, Guadalupe
   ('ACEMHH B', '50701847', 'starter'),  -- Parodi, Juan Cruz [GK]
   ('ACEMHH B', '42662568', 'starter'),  -- Tubio, Damian [GK]

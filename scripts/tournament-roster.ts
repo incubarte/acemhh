@@ -15,12 +15,13 @@
 // para explicar lo que el DNI no resuelve — "no está" no es lo mismo que
 // "está sin DNI cargado" — y para avisar cuando un DNI apunta a otra persona.
 //
-// Columnas del CSV: equipo,categoria,apellido,nombre,designacion,dni,player_id.
+// Columnas del CSV: equipo,categoria,apellido,nombre,designacion,dni,player_id,rol.
 //
 // - `designacion` (C = capitán, A = alterno, GK = arquero) no se guarda, pero
 //   decide el rol junto con el orden de la lista: los primeros 12 jugadores de
 //   campo son titulares y del 13 en adelante suplentes; los arqueros van al
-//   final de la lista y entran como titulares.
+//   final de la lista y entran como titulares. `rol` (titular/suplente), si
+//   está, pisa esa inferencia: es para el que el club decidió aparte.
 // - `player_id` es opcional y es la forma de confirmar a mano a quién se
 //   refiere una fila cuando el nombre no coincide exacto ("Chevallier" vs
 //   "Chevalier"). Con el id, la migración le carga el DNI de la lista si no
@@ -51,6 +52,7 @@ type Row = {
     designation: string;
     dni: string;
     player_id: string;
+    role_override: "" | "titular" | "suplente";
 };
 
 type Player = { id: string; name: string; last_name: string; dni: string | null };
@@ -76,6 +78,7 @@ function parseCsv(text: string): Row[] {
         designation: col("designacion"),
         dni: col("dni"),
         player_id: col("player_id", false),
+        role: col("rol", false),
     };
     return lines.slice(1).map((l) => {
         const f = l.split(",").map((x) => x.trim());
@@ -87,6 +90,7 @@ function parseCsv(text: string): Row[] {
             designation: f[c.designation],
             dni: f[c.dni],
             player_id: c.player_id >= 0 ? (f[c.player_id] ?? "") : "",
+            role_override: (c.role >= 0 ? (f[c.role] ?? "") : "") as Row["role_override"],
         };
     });
 }
@@ -107,6 +111,13 @@ const roleOf = new Map<Row, "starter" | "substitute">();
 {
     const seen = new Map<string, number>();
     for (const r of rows) {
+        if (r.role_override) {
+            if (r.role_override !== "titular" && r.role_override !== "suplente") {
+                throw new Error(`${r.last_name}, ${r.name}: rol "${r.role_override}" no es titular ni suplente`);
+            }
+            roleOf.set(r, r.role_override === "suplente" ? "substitute" : "starter");
+            continue;
+        }
         if (r.designation === "GK") {
             roleOf.set(r, "starter");
             continue;
@@ -307,7 +318,8 @@ out.push(`--   scripts/tournament-roster.ts <csv> --verify`);
 out.push(`-- después del db push.`);
 out.push(`--`);
 out.push(`-- Los primeros ${Starters} jugadores de campo de cada lista son titulares, del`);
-out.push(`-- ${Starters + 1} en adelante suplentes; los arqueros, titulares.`);
+out.push(`-- ${Starters + 1} en adelante suplentes; los arqueros, titulares. Salvo donde la lista`);
+out.push(`-- dice otra cosa (columna rol).`);
 out.push(``);
 if (fills.length) {
     out.push(`-- Jugadores que estaban cargados sin DNI. Se los identifica por id (el de`);

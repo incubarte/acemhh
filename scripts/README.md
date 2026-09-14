@@ -239,11 +239,12 @@ deno run --allow-net --allow-env --allow-read scripts/tournament-roster.ts \
   backfill/interclubes-clausura-2026.csv --verify   # después del db push
 ```
 
-Columnas: `equipo,categoria,apellido,nombre,designacion,dni,player_id`.
+Columnas: `equipo,categoria,apellido,nombre,designacion,dni,player_id,rol`.
 `designacion` (C capitán, A alterno, GK arquero) no se guarda, pero decide el
 rol junto con el orden de la lista: los primeros 12 jugadores de campo de cada
 equipo son titulares, del 13 en adelante suplentes, y los arqueros (que van al
-final) titulares.
+final) titulares. `rol` (`titular` o `suplente`) pisa esa inferencia para un
+jugador puntual.
 
 **El DNI manda.** El nombre sólo explica lo que el DNI no resuelve:
 
