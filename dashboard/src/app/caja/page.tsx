@@ -26,7 +26,7 @@ function deltaLabel(delta: number) {
 
 function FlowLine({ entry }: { entry: FlowEntry }) {
   const row = (icon: string, text: React.ReactNode) => (
-    <div style={{
+    <div data-testid="caja-flow" data-at={entry.at} style={{
       display: "flex",
       alignItems: "baseline",
       gap: 8,
@@ -145,6 +145,17 @@ function CajaContent() {
           ))}
       </Card>
 
+      {/* Las acciones van arriba: se llega acá para registrar algo, y el
+          historial de abajo es largo. */}
+      <div data-testid="caja-actions" style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 16 }}>
+        <Link href="/caja/egreso" style={{ textDecoration: "none" }}>
+          <button className="btnPrimary" style={{ width: "100%" }}>📤 Registrar egreso</button>
+        </Link>
+        <Link href="/caja/handoff" style={{ textDecoration: "none" }}>
+          <button className="btnPrimary" style={{ width: "100%" }}>🔁 Entregar caja</button>
+        </Link>
+      </div>
+
       {data.pending.length > 0 && (
         <Card title="Entregas pendientes de confirmación">
           {data.pending.map((h) => (
@@ -185,7 +196,12 @@ function CajaContent() {
           ))}
         </select>
 
-        {/* The ledger opens with what was already in the caja: everything
+        {/* Newest first: what just happened is what one comes to check. The
+            running balance still reads top-down as the caja right after each
+            movement, ending in what it opened with. */}
+        {[...data.history].reverse().map((e, i) => <FlowLine key={i} entry={e} />)}
+
+        {/* The ledger opened with what was already in the caja: everything
             before August, which the movements list does not itemize. */}
         <div
           data-testid="caja-opening"
@@ -194,7 +210,6 @@ function CajaContent() {
             alignItems: "baseline",
             gap: 8,
             padding: "8px 0",
-            borderBottom: "1px solid rgba(255,255,255,0.07)",
           }}
         >
           <span>🏦</span>
@@ -213,21 +228,10 @@ function CajaContent() {
           </span>
         </div>
 
-        {data.history.map((e, i) => <FlowLine key={i} entry={e} />)}
-
         {data.history.length === 0 && (
           <p style={{ margin: "8px 0 0", opacity: 0.7 }}>Sin movimientos desde agosto.</p>
         )}
       </Card>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 20 }}>
-        <Link href="/caja/egreso" style={{ textDecoration: "none" }}>
-          <button className="btnPrimary" style={{ width: "100%" }}>📤 Registrar egreso</button>
-        </Link>
-        <Link href="/caja/handoff" style={{ textDecoration: "none" }}>
-          <button className="btnPrimary" style={{ width: "100%" }}>🔁 Entregar caja</button>
-        </Link>
-      </div>
 
       {err ? <p style={{ color: "crimson", marginTop: 12 }}>{err}</p> : null}
     </div>

@@ -328,3 +328,28 @@ test("los cobros se discriminan por slot, y la entrega dice cuánto fue", async 
   await s.from("payments").delete().eq("player_id", player!.id);
   await s.from("players").delete().eq("id", player!.id);
 });
+
+test("la pantalla lista los movimientos del más nuevo al más viejo, con las acciones arriba", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  await page.goto("/caja");
+  const flows = page.getByTestId("caja-flow");
+  await expect(flows.first()).toBeVisible();
+  const ats = await flows.evaluateAll((els) => els.map((e) => e.getAttribute("data-at") ?? ""));
+  expect(ats.length).toBeGreaterThan(1);
+  expect([...ats].sort().reverse()).toEqual(ats);
+  // El saldo inicial cierra la lista, no la abre.
+  const opening = page.getByTestId("caja-opening");
+  expect(await opening.evaluate((el, last) =>
+    el.compareDocumentPosition(last) & Node.DOCUMENT_POSITION_PRECEDING, await flows.last().elementHandle())).toBeTruthy();
+  // Las acciones, entre "Cajas del club" y "Movimientos".
+  const actions = page.getByTestId("caja-actions");
+  const movimientos = page.getByText("Movimientos", { exact: true });
+  expect(await actions.evaluate((el, other) =>
+    el.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING, await movimientos.elementHandle())).toBeTruthy();
+});
+
+test("'partidos' es un concepto de egreso", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  await page.goto("/caja/egreso");
+  await expect(page.locator("select option", { hasText: "partidos" })).toHaveCount(1);
+});
