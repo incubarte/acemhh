@@ -221,9 +221,9 @@ test("el detalle lista los pagos y completar lo vencido deja el mes en verde", a
   await modal.getByTestId("confirm-payment").click();
 
   await expect(page.getByTestId("payment-toast")).toContainText("$30k");
-  // El detalle sigue abierto, ya con el pago nuevo.
-  await expect(sheet.getByTestId("payment-list")).toContainText("$30k");
-  await sheet.getByRole("button", { name: "Cerrar" }).click();
+  // Registrado: se cierra todo y la lista queda lista para el siguiente.
+  await expect(sheet).toHaveCount(0);
+  await expect(modal).toHaveCount(0);
 
   await expectStatuses(page, "Parcial", ["paid", "upcoming", "upcoming", "upcoming"]);
   await expect(standingOf(page, "Parcial")).toHaveText("al día · pagó $60k");
@@ -239,23 +239,22 @@ test("un monto libre se registra tal cual, y 45 quiere decir 45k", async ({ page
   await expect(modal).toContainText("$45k");
   await modal.getByTestId("confirm-payment").click();
   await expect(page.getByTestId("payment-toast")).toBeVisible();
-  await page.getByRole("button", { name: "Cerrar" }).click();
 
   await expectStatuses(page, "Nada", ["partial", "upcoming", "upcoming", "upcoming"]);
   await expect(standingOf(page, "Nada")).toHaveText("debe $15k");
 });
 
-test("el torneo anticipado deja todo en verde y queda como transferencia", async ({ page }) => {
+test("el torneo anticipado deja todo en verde y va a la cuenta, no a la caja", async ({ page }) => {
   await page.goto(`/torneos/equipos/${teams.get(TEAM_NEW)}`);
   await page.locator(`[data-player-row="${players.get("Adelantado")}"]`).click();
   await page.getByTestId("register-payment").click();
   const modal = page.getByTestId("payment-modal");
+  // Lo que debe hoy va primero; el anticipado, después.
+  await expect(modal.getByRole("button").first()).toHaveAttribute("data-testid", "pay-suggested");
   await expect(modal.getByTestId("pay-upfront")).toContainText("$178k");
   await modal.getByTestId("pay-upfront").click();
-  await modal.getByTestId("pay-bank").click();
   await modal.getByTestId("confirm-payment").click();
   await expect(page.getByTestId("payment-toast")).toBeVisible();
-  await page.getByRole("button", { name: "Cerrar" }).click();
 
   await expectStatuses(page, "Adelantado", ["paid", "paid", "paid", "paid"]);
   await expect(standingOf(page, "Adelantado")).toHaveText("torneo pago por anticipado");
@@ -272,6 +271,22 @@ test("el torneo anticipado deja todo en verde y queda como transferencia", async
     slot_weekday: null,
     session: null,
   });
+});
+
+test("tocar afuera del pago vuelve a la lista, sin botón de cancelar", async ({ page }) => {
+  await page.goto(`/torneos/equipos/${teams.get(TEAM_NEW)}`);
+  await page.locator(`[data-player-row="${players.get("Suplente")}"]`).click();
+  await page.getByTestId("register-payment").click();
+  const modal = page.getByTestId("payment-modal");
+  await expect(modal).toBeVisible();
+  await expect(modal.getByRole("button", { name: "Cancelar" })).toHaveCount(0);
+  await modal.getByTestId("pay-suggested").click();
+  await expect(modal.getByRole("button", { name: "Volver" })).toHaveCount(0);
+  // Afuera del popup: arriba a la izquierda, donde sólo está el fondo.
+  await page.mouse.click(5, 5);
+  await expect(modal).toHaveCount(0);
+  await expect(page.getByTestId("player-sheet")).toHaveCount(0);
+  await expect(page.getByTestId("section-titulares")).toBeVisible();
 });
 
 test("el arquero integra el equipo pero no paga: sin puntos, sin botón, y el servicio lo rechaza", async ({ page }) => {
@@ -331,9 +346,31 @@ test("el servicio no deja pasar un anticipado fuera de regla", async ({ page }) 
   expect(count).toBe(0);
 });
 
-test("la plata del torneo llega a la caja como torneo, no como sin slot", async ({ page }) => {
+test("la cuota va a la cuenta: no toca la caja; si alguna vez entra en efectivo, la caja la llama torneo", async ({ page }) => {
+  // Lo registrado desde la pantalla es transferencia y no suma a ninguna caja.
+  const { data: fromScreen } = await admin().from("payments")
+    .select("is_cash")
+    .in("player_id", [players.get("Parcial")!, players.get("Nada")!, players.get("Adelantado")!])
+    .not("registered_by_user_id", "is", null);
+  expect(fromScreen!.length).toBeGreaterThan(0);
+  expect(fromScreen!.every((p) => p.is_cash === false)).toBe(true);
+
+  // Un pago de torneo en efectivo (cargado a mano) sí llega, y con su nombre.
+  const me = await (await page.request.get("/api/me")).json() as { id: string };
+  const { error } = await admin().from("payments").insert({
+    id: crypto.randomUUID(),
+    player_id: players.get("Moroso")!,
+    team_id: teams.get(TEAM_OLD)!,
+    registered_by: "__test",
+    registered_by_user_id: me.id,
+    concept: "tournament",
+    month: todayBA().slice(0, 7),
+    amount: 5000,
+    is_cash: true,
+  });
+  if (error) throw new Error(JSON.stringify(error));
+
   const res = await page.request.get("/api/caja");
   expect(res.ok()).toBeTruthy();
-  const body = await res.text();
-  expect(body).toContain('"slot":"torneo"');
+  expect(await res.text()).toContain('"slot":"torneo"');
 });

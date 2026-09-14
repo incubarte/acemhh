@@ -74,7 +74,7 @@ plata y no puede vivir sólo en el botón.
 | `team_id` | El equipo. Obligatorio para estos conceptos, nulo para el resto. |
 | `month` | Cuándo se cobró, no a qué cuota va. La columna es obligatoria para todo concepto. |
 | `slot_weekday`, `slot_hour`, `session` | Nulos: el torneo no pertenece a ningún entrenamiento. |
-| `is_cash` | Lo elige quien cobra. En efectivo suma a su caja, y la caja lo lista como "torneo". |
+| `is_cash` | `false` desde la pantalla: la cuota va a la cuenta del club, como la cuota social, y no toca la caja de nadie. La ruta acepta `true` por si alguna vez se cobra en efectivo; la caja lo lista como "torneo". |
 
 Todo lo que lee `payments` filtra por lista de conceptos, así que los pagos de
 torneo no entran al ledger de entrenamientos, al análisis ni a la credencial.
@@ -114,8 +114,10 @@ admite `cat-d` además de `cat-c`.
 - `/torneos/equipos/<equipo>` — titulares y suplentes, cada uno con su línea
   ("al día", "debe $X", "torneo saldado") y sus puntos. Tocar la fila abre el
   detalle: cuota por cuota, los pagos registrados y el botón de registrar pago.
-- El pago ofrece completar lo vencido (o la próxima cuota si está al día), el
-  torneo anticipado cuando corresponde, y un monto libre. "45" quiere decir
-  45.000, como en la pantalla de entrenamientos. Efectivo o transferencia.
+- El pago ofrece primero completar lo vencido (o la próxima cuota si está al
+  día), después el torneo anticipado cuando corresponde, y un monto libre. "45"
+  quiere decir 45.000, como en la pantalla de entrenamientos. No hay botones de
+  cancelar ni de volver: tocar afuera cierra y devuelve a la lista, y un pago
+  registrado también cierra todo, para seguir con el siguiente jugador.
 
 Los permisos son de `WHEEL`: el mismo grupo que cobra los entrenamientos.

@@ -288,18 +288,19 @@ function PlayerSheet({ p, onClose, onPay }: {
 
 type Choice = { amount: number; concept: TournamentConcept };
 
+// Sin botones de cancelar ni de volver: tocar afuera cierra todo y devuelve a
+// la lista. La pantalla se usa cobrando en fila, y cada toque de más cuesta.
 function PaymentModal({ p, upfrontPrice, onClose, onConfirm, busy, error }: {
   p: TeamPlayer;
   upfrontPrice: number | null;
   onClose: () => void;
-  onConfirm: (choice: Choice, isCash: boolean) => void;
+  onConfirm: (choice: Choice) => void;
   busy: boolean;
   error: string | null;
 }) {
   const s = p.standing;
   const [chosen, setChosen] = useState<Choice | null>(null);
   const [custom, setCustom] = useState("");
-  const [isCash, setIsCash] = useState(true);
 
   const nextMonth = s.installments.find((i) => i.paid < i.amount)?.month;
   const suggestedLabel = s.outstandingNow > 0
@@ -318,15 +319,6 @@ function PaymentModal({ p, upfrontPrice, onClose, onConfirm, busy, error }: {
     fontSize: "0.95rem",
     textAlign: "left",
   };
-  const toggle = (on: boolean): React.CSSProperties => ({
-    flex: 1,
-    padding: "10px",
-    borderRadius: 8,
-    border: on ? "1px solid rgba(36,179,91,0.8)" : "1px solid rgba(255,255,255,0.2)",
-    background: on ? "rgba(36,179,91,0.25)" : "rgba(255,255,255,0.04)",
-    fontWeight: on ? 600 : 400,
-  });
-
   return (
     <Overlay>
       <div
@@ -360,6 +352,16 @@ function PaymentModal({ p, upfrontPrice, onClose, onConfirm, busy, error }: {
 
           {chosen === null ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
+              {/* Lo más común va primero: lo que debe hoy. */}
+              {s.nextSuggested !== null && suggestedLabel && (
+                <button
+                  data-testid="pay-suggested"
+                  style={button}
+                  onClick={() => setChosen({ amount: s.nextSuggested!, concept: "tournament" })}
+                >
+                  {suggestedLabel} · <strong>${formatArs(s.nextSuggested)}</strong>
+                </button>
+              )}
               {/* Sólo para quien no pagó nada y antes de que venza la primera
                   cuota: el torneo entero, más barato que la suma. */}
               {s.upfrontAvailable && upfrontPrice !== null && (
@@ -372,15 +374,6 @@ function PaymentModal({ p, upfrontPrice, onClose, onConfirm, busy, error }: {
                   <span style={{ display: "block", fontSize: "0.75rem", opacity: 0.65 }}>
                     en vez de ${formatArs(s.total)} en cuotas
                   </span>
-                </button>
-              )}
-              {s.nextSuggested !== null && suggestedLabel && (
-                <button
-                  data-testid="pay-suggested"
-                  style={button}
-                  onClick={() => setChosen({ amount: s.nextSuggested!, concept: "tournament" })}
-                >
-                  {suggestedLabel} · <strong>${formatArs(s.nextSuggested)}</strong>
                 </button>
               )}
               <div style={{ display: "flex", gap: 8 }}>
@@ -415,12 +408,6 @@ function PaymentModal({ p, upfrontPrice, onClose, onConfirm, busy, error }: {
                   OK
                 </button>
               </div>
-              <button
-                onClick={onClose}
-                style={{ ...button, textAlign: "center", background: "transparent" }}
-              >
-                Cancelar
-              </button>
             </div>
           ) : (
             <div style={{ marginTop: 14 }}>
@@ -432,29 +419,14 @@ function PaymentModal({ p, upfrontPrice, onClose, onConfirm, busy, error }: {
                   ? "Torneo completo por anticipado"
                   : "Cuota del torneo"}
               </p>
-              <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                <button data-testid="pay-cash" style={toggle(isCash)} onClick={() => setIsCash(true)}>
-                  Efectivo
-                </button>
-                <button data-testid="pay-bank" style={toggle(!isCash)} onClick={() => setIsCash(false)}>
-                  Transferencia
-                </button>
-              </div>
               {error && <p style={{ color: "crimson", fontSize: "0.85rem" }}>{error}</p>}
-              <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-                <button
-                  style={{ ...button, textAlign: "center" }}
-                  disabled={busy}
-                  onClick={() => setChosen(null)}
-                >
-                  Volver
-                </button>
+              <div style={{ marginTop: 16 }}>
                 <button
                   data-testid="confirm-payment"
                   className="btnPrimary"
-                  style={{ flex: 1 }}
+                  style={{ width: "100%" }}
                   disabled={busy}
-                  onClick={() => onConfirm(chosen, isCash)}
+                  onClick={() => onConfirm(chosen)}
                 >
                   Confirmar
                 </button>
@@ -513,7 +485,7 @@ function TeamContent() {
   const collected = payers.reduce((acc, p) => acc + p.standing.paid, 0);
   const dueSoFar = payers.reduce((acc, p) => acc + p.standing.dueSoFar, 0);
 
-  const confirm = async (choice: Choice, isCash: boolean) => {
+  const confirm = async (choice: Choice) => {
     if (!selected) return;
     setBusy(true);
     setPayError(null);
@@ -525,7 +497,9 @@ function TeamContent() {
           player_id: selected.id,
           amount: choice.amount,
           concept: choice.concept,
-          is_cash: isCash,
+          // La cuota del torneo va a la cuenta del club, como la cuota social:
+          // no pasa por la caja de quien la registra.
+          is_cash: false,
         }),
       });
       if (!res.ok) {
@@ -533,7 +507,9 @@ function TeamContent() {
         return;
       }
       await load();
+      // Registrado: de vuelta a la lista, listo para el siguiente jugador.
       setPaying(false);
+      setSelectedId(null);
       setToast(`✓ Pago de $${formatArs(choice.amount)} registrado`);
     } catch (e: unknown) {
       setPayError(e instanceof Error ? e.message : String(e));
@@ -607,7 +583,7 @@ function TeamContent() {
         <PaymentModal
           p={selected}
           upfrontPrice={detail.category.upfront_price}
-          onClose={() => setPaying(false)}
+          onClose={() => { setPaying(false); setSelectedId(null); }}
           onConfirm={confirm}
           busy={busy}
           error={payError}
