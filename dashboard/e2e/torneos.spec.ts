@@ -78,8 +78,8 @@ test.beforeAll(async () => {
   tournamentId = t.id;
 
   const { data: cats, error: cErr } = await s.from("tournament_categories").insert([
-    { tournament_id: tournamentId, name: "Nueva", position: 1, upfront_price: UPFRONT },
-    { tournament_id: tournamentId, name: "Vieja", position: 2, upfront_price: UPFRONT },
+    { tournament_id: tournamentId, name: "Nueva", position: 1, upfront_price: UPFRONT, substitute_price: 35000 },
+    { tournament_id: tournamentId, name: "Vieja", position: 2, upfront_price: UPFRONT, substitute_price: 35000 },
   ]).select("id,name");
   if (cErr) throw new Error(JSON.stringify(cErr));
   const cat = new Map(cats!.map((c) => [c.name, c.id]));
@@ -168,9 +168,10 @@ test("la lista agrupa los equipos por categoría y dice cuántos deben", async (
   const cardNew = nueva.getByTestId("team-card").filter({ hasText: TEAM_NEW });
   await expect(cardNew).toBeVisible();
   await expect(cardNew).toContainText("4 titulares · 1 suplente");
-  // Nadie completó la cuota de este mes todavía; el arquero no cuenta.
-  await expect(cardNew.getByTestId("team-up-to-date")).toHaveText("4 deben");
-  await expect(cardNew).toContainText("$30k de $240k");
+  // Nadie completó la cuota de este mes todavía. Ni el arquero ni el
+  // suplente tienen cuota, así que no cuentan.
+  await expect(cardNew.getByTestId("team-up-to-date")).toHaveText("3 deben");
+  await expect(cardNew).toContainText("$30k de $180k");
 
   const vieja = page.locator('[data-testid="category-section"][data-category="Vieja"]');
   const cardOld = vieja.getByTestId("team-card").filter({ hasText: TEAM_OLD });
@@ -191,12 +192,18 @@ test("los puntos: un mes entero y el 40% del siguiente es verde, amarillo, gris,
   await expect(page.getByTestId("team-summary")).toContainText("0 al día");
 });
 
-test("titulares y suplentes van en secciones distintas", async ({ page }) => {
+test("titulares, suplentes y arqueros van en secciones distintas", async ({ page }) => {
   await page.goto(`/torneos/equipos/${teams.get(TEAM_NEW)}`);
-  await expect(page.getByTestId("section-titulares").getByTestId("player-row")).toHaveCount(4);
+  await expect(page.getByTestId("section-titulares").getByTestId("player-row")).toHaveCount(3);
   const subs = page.getByTestId("section-suplentes").getByTestId("player-row");
   await expect(subs).toHaveCount(1);
   await expect(subs.first()).toContainText(`${LAST}, Suplente`);
+  // El suplente no tiene cuota: sin puntos, y su línea lo dice.
+  await expect(subs.first().getByTestId("fee-dot")).toHaveCount(0);
+  await expect(standingOf(page, "Suplente")).toHaveText("suplente · sin pagos");
+  const gks = page.getByTestId("section-arqueros").getByTestId("player-row");
+  await expect(gks).toHaveCount(1);
+  await expect(gks.first()).toContainText(`${LAST}, Arquero`);
   await expectStatuses(page, "Nada", ["due", "upcoming", "upcoming", "upcoming"]);
   await expectStatuses(page, "Parcial", ["partial", "upcoming", "upcoming", "upcoming"]);
 });
@@ -207,12 +214,17 @@ test("el detalle lista los pagos y completar lo vencido deja el mes en verde", a
 
   const sheet = page.getByTestId("player-sheet");
   await expect(sheet).toBeVisible();
+  await expect(sheet).toHaveAttribute("data-open", "true");
+  await expect(sheet.getByRole("button", { name: "Cerrar" })).toHaveCount(0);
   await expect(sheet.getByTestId("payment-list")).toContainText("$30k");
   await expect(sheet).toContainText("Pagó$30k de $195k");
   await expect(sheet).toContainText("Debe a la fecha$30k");
 
   await sheet.getByTestId("register-payment").click();
   const modal = page.getByTestId("payment-modal");
+  // El popup va encima del drawer; el drawer sigue ahí.
+  await expect(modal).toBeVisible();
+  await expect(sheet).toBeVisible();
   // Ya pagó algo: el anticipado no se ofrece.
   await expect(modal.getByTestId("pay-upfront")).toHaveCount(0);
   await expect(modal.getByTestId("pay-suggested")).toContainText("Completar lo vencido");
@@ -234,6 +246,9 @@ test("un monto libre se registra tal cual, y 45 quiere decir 45k", async ({ page
   await page.locator(`[data-player-row="${players.get("Nada")}"]`).click();
   await page.getByTestId("register-payment").click();
   const modal = page.getByTestId("payment-modal");
+  // "Otro monto..." es un botón; recién al tocarlo aparece el campo.
+  await expect(modal.getByTestId("custom-amount")).toHaveCount(0);
+  await modal.getByTestId("custom-toggle").click();
   await modal.getByTestId("custom-amount").fill("45");
   await modal.getByTestId("custom-ok").click();
   await expect(modal).toContainText("$45k");
@@ -273,9 +288,11 @@ test("el torneo anticipado deja todo en verde", async ({ page }) => {
   });
 });
 
-test("tocar afuera del pago vuelve a la lista, sin botón de cancelar", async ({ page }) => {
+test("tocar afuera cierra el popup y deja el drawer; otro toque afuera cierra el drawer", async ({ page }) => {
   await page.goto(`/torneos/equipos/${teams.get(TEAM_NEW)}`);
-  await page.locator(`[data-player-row="${players.get("Suplente")}"]`).click();
+  await page.locator(`[data-player-row="${players.get("Nada")}"] [role="button"]`).click();
+  const sheet = page.getByTestId("player-sheet");
+  await expect(sheet).toHaveAttribute("data-open", "true");
   await page.getByTestId("register-payment").click();
   const modal = page.getByTestId("payment-modal");
   await expect(modal).toBeVisible();
@@ -285,8 +302,34 @@ test("tocar afuera del pago vuelve a la lista, sin botón de cancelar", async ({
   // Afuera del popup: arriba a la izquierda, donde sólo está el fondo.
   await page.mouse.click(5, 5);
   await expect(modal).toHaveCount(0);
-  await expect(page.getByTestId("player-sheet")).toHaveCount(0);
+  await expect(sheet).toBeVisible();
+  await page.mouse.click(5, 5);
+  await expect(sheet).toHaveCount(0);
   await expect(page.getByTestId("section-titulares")).toBeVisible();
+});
+
+test("el + de la fila cobra sin abrir el detalle, y al suplente le propone 35k", async ({ page }) => {
+  await page.goto(`/torneos/equipos/${teams.get(TEAM_NEW)}`);
+  await page.locator(`[data-player-row="${players.get("Suplente")}"]`).getByTestId("row-pay").click();
+  const modal = page.getByTestId("payment-modal");
+  await expect(modal).toBeVisible();
+  await expect(page.getByTestId("player-sheet")).toHaveCount(0);
+  await expect(modal.getByTestId("pay-suggested")).toHaveCount(0);
+  await expect(modal.getByTestId("pay-upfront")).toHaveCount(0);
+  await expect(modal.getByTestId("pay-substitute")).toContainText("$35k");
+  await modal.getByTestId("pay-substitute").click();
+  await modal.getByTestId("confirm-payment").click();
+  await expect(page.getByTestId("payment-toast")).toContainText("$35k");
+  await expect(modal).toHaveCount(0);
+  await expect(standingOf(page, "Suplente")).toHaveText("suplente · pagó $35k");
+  await expect(page.getByTestId("team-summary")).toContainText("suplentes $35k");
+
+  // El suplente no tiene torneo que anticipar.
+  const res = await page.request.post(`/api/torneos/equipos/${teams.get(TEAM_NEW)}/pago`, {
+    data: { player_id: players.get("Suplente"), amount: UPFRONT, concept: "tournament upfront" },
+  });
+  expect(res.status()).toBe(409);
+  expect(await res.text()).toContain("suplentes");
 });
 
 test("el arquero integra el equipo pero no paga: sin puntos, sin botón, y el servicio lo rechaza", async ({ page }) => {
@@ -294,11 +337,11 @@ test("el arquero integra el equipo pero no paga: sin puntos, sin botón, y el se
   const row = page.locator(`[data-player-row="${players.get("Arquero")}"]`);
   await expect(row).toBeVisible();
   await expect(row.getByTestId("fee-dot")).toHaveCount(0);
+  await expect(row.getByTestId("row-pay")).toHaveCount(0);
   await expect(standingOf(page, "Arquero")).toHaveText("arquero · no paga cuota");
-  await expect(page.getByTestId("team-summary")).toContainText("4 jugadores pagan");
-  await expect(page.getByTestId("team-summary")).toContainText("1 arquero sin cuota");
+  await expect(page.getByTestId("team-summary")).toContainText("3 titulares");
 
-  await row.click();
+  await row.locator('[role="button"]').click();
   const sheet = page.getByTestId("player-sheet");
   await expect(sheet.getByTestId("exempt-note")).toBeVisible();
   await expect(sheet.getByTestId("register-payment")).toHaveCount(0);
@@ -321,9 +364,15 @@ test("el servicio no deja pasar un anticipado fuera de regla", async ({ page }) 
   expect(res.status()).toBe(409);
   expect(await res.text()).toContain("no pagó nada");
 
-  // Menos que el precio anticipado.
+  // Menos que el precio anticipado. Moroso no pagó nada, pero su primera
+  // cuota ya venció, así que la regla del monto se prueba con un titular
+  // nuevo que todavía no pagó.
+  const { data: fresh } = await admin().from("players")
+    .insert({ name: "Fresco", last_name: LAST, dni: "99002008", categories: ["cat-a"], player_type: "player", trains: false, invitee: false })
+    .select("id").single();
+  await admin().from("team_players").insert({ team_id: teams.get(TEAM_NEW)!, player_id: fresh!.id, role: "starter" });
   res = await post(TEAM_NEW, {
-    player_id: players.get("Suplente"), amount: UPFRONT - 1000, concept: "tournament upfront",
+    player_id: fresh!.id, amount: UPFRONT - 1000, concept: "tournament upfront",
   });
   expect(res.status()).toBe(409);
   expect(await res.text()).toContain("no admite pagos parciales");
@@ -342,7 +391,7 @@ test("el servicio no deja pasar un anticipado fuera de regla", async ({ page }) 
   // Nada de eso quedó registrado.
   const { count } = await admin().from("payments")
     .select("id", { count: "exact", head: true })
-    .in("player_id", [players.get("Suplente")!, players.get("Moroso")!]);
+    .in("player_id", [fresh!.id, players.get("Moroso")!]);
   expect(count).toBe(0);
 });
 

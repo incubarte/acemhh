@@ -3,15 +3,16 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
 import { todayBA } from "@/lib/trainingDay";
 import { feeStanding, type FeeStanding, type Installment } from "@/lib/tournamentFees";
-import { isFeeExempt, loadTeam, memberKey, paymentsByMember, paymentsForTeams, type TeamPaymentRow } from "@/lib/tournaments";
+import { feeKindOf, loadTeam, memberKey, paymentsByMember, paymentsForTeams, type FeeKind, type TeamPaymentRow } from "@/lib/tournaments";
 
 export type TeamPlayer = {
   id: string;
   name: string;
   last_name: string;
   role: "starter" | "substitute";
-  /** Arquero: no paga la cuota. Su standing viene vacío. */
-  exempt: boolean;
+  /** Cuotas, pago suelto de suplente, o nada (arquero). Fuera de
+   * `installments` el standing viene sin cuotas: sólo dice cuánto pagó. */
+  fee: FeeKind;
   standing: FeeStanding;
   payments: Omit<TeamPaymentRow, "player_id" | "team_id">[];
 };
@@ -23,6 +24,8 @@ export type TeamDetail = {
     id: string;
     name: string;
     upfront_price: number | null;
+    /** Lo que se le sugiere cobrar a un suplente. */
+    substitute_price: number | null;
     installments: Installment[];
   };
   /** YYYY-MM, hoy en Buenos Aires. */
@@ -61,16 +64,16 @@ export const GET = withPermission('api', '/api/torneos/equipos', 'GET', async (_
       .map((m) => {
         const p = Array.isArray(m.players) ? m.players[0] : m.players;
         const mine = byMember.get(memberKey(teamId, String(m.player_id))) ?? [];
-        const exempt = isFeeExempt(p?.player_type);
+        const fee = feeKindOf(String(m.role), p?.player_type);
         return {
           id: String(m.player_id),
           name: p?.name ?? "?",
           last_name: p?.last_name ?? "?",
           role: (m.role === "substitute" ? "substitute" : "starter") as TeamPlayer["role"],
-          exempt,
-          standing: exempt
-            ? feeStanding([], null, mine, today)
-            : feeStanding(head.category.installments, head.category.upfront_price, mine, today),
+          fee,
+          standing: fee === "installments"
+            ? feeStanding(head.category.installments, head.category.upfront_price, mine, today)
+            : feeStanding([], null, mine, today),
           payments: mine.map(({ id, amount, concept, is_cash, created_at, registered_by }) => ({
             id, amount, concept, is_cash, created_at, registered_by,
           })),

@@ -20,8 +20,9 @@ const heading: React.CSSProperties = {
 };
 
 function TeamCard({ team }: { team: TeamSummary }) {
-  // Los arqueros no pagan: no cuentan ni como al día ni como deudores.
-  const payers = team.players - team.exempt;
+  // Sólo los titulares tienen cuota: los arqueros no pagan y los suplentes
+  // pagan suelto, sin obligación. Ni unos ni otros son deudores.
+  const payers = team.players - team.exempt - team.substitutes;
   const owing = payers - team.upToDate;
   const allGood = payers > 0 && owing === 0;
   const roles = [
@@ -69,6 +70,7 @@ function TeamCard({ team }: { team: TeamSummary }) {
             </div>
             <div style={{ fontSize: "0.75rem", opacity: 0.6, margin: 0 }}>
               ${formatArs(team.collected)} de ${formatArs(team.dueSoFar)}
+              {team.substitutesPaid > 0 && ` · suplentes $${formatArs(team.substitutesPaid)}`}
             </div>
           </div>
         )}

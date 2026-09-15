@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
 import { todayBA } from "@/lib/trainingDay";
 import { feeStanding, TournamentConcepts, type TournamentConcept } from "@/lib/tournamentFees";
-import { isFeeExempt, loadTeam, paymentsForTeams, registeredBy } from "@/lib/tournaments";
+import { feeKindOf, loadTeam, paymentsForTeams, registeredBy } from "@/lib/tournaments";
 
 // Registrar un pago de la cuota del torneo para un jugador del equipo.
 //
@@ -44,15 +44,20 @@ export const POST = withPermission('api', '/api/torneos/pago', 'POST', async (se
 
     const { data: member, error: memberError } = await s
       .from("team_players")
-      .select("player_id,players(player_type)")
+      .select("player_id,role,players(player_type)")
       .eq("team_id", teamId)
       .eq("player_id", body.player_id)
       .maybeSingle();
     if (memberError) return new NextResponse(memberError.message, { status: 500 });
     if (!member) return new NextResponse("El jugador no integra este equipo", { status: 400 });
     const memberPlayer = Array.isArray(member.players) ? member.players[0] : member.players;
-    if (isFeeExempt((memberPlayer as { player_type?: string } | null)?.player_type)) {
+    const fee = feeKindOf(String(member.role), (memberPlayer as { player_type?: string } | null)?.player_type);
+    if (fee === "exempt") {
       return new NextResponse("Los arqueros no pagan la cuota del torneo", { status: 409 });
+    }
+    // El suplente paga suelto, sin cuotas: no hay torneo entero que anticipar.
+    if (fee === "substitute" && concept === "tournament upfront") {
+      return new NextResponse("Los suplentes no tienen cuota: se les registra un pago suelto", { status: 409 });
     }
 
     const today = todayBA().slice(0, 7);

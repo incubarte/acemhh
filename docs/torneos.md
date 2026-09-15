@@ -34,6 +34,14 @@ tiene dos cuotas.
 la lista: integran el equipo, pero no tienen puntos, no cuentan como al día ni
 como deudores, y el servicio rechaza registrarles un pago.
 
+**Los suplentes pagan suelto.** No tienen cuota ni obligación: se les registra
+lo que pagan, cuando pagan, y el monto sugerido es `substitute_price` de la
+categoría (35.000 en el Clausura 2026). No hay torneo anticipado para ellos.
+
+Así cada integrante es una de tres cosas (`fee` en la API): `installments` (los
+titulares, con cuotas), `substitute` o `exempt` (arqueros). El arquero manda
+sobre el rol.
+
 **Cada mes es una cuota, y los pagos no dicen a qué mes van.** Se admite
 cualquier monto — puede pagar menos o más que una cuota — y lo pagado se aplica
 a las cuotas en orden. Lo que importa es cuánto lleva pagado contra cuánto
@@ -111,13 +119,21 @@ admite `cat-d` además de `cat-c`.
 - `/torneos` — los torneos activos (pestañas si hay más de uno), sus
   categorías y equipos. Cada equipo dice cuántos jugadores tiene, cuántos
   deben, y cuánto se cobró de lo que debería llevarse cobrado.
-- `/torneos/equipos/<equipo>` — titulares y suplentes, cada uno con su línea
-  ("al día", "debe $X", "torneo saldado") y sus puntos. Tocar la fila abre el
-  detalle: cuota por cuota, los pagos registrados y el botón de registrar pago.
-- El pago ofrece primero completar lo vencido (o la próxima cuota si está al
-  día), después el torneo anticipado cuando corresponde, y un monto libre. "45"
-  quiere decir 45.000, como en la pantalla de entrenamientos. No hay botones de
-  cancelar ni de volver: tocar afuera cierra y devuelve a la lista, y un pago
-  registrado también cierra todo, para seguir con el siguiente jugador.
+- `/torneos/equipos/<equipo>` — titulares, suplentes y arqueros, cada uno con
+  su línea ("al día", "debe $X", "torneo saldado", "suplente · pagó $X") y, los
+  titulares, sus puntos. El + de la fila cobra directo. Tocar la fila abre el
+  detalle, un drawer que sube desde abajo: cuota por cuota, los pagos
+  registrados y el botón de registrar pago. No tiene botón de cerrar: tocar
+  afuera lo baja.
+- El pago se abre encima del drawer, que queda. Ofrece primero completar lo
+  vencido (o la próxima cuota si está al día), después el torneo anticipado si
+  no registró ningún pago todavía, y "Otro monto...", que al tocarlo se vuelve
+  un campo con su OK. Al suplente le ofrece su pago suelto. "45" quiere decir
+  45.000, como en la pantalla de entrenamientos. Sin botones de cancelar ni de
+  volver: tocar afuera cierra el popup, y un pago registrado cierra todo, para
+  seguir con el siguiente jugador.
+- La cuota se cobra en efectivo. En Caja entra a la caja de quien la registró,
+  y el filtro por tipo la separa de los cobros de entrenamiento y de las
+  matrículas anuales.
 
 Los permisos son de `WHEEL`: el mismo grupo que cobra los entrenamientos.

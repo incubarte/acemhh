@@ -63,6 +63,18 @@ export function isFeeExempt(playerType: string | null | undefined): boolean {
   return playerType === "goalkeeper";
 }
 
+/**
+ * Qué le corresponde pagar a un integrante: las cuotas del torneo
+ * (`installments`), un pago suelto sin obligación (`substitute`), o nada
+ * (`exempt`, los arqueros). El arquero manda sobre el rol.
+ */
+export type FeeKind = "installments" | "substitute" | "exempt";
+
+export function feeKindOf(role: string, playerType: string | null | undefined): FeeKind {
+  if (isFeeExempt(playerType)) return "exempt";
+  return role === "substitute" ? "substitute" : "installments";
+}
+
 /** El mismo texto que firman los otros cobros. */
 export function registeredBy(sess: AuthSession): string {
   const name = `${sess.first_name}${sess.last_name ? ` ${sess.last_name}` : ""}`.trim();
@@ -82,7 +94,7 @@ export async function loadTeam(s: SupabaseClient, teamId: string) {
 
   const [tRes, cRes, iRes] = await Promise.all([
     s.from("tournaments").select("id,name,is_active").eq("id", team.tournament_id).single(),
-    s.from("tournament_categories").select("id,name,upfront_price").eq("id", team.category_id).single(),
+    s.from("tournament_categories").select("id,name,upfront_price,substitute_price").eq("id", team.category_id).single(),
     s.from("tournament_installments").select("month,amount").eq("category_id", team.category_id).order("month"),
   ]);
   const firstError = tRes.error ?? cRes.error ?? iRes.error;
@@ -102,6 +114,7 @@ export async function loadTeam(s: SupabaseClient, teamId: string) {
       id: String(category.id),
       name: String(category.name),
       upfront_price: category.upfront_price === null ? null : Number(category.upfront_price),
+      substitute_price: category.substitute_price === null ? null : Number(category.substitute_price),
       installments: (iRes.data ?? []).map((i) => ({
         month: String(i.month),
         amount: Number(i.amount),

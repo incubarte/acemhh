@@ -141,8 +141,11 @@ export const RoleLabels: Record<string, string> = {
   substitute: "Suplente",
 };
 
-/** Pesos como los abrevian las pantallas: 30000 se lee "30k". */
+/** Pesos como los abrevian las pantallas: 30000 se lee "30k", y un millón
+ * "1.000k" para que los miles se cuenten de un vistazo. */
 export function formatArs(amount: number): string {
-  if (amount >= 1000 && amount % 1000 === 0) return `${amount / 1000}k`;
+  if (amount >= 1000 && amount % 1000 === 0) {
+    return `${new Intl.NumberFormat("es-AR").format(amount / 1000)}k`;
+  }
   return new Intl.NumberFormat("es-AR").format(amount);
 }

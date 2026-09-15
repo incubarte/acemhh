@@ -17,8 +17,8 @@ import {
 import type { TeamDetail, TeamPlayer } from "../../../api/torneos/equipos/[team]/route";
 
 // Un equipo: sus jugadores y cómo viene cada uno con la cuota del torneo. Un
-// punto por mes dice de un vistazo qué pagó y qué falta; tocar la fila abre
-// el detalle, y desde ahí se registra el pago.
+// punto por mes dice de un vistazo qué pagó y qué falta; el + de la fila cobra
+// directo, y tocar la fila abre el detalle con los pagos.
 
 const StatusColor: Record<InstallmentStatus, string> = {
   paid: "var(--acemhh-green)",
@@ -44,6 +44,9 @@ const heading: React.CSSProperties = {
   textTransform: "uppercase",
   opacity: 0.55,
 };
+
+/** Cuánto tarda el drawer en subir y en bajar. */
+const DrawerMs = 220;
 
 function formatWhen(iso: string): string {
   return new Intl.DateTimeFormat("es-AR", {
@@ -101,76 +104,136 @@ function FeeDots({ standing, size = 14, labels = false }: {
   );
 }
 
-/** Una línea: al día, debe tanto, o saldado. */
-function standingLine(s: FeeStanding): { text: string; color?: string } {
+/** Una línea: al día, debe tanto, saldado; o qué es el que no tiene cuota. */
+function standingLine(p: TeamPlayer): { text: string; color?: string } {
+  const s = p.standing;
+  if (p.fee === "exempt") return { text: "arquero · no paga cuota" };
+  if (p.fee === "substitute") {
+    return { text: s.paid > 0 ? `suplente · pagó $${formatArs(s.paid)}` : "suplente · sin pagos" };
+  }
   if (s.remaining === 0 && s.total > 0) {
     return { text: s.upfrontTaken ? "torneo pago por anticipado" : "torneo saldado", color: "var(--acemhh-green-3)" };
   }
   if (s.outstandingNow > 0) {
     return { text: `debe $${formatArs(s.outstandingNow)}`, color: "#f2c14e" };
   }
-  return { text: `al día · pagó $${formatArs(s.paid)}`, color: undefined };
+  return { text: `al día · pagó $${formatArs(s.paid)}` };
 }
 
 // ---- La fila ----
 
-const ExemptLine = "arquero · no paga cuota";
+const PayButtonWidth = 36;
 
-function PlayerRow({ p, onOpen }: { p: TeamPlayer; onOpen: (p: TeamPlayer) => void }) {
-  const line = p.exempt ? { text: ExemptLine, color: undefined } : standingLine(p.standing);
+function PlayerRow({ p, onOpen, onPay }: {
+  p: TeamPlayer;
+  onOpen: (p: TeamPlayer) => void;
+  onPay: (p: TeamPlayer) => void;
+}) {
+  const line = standingLine(p);
   return (
     <div
       data-testid="player-row"
       data-player-row={p.id}
-      role="button"
-      onClick={() => onOpen(p)}
       style={{
         display: "flex",
         alignItems: "center",
         gap: 10,
-        padding: "10px 8px",
+        padding: "6px 0 6px 8px",
         borderBottom: rowBorder,
-        cursor: "pointer",
-        WebkitTapHighlightColor: "transparent",
       }}
     >
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          data-testid="player-name"
-          style={{ fontSize: "0.9rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-        >
-          {p.last_name}, {p.name}
+      <div
+        role="button"
+        onClick={() => onOpen(p)}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "4px 0",
+          cursor: "pointer",
+          WebkitTapHighlightColor: "transparent",
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            data-testid="player-name"
+            style={{ fontSize: "0.9rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          >
+            {p.last_name}, {p.name}
+          </div>
+          <div
+            data-testid="player-standing"
+            style={{ fontSize: "0.75rem", opacity: line.color ? 0.95 : 0.6, color: line.color, margin: 0 }}
+          >
+            {line.text}
+          </div>
         </div>
-        <div
-          data-testid="player-standing"
-          style={{ fontSize: "0.75rem", opacity: line.color ? 0.95 : 0.6, color: line.color, margin: 0 }}
-        >
-          {line.text}
-        </div>
+        {p.fee === "installments" && <FeeDots standing={p.standing} />}
       </div>
-      {!p.exempt && <FeeDots standing={p.standing} />}
+      {/* Cobrar sin pasar por el detalle: lo más frecuente, al alcance. */}
+      {p.fee !== "exempt"
+        ? (
+          <button
+            data-testid="row-pay"
+            aria-label={`Registrar pago a ${p.last_name}, ${p.name}`}
+            onClick={() => onPay(p)}
+            style={{
+              width: PayButtonWidth,
+              height: 36,
+              flexShrink: 0,
+              padding: 0,
+              borderRadius: 8,
+              border: "1px solid rgba(36,179,91,0.5)",
+              background: "rgba(36,179,91,0.18)",
+              fontSize: "1.2rem",
+              lineHeight: 1,
+            }}
+          >
+            +
+          </button>
+        )
+        : <span style={{ width: PayButtonWidth, flexShrink: 0 }} />}
     </div>
   );
 }
 
 // ---- El detalle del jugador ----
 
-function PlayerSheet({ p, onClose, onPay }: {
-  p: TeamPlayer;
-  onClose: () => void;
-  onPay: () => void;
+/**
+ * Sube desde abajo y baja al cerrarse. No tiene botón de cerrar: tocar afuera
+ * es cerrar. `open` en false arranca la bajada y avisa cuando terminó.
+ */
+function Drawer({ open, onClosed, onBackdrop, children, testId }: {
+  open: boolean;
+  onClosed: () => void;
+  onBackdrop: () => void;
+  children: React.ReactNode;
+  testId: string;
 }) {
-  const s = p.standing;
-  const num: React.CSSProperties = { fontVariantNumeric: "tabular-nums", textAlign: "right" };
-  const row: React.CSSProperties = { display: "flex", justifyContent: "space-between", gap: 12, padding: "3px 0" };
+  // Montado abajo de todo; en el siguiente frame sube. Así la primera pintura
+  // tiene desde dónde animar.
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!open) {
+      setShown(false);
+      const t = setTimeout(onClosed, DrawerMs);
+      return () => clearTimeout(t);
+    }
+    const raf = requestAnimationFrame(() => setShown(true));
+    return () => cancelAnimationFrame(raf);
+  }, [open, onClosed]);
+
   return (
     <Overlay>
       <div
-        onClick={onClose}
+        onClick={onBackdrop}
         style={{
           position: "fixed",
           inset: 0,
-          background: "rgba(0,0,0,0.65)",
+          background: shown ? "rgba(0,0,0,0.65)" : "rgba(0,0,0,0)",
+          transition: `background ${DrawerMs}ms ease`,
           zIndex: 100,
           display: "flex",
           alignItems: "flex-end",
@@ -178,7 +241,8 @@ function PlayerSheet({ p, onClose, onPay }: {
         }}
       >
         <div
-          data-testid="player-sheet"
+          data-testid={testId}
+          data-open={shown ? "true" : "false"}
           onClick={(e) => e.stopPropagation()}
           style={{
             width: "100%",
@@ -190,21 +254,42 @@ function PlayerSheet({ p, onClose, onPay }: {
             borderBottom: "none",
             background: "#16211b",
             padding: "18px 18px 24px",
+            transform: shown ? "translateY(0)" : "translateY(100%)",
+            transition: `transform ${DrawerMs}ms ease`,
           }}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-            <p style={{ margin: 0, fontWeight: 700, fontSize: "1.05rem" }}>
-              {p.last_name}, {p.name}
-            </p>
-            <span className="badge">{RoleLabels[p.role]}</span>
-          </div>
+          {children}
+        </div>
+      </div>
+    </Overlay>
+  );
+}
 
-          {p.exempt ? (
-            <p data-testid="exempt-note" style={{ marginTop: 14 }}>
-              Los arqueros no pagan la cuota del torneo.
-            </p>
-          ) : (
-          <>
+function PlayerSheet({ p, onPay }: { p: TeamPlayer; onPay: () => void }) {
+  const s = p.standing;
+  const num: React.CSSProperties = { fontVariantNumeric: "tabular-nums", textAlign: "right" };
+  const row: React.CSSProperties = { display: "flex", justifyContent: "space-between", gap: 12, padding: "3px 0" };
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+        <p style={{ margin: 0, fontWeight: 700, fontSize: "1.05rem" }}>
+          {p.last_name}, {p.name}
+        </p>
+        <span className="badge">{p.fee === "exempt" ? "Arquero" : RoleLabels[p.role]}</span>
+      </div>
+
+      {p.fee === "exempt" && (
+        <p data-testid="exempt-note" style={{ marginTop: 14 }}>
+          Los arqueros no pagan la cuota del torneo.
+        </p>
+      )}
+      {p.fee === "substitute" && (
+        <p data-testid="substitute-note" style={{ marginTop: 14 }}>
+          Los suplentes no tienen cuota: se les registra lo que pagan, cuando pagan.
+        </p>
+      )}
+      {p.fee === "installments" && (
+        <>
           <div style={{ marginTop: 14, display: "flex", justifyContent: "center" }}>
             <FeeDots standing={s} size={22} labels />
           </div>
@@ -241,46 +326,46 @@ function PlayerSheet({ p, onClose, onPay }: {
               </p>
             )}
           </div>
-          </>
-          )}
+        </>
+      )}
 
-          <div style={heading}>Pagos</div>
-          {p.payments.length === 0 ? (
-            <p style={{ margin: 0, fontSize: "0.85rem" }}>Sin pagos registrados.</p>
-          ) : (
-            <div data-testid="payment-list" style={{ fontSize: "0.85rem" }}>
-              {[...p.payments].reverse().map((pay) => (
-                <div key={pay.id} style={row}>
-                  <span style={{ opacity: 0.85 }}>
-                    {formatWhen(pay.created_at)}
-                    <span style={{ opacity: 0.6 }}> · {pay.is_cash ? "efectivo" : "transferencia"}</span>
-                    <span style={{ opacity: 0.6 }}> · {collectorName(pay.registered_by)}</span>
-                  </span>
-                  <span style={num}>
-                    ${formatArs(pay.amount)}
-                    {pay.concept === "tournament upfront" ? " (anticipado)" : ""}
-                  </span>
-                </div>
-              ))}
+      <div style={heading}>Pagos</div>
+      {p.payments.length === 0 ? (
+        <p style={{ margin: 0, fontSize: "0.85rem" }}>Sin pagos registrados.</p>
+      ) : (
+        <div data-testid="payment-list" style={{ fontSize: "0.85rem" }}>
+          {[...p.payments].reverse().map((pay) => (
+            <div key={pay.id} style={row}>
+              <span style={{ opacity: 0.85 }}>
+                {formatWhen(pay.created_at)}
+                <span style={{ opacity: 0.6 }}> · {collectorName(pay.registered_by)}</span>
+              </span>
+              <span style={num}>
+                ${formatArs(pay.amount)}
+                {pay.concept === "tournament upfront" ? " (anticipado)" : ""}
+              </span>
+            </div>
+          ))}
+          {p.fee === "substitute" && p.payments.length > 1 && (
+            <div style={{ ...row, borderTop: rowBorder, marginTop: 6, paddingTop: 8, fontWeight: 600 }}>
+              <span>Total</span>
+              <span style={num}>${formatArs(s.paid)}</span>
             </div>
           )}
-
-          <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
-            <button onClick={onClose} style={{ flex: 1 }}>Cerrar</button>
-            {!p.exempt && (
-              <button
-                data-testid="register-payment"
-                className="btnPrimary"
-                style={{ flex: 2 }}
-                onClick={onPay}
-              >
-                Registrar pago
-              </button>
-            )}
-          </div>
         </div>
-      </div>
-    </Overlay>
+      )}
+
+      {p.fee !== "exempt" && (
+        <button
+          data-testid="register-payment"
+          className="btnPrimary"
+          style={{ width: "100%", marginTop: 18 }}
+          onClick={onPay}
+        >
+          Registrar pago
+        </button>
+      )}
+    </>
   );
 }
 
@@ -288,11 +373,12 @@ function PlayerSheet({ p, onClose, onPay }: {
 
 type Choice = { amount: number; concept: TournamentConcept };
 
-// Sin botones de cancelar ni de volver: tocar afuera cierra todo y devuelve a
-// la lista. La pantalla se usa cobrando en fila, y cada toque de más cuesta.
-function PaymentModal({ p, upfrontPrice, onClose, onConfirm, busy, error }: {
+// Sin botones de cancelar ni de volver: tocar afuera cierra el popup. La
+// pantalla se usa cobrando en fila, y cada toque de más cuesta.
+function PaymentModal({ p, upfrontPrice, substitutePrice, onClose, onConfirm, busy, error }: {
   p: TeamPlayer;
   upfrontPrice: number | null;
+  substitutePrice: number | null;
   onClose: () => void;
   onConfirm: (choice: Choice) => void;
   busy: boolean;
@@ -300,6 +386,9 @@ function PaymentModal({ p, upfrontPrice, onClose, onConfirm, busy, error }: {
 }) {
   const s = p.standing;
   const [chosen, setChosen] = useState<Choice | null>(null);
+  // "Otro monto..." es un botón hasta que se lo toca: recién ahí aparece el
+  // campo, corto, con su OK al lado.
+  const [customOpen, setCustomOpen] = useState(false);
   const [custom, setCustom] = useState("");
 
   const nextMonth = s.installments.find((i) => i.paid < i.amount)?.month;
@@ -308,6 +397,10 @@ function PaymentModal({ p, upfrontPrice, onClose, onConfirm, busy, error }: {
     : nextMonth
     ? `Cuota de ${monthNameEs(nextMonth)}`
     : null;
+  // El torneo entero con descuento: sólo para quien no registró ningún pago
+  // todavía, y mientras la primera cuota no haya vencido.
+  const offerUpfront = p.fee === "installments" && upfrontPrice !== null &&
+    p.payments.length === 0 && s.upfrontAvailable;
 
   const button: React.CSSProperties = {
     width: "100%",
@@ -319,6 +412,15 @@ function PaymentModal({ p, upfrontPrice, onClose, onConfirm, busy, error }: {
     fontSize: "0.95rem",
     textAlign: "left",
   };
+
+  const submitCustom = () => {
+    let value = parseInt(custom, 10);
+    if (!Number.isFinite(value) || value <= 0) return;
+    // "30" quiere decir 30k: acá los montos son miles.
+    if (value < 1000) value = value * 1000;
+    setChosen({ amount: value, concept: "tournament" });
+  };
+
   return (
     <Overlay>
       <div
@@ -326,7 +428,7 @@ function PaymentModal({ p, upfrontPrice, onClose, onConfirm, busy, error }: {
         style={{
           position: "fixed",
           inset: 0,
-          background: "rgba(0,0,0,0.65)",
+          background: "rgba(0,0,0,0.55)",
           zIndex: 110,
           display: "flex",
           alignItems: "center",
@@ -352,62 +454,83 @@ function PaymentModal({ p, upfrontPrice, onClose, onConfirm, busy, error }: {
 
           {chosen === null ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
-              {/* Lo más común va primero: lo que debe hoy. */}
-              {s.nextSuggested !== null && suggestedLabel && (
-                <button
-                  data-testid="pay-suggested"
-                  style={button}
-                  onClick={() => setChosen({ amount: s.nextSuggested!, concept: "tournament" })}
-                >
-                  {suggestedLabel} · <strong>${formatArs(s.nextSuggested)}</strong>
-                </button>
-              )}
-              {/* Sólo para quien no pagó nada y antes de que venza la primera
-                  cuota: el torneo entero, más barato que la suma. */}
-              {s.upfrontAvailable && upfrontPrice !== null && (
-                <button
-                  data-testid="pay-upfront"
-                  style={button}
-                  onClick={() => setChosen({ amount: upfrontPrice, concept: "tournament upfront" })}
-                >
-                  Torneo completo por anticipado · <strong>${formatArs(upfrontPrice)}</strong>
-                  <span style={{ display: "block", fontSize: "0.75rem", opacity: 0.65 }}>
-                    en vez de ${formatArs(s.total)} en cuotas
-                  </span>
-                </button>
-              )}
-              <div style={{ display: "flex", gap: 8 }}>
-                <input
-                  data-testid="custom-amount"
-                  type="number"
-                  inputMode="numeric"
-                  placeholder="Otro monto..."
-                  value={custom}
-                  onChange={(e) => setCustom(e.target.value)}
-                  style={{
-                    flex: 1,
-                    padding: "12px",
-                    borderRadius: 8,
-                    border: "1px solid rgba(255,255,255,0.2)",
-                    background: "rgba(255,255,255,0.06)",
-                    color: "inherit",
-                  }}
-                />
-                <button
-                  data-testid="custom-ok"
-                  className="btnPrimary"
-                  disabled={!custom.trim()}
-                  onClick={() => {
-                    let value = parseInt(custom, 10);
-                    if (!Number.isFinite(value) || value <= 0) return;
-                    // "30" quiere decir 30k: acá los montos son miles.
-                    if (value < 1000) value = value * 1000;
-                    setChosen({ amount: value, concept: "tournament" });
-                  }}
-                >
-                  OK
-                </button>
-              </div>
+              {p.fee === "substitute"
+                ? (substitutePrice !== null && (
+                  <button
+                    data-testid="pay-substitute"
+                    style={button}
+                    onClick={() => setChosen({ amount: substitutePrice, concept: "tournament" })}
+                  >
+                    Pago de suplente · <strong>${formatArs(substitutePrice)}</strong>
+                  </button>
+                ))
+                : (
+                  <>
+                    {/* Lo más común va primero: lo que debe hoy. */}
+                    {s.nextSuggested !== null && suggestedLabel && (
+                      <button
+                        data-testid="pay-suggested"
+                        style={button}
+                        onClick={() => setChosen({ amount: s.nextSuggested!, concept: "tournament" })}
+                      >
+                        {suggestedLabel} · <strong>${formatArs(s.nextSuggested)}</strong>
+                      </button>
+                    )}
+                    {offerUpfront && (
+                      <button
+                        data-testid="pay-upfront"
+                        style={button}
+                        onClick={() => setChosen({ amount: upfrontPrice, concept: "tournament upfront" })}
+                      >
+                        Torneo completo por anticipado · <strong>${formatArs(upfrontPrice)}</strong>
+                        <span style={{ display: "block", fontSize: "0.75rem", opacity: 0.65 }}>
+                          en vez de ${formatArs(s.total)} en cuotas
+                        </span>
+                      </button>
+                    )}
+                  </>
+                )}
+              {!customOpen
+                ? (
+                  <button
+                    data-testid="custom-toggle"
+                    style={button}
+                    onClick={() => setCustomOpen(true)}
+                  >
+                    Otro monto...
+                  </button>
+                )
+                : (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      data-testid="custom-amount"
+                      type="number"
+                      inputMode="numeric"
+                      autoFocus
+                      placeholder="Monto"
+                      value={custom}
+                      onChange={(e) => setCustom(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") submitCustom(); }}
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        padding: "12px",
+                        borderRadius: 8,
+                        border: "1px solid rgba(255,255,255,0.2)",
+                        background: "rgba(255,255,255,0.06)",
+                        color: "inherit",
+                      }}
+                    />
+                    <button
+                      data-testid="custom-ok"
+                      className="btnPrimary"
+                      disabled={!custom.trim()}
+                      onClick={submitCustom}
+                    >
+                      OK
+                    </button>
+                  </div>
+                )}
             </div>
           ) : (
             <div style={{ marginTop: 14 }}>
@@ -417,6 +540,8 @@ function PaymentModal({ p, upfrontPrice, onClose, onConfirm, busy, error }: {
               <p style={{ margin: "4px 0 0", opacity: 0.75, fontSize: "0.9rem" }}>
                 {chosen.concept === "tournament upfront"
                   ? "Torneo completo por anticipado"
+                  : p.fee === "substitute"
+                  ? "Pago de suplente"
                   : "Cuota del torneo"}
               </p>
               {error && <p style={{ color: "crimson", fontSize: "0.85rem" }}>{error}</p>}
@@ -448,8 +573,12 @@ function TeamContent() {
 
   const [detail, setDetail] = useState<TeamDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // El drawer: quién está abierto, y si está bajando.
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [paying, setPaying] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // El popup de pago, independiente del drawer: se abre desde la fila o
+  // desde el drawer, y encima de él.
+  const [payingId, setPayingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -472,21 +601,28 @@ function TeamContent() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  const openDrawer = (id: string) => {
+    setSelectedId(id);
+    setDrawerOpen(true);
+  };
+  const closeDrawer = () => setDrawerOpen(false);
+  const drawerClosed = useCallback(() => setSelectedId(null), []);
+
   if (error) return <p style={{ color: "crimson" }}>{error}</p>;
   if (!detail) return <p>Cargando…</p>;
 
   const selected = detail.players.find((p) => p.id === selectedId) ?? null;
-  const starters = detail.players.filter((p) => p.role === "starter");
-  const substitutes = detail.players.filter((p) => p.role === "substitute");
-  // Los arqueros no pagan: el resumen habla de los que sí.
-  const payers = detail.players.filter((p) => !p.exempt);
-  const exempt = detail.players.length - payers.length;
-  const upToDate = payers.filter((p) => p.standing.outstandingNow === 0).length;
-  const collected = payers.reduce((acc, p) => acc + p.standing.paid, 0);
-  const dueSoFar = payers.reduce((acc, p) => acc + p.standing.dueSoFar, 0);
+  const paying = detail.players.find((p) => p.id === payingId) ?? null;
+  const starters = detail.players.filter((p) => p.fee === "installments");
+  const substitutes = detail.players.filter((p) => p.fee === "substitute");
+  const goalkeepers = detail.players.filter((p) => p.fee === "exempt");
+  const upToDate = starters.filter((p) => p.standing.outstandingNow === 0).length;
+  const collected = starters.reduce((acc, p) => acc + p.standing.paid, 0);
+  const dueSoFar = starters.reduce((acc, p) => acc + p.standing.dueSoFar, 0);
+  const substitutesPaid = substitutes.reduce((acc, p) => acc + p.standing.paid, 0);
 
   const confirm = async (choice: Choice) => {
-    if (!selected) return;
+    if (!paying) return;
     setBusy(true);
     setPayError(null);
     try {
@@ -494,7 +630,7 @@ function TeamContent() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          player_id: selected.id,
+          player_id: paying.id,
           amount: choice.amount,
           concept: choice.concept,
           // La cuota del torneo se cobra siempre en efectivo: suma a la caja
@@ -508,8 +644,8 @@ function TeamContent() {
       }
       await load();
       // Registrado: de vuelta a la lista, listo para el siguiente jugador.
-      setPaying(false);
-      setSelectedId(null);
+      setPayingId(null);
+      closeDrawer();
       setToast(`✓ Pago de $${formatArs(choice.amount)} registrado`);
     } catch (e: unknown) {
       setPayError(e instanceof Error ? e.message : String(e));
@@ -522,7 +658,14 @@ function TeamContent() {
     list.length === 0 ? null : (
       <section data-testid={`section-${title.toLowerCase()}`}>
         <div style={heading}>{title}</div>
-        {list.map((p) => <PlayerRow key={p.id} p={p} onOpen={(pl) => setSelectedId(pl.id)} />)}
+        {list.map((p) => (
+          <PlayerRow
+            key={p.id}
+            p={p}
+            onOpen={(pl) => openDrawer(pl.id)}
+            onPay={(pl) => { setPayError(null); setPayingId(pl.id); }}
+          />
+        ))}
       </section>
     );
 
@@ -531,12 +674,12 @@ function TeamContent() {
       <p data-testid="team-context" style={{ margin: 0, fontSize: "0.85rem" }}>
         {detail.tournament.name} · {detail.category.name}
       </p>
-      {detail.players.length > 0 && (
+      {starters.length > 0 && (
         <p data-testid="team-summary" style={{ margin: "4px 0 0", fontSize: "0.85rem" }}>
-          {payers.length} {payers.length === 1 ? "jugador paga" : "jugadores pagan"} ·{" "}
+          {starters.length} {starters.length === 1 ? "titular" : "titulares"} ·{" "}
           <strong>{upToDate}</strong> al día · cobrado{" "}
           <strong>${formatArs(collected)}</strong> de ${formatArs(dueSoFar)} a la fecha
-          {exempt > 0 && ` · ${exempt} ${exempt === 1 ? "arquero" : "arqueros"} sin cuota`}
+          {substitutesPaid > 0 && ` · suplentes $${formatArs(substitutesPaid)}`}
         </p>
       )}
 
@@ -546,6 +689,7 @@ function TeamContent() {
         <>
           {section("Titulares", starters)}
           {section("Suplentes", substitutes)}
+          {section("Arqueros", goalkeepers)}
         </>
       )}
 
@@ -572,18 +716,25 @@ function TeamContent() {
         </div>
       )}
 
-      {selected && !paying && (
-        <PlayerSheet
-          p={selected}
-          onClose={() => setSelectedId(null)}
-          onPay={() => { setPayError(null); setPaying(true); }}
-        />
+      {selected && (
+        <Drawer
+          open={drawerOpen}
+          onClosed={drawerClosed}
+          onBackdrop={closeDrawer}
+          testId="player-sheet"
+        >
+          <PlayerSheet
+            p={selected}
+            onPay={() => { setPayError(null); setPayingId(selected.id); }}
+          />
+        </Drawer>
       )}
-      {selected && paying && (
+      {paying && (
         <PaymentModal
-          p={selected}
+          p={paying}
           upfrontPrice={detail.category.upfront_price}
-          onClose={() => { setPaying(false); setSelectedId(null); }}
+          substitutePrice={detail.category.substitute_price}
+          onClose={() => setPayingId(null)}
           onConfirm={confirm}
           busy={busy}
           error={payError}
