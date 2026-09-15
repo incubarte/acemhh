@@ -55,6 +55,7 @@ function FlowLine({ entry }: { entry: FlowEntry }) {
       <>
         {entry.name} cobró {entry.count === 1 ? "1 pago" : `${entry.count} pagos`}
         {" "}en <strong>{entry.slot}</strong>
+        {entry.is_cash ? "" : " (banco)"}
       </>,
     );
   }
@@ -87,16 +88,22 @@ function CajaContent() {
   const [busy, setBusy] = useState(false);
   // "" = the club's caja; otherwise a single admin's.
   const [scope, setScope] = useState("");
+  // "" = every movement; otherwise one kind of income.
+  const [kind, setKind] = useState("");
 
   const reload = useCallback(async () => {
-    const res = await fetch(`/api/caja${scope ? `?user=${scope}` : ""}`);
+    const q = new URLSearchParams();
+    if (scope) q.set("user", scope);
+    if (kind) q.set("kind", kind);
+    const qs = q.toString();
+    const res = await fetch(`/api/caja${qs ? `?${qs}` : ""}`);
     if (!res.ok) {
       setErr(await res.text());
       return;
     }
     setErr(null);
     setData((await res.json()) as CajaData);
-  }, [scope]);
+  }, [scope, kind]);
 
   useEffect(() => {
     reload();
@@ -195,6 +202,17 @@ function CajaContent() {
             </option>
           ))}
         </select>
+        <select
+          data-testid="caja-kind"
+          value={kind}
+          onChange={(e) => setKind(e.target.value)}
+          style={{ width: "100%", marginBottom: 10 }}
+        >
+          <option value="">Todos los movimientos</option>
+          <option value="training">Cobros de entrenamiento</option>
+          <option value="dues">Matrículas anuales</option>
+          <option value="tournament">Cobros de torneo</option>
+        </select>
 
         {/* Newest first: what just happened is what one comes to check. The
             running balance still reads top-down as the caja right after each
@@ -202,8 +220,9 @@ function CajaContent() {
         {[...data.history].reverse().map((e, i) => <FlowLine key={i} entry={e} />)}
 
         {/* The ledger opened with what was already in the caja: everything
-            before August, which the movements list does not itemize. */}
-        <div
+            before August, which the movements list does not itemize. With a
+            kind filter on, the list is not a ledger and the row has no place. */}
+        {!kind && <div
           data-testid="caja-opening"
           style={{
             display: "flex",
@@ -226,7 +245,7 @@ function CajaContent() {
           <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
             {formatArs(data.opening)}
           </span>
-        </div>
+        </div>}
 
         {data.history.length === 0 && (
           <p style={{ margin: "8px 0 0", opacity: 0.7 }}>Sin movimientos desde agosto.</p>

@@ -23,6 +23,13 @@ function admin(): SupabaseClient {
 async function cleanup() {
   const s = admin();
   await s.from("expenses").delete().eq("notes", EXPENSE_NOTES);
+  const { data: testPlayers } = await s.from("players").select("id").eq("last_name", RECEIVER_NAME);
+  const playerIds = (testPlayers ?? []).map((p) => p.id);
+  if (playerIds.length > 0) {
+    await s.from("payments").delete().in("player_id", playerIds);
+    await s.from("attendances").delete().in("player_id", playerIds);
+    await s.from("players").delete().in("id", playerIds);
+  }
   const { data } = await s.from("users").select("id").eq("first_name", RECEIVER_NAME);
   const ids = (data ?? []).map((u) => u.id);
   if (ids.length === 0) return;
@@ -352,4 +359,43 @@ test("'partidos' es un concepto de egreso", async ({ page }) => {
   await page.request.post("/api/auth/dev");
   await page.goto("/caja/egreso");
   await expect(page.locator("select option", { hasText: "partidos" })).toHaveCount(1);
+});
+
+test("el filtro por tipo separa entrenamientos, matrículas y torneo; la matrícula se lista pero no mueve caja", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  const me = await (await page.request.get("/api/me")).json() as { id: string };
+  const s = admin();
+  // Una matrícula al banco, registrada por el usuario de prueba.
+  const { data: player } = await s.from("players")
+    .insert({ name: "__test-dues", last_name: RECEIVER_NAME, dni: "99001104", categories: ["cat-b"], player_type: "player", trains: false, invitee: false })
+    .select("id").single();
+  const { error } = await s.from("payments").insert({
+    id: crypto.randomUUID(), player_id: player!.id, registered_by: "__test",
+    registered_by_user_id: me.id, concept: "membership dues", month: "2026-09", amount: 70000, is_cash: false,
+  });
+  if (error) throw new Error(JSON.stringify(error));
+
+  const before = await (await page.request.get(`/api/caja?user=${me.id}`)).json();
+  const dues = await (await page.request.get(`/api/caja?user=${me.id}&kind=dues`)).json();
+  expect(dues.history.length).toBeGreaterThan(0);
+  expect(dues.history.every((h: { kind: string; income: string }) => h.kind === "income" && h.income === "dues")).toBe(true);
+  const entry = dues.history.find((h: { amount: number }) => h.amount === 70000);
+  expect(entry.is_cash).toBe(false);
+  expect(entry.delta).toBe(0);
+  expect(entry.slot).toBe("cuota social");
+  // El saldo es el mismo con y sin filtro: el filtro elige qué mostrar.
+  const balanceOf = (c: { users: { id: string; balance: number }[] }) => c.users.find((u) => u.id === me.id)!.balance;
+  expect(balanceOf(dues)).toBe(balanceOf(before));
+
+  const training = await (await page.request.get(`/api/caja?kind=training`)).json();
+  expect(training.history.every((h: { income: string }) => h.income === "training")).toBe(true);
+  const tournament = await (await page.request.get(`/api/caja?kind=tournament`)).json();
+  expect(tournament.history.every((h: { income: string }) => h.income === "tournament")).toBe(true);
+
+  // En pantalla: el selector, y sin saldo inicial cuando hay filtro.
+  await page.goto("/caja");
+  await page.getByTestId("caja-kind").selectOption("dues");
+  await expect(page.getByTestId("caja-opening")).toHaveCount(0);
+  await expect(page.getByTestId("caja-flow").first()).toContainText("cuota social");
+  await expect(page.getByTestId("caja-flow").first()).toContainText("(banco)");
 });

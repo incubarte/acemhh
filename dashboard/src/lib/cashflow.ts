@@ -32,10 +32,24 @@ export type IncomePayment = {
    * and never reach the caja anyway (they go to the bank). */
   slot_weekday: number | null;
   slot_hour: number | null;
-  /** Tournament fees are collected at no slot either, but they are not
-   * "slotless" money: the caja says what they are. */
+  /** What was paid for: decides the kind of income and, for money outside
+   * training, what the entry is called. */
   concept?: string;
+  /** Bank money is listed but never enters a caja. Defaults to cash. */
+  is_cash?: boolean;
 };
+
+/** The three kinds of money that come in: training (sessions, months, debt),
+ * the annual membership dues, and tournament fees. */
+export type IncomeKind = "training" | "dues" | "tournament";
+
+export const IncomeKinds: readonly IncomeKind[] = ["training", "dues", "tournament"];
+
+export function incomeKind(concept: string | undefined): IncomeKind {
+  if (concept === "membership dues") return "dues";
+  if (concept === "tournament" || concept === "tournament upfront") return "tournament";
+  return "training";
+}
 
 /** What a group without a slot is called on screen. */
 export const NoSlotLabel = "sin slot";
@@ -43,9 +57,8 @@ export const NoSlotLabel = "sin slot";
 /** What tournament fee income is called on screen. */
 export const TournamentLabel = "torneo";
 
-function isTournament(concept: string | undefined): boolean {
-  return concept === "tournament" || concept === "tournament upfront";
-}
+/** What membership dues income is called on screen. */
+export const DuesLabel = "cuota social";
 
 export type IncomeGroup = {
   user_id: string;
@@ -54,6 +67,8 @@ export type IncomeGroup = {
   /** The collection day (YYYY-MM-DD, 5am-anchored) this group belongs to. */
   day: string;
   slot: string;
+  kind: IncomeKind;
+  is_cash: boolean;
   amount: number;
   count: number;
 };
@@ -66,12 +81,16 @@ export function groupIncomeByDay(payments: IncomePayment[]): IncomeGroup[] {
 
   for (const p of [...payments].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
     const day = collectionDay(p.created_at);
-    const slot = isTournament(p.concept)
+    const kind = incomeKind(p.concept);
+    const isCash = p.is_cash ?? true;
+    const slot = kind === "tournament"
       ? TournamentLabel
+      : kind === "dues"
+      ? DuesLabel
       : p.slot_weekday !== null && p.slot_hour !== null
       ? slotLabel(p.slot_weekday, p.slot_hour)
       : NoSlotLabel;
-    const key = `${p.user_id}|${day}|${slot}`;
+    const key = `${p.user_id}|${day}|${slot}|${isCash}`;
     const existing = groups.get(key);
     if (existing) {
       existing.amount += p.amount;
@@ -82,6 +101,8 @@ export function groupIncomeByDay(payments: IncomePayment[]): IncomeGroup[] {
         start: p.created_at,
         day,
         slot,
+        kind,
+        is_cash: isCash,
         amount: p.amount,
         count: 1,
       });

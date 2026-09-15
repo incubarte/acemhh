@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
-import { groupIncomeByDay } from "@/lib/cashflow";
+import { groupIncomeByDay, IncomeKinds, type IncomeKind } from "@/lib/cashflow";
 
 export type CajaUser = {
   id: string;
@@ -20,7 +20,17 @@ export type PendingHandoff = {
 };
 
 type FlowKind =
-  | { kind: "income"; name: string; amount: number; count: number; slot: string }
+  | {
+    kind: "income";
+    name: string;
+    amount: number;
+    count: number;
+    slot: string;
+    /** Training, dues or tournament money. */
+    income: IncomeKind;
+    /** Bank income is listed but moves no caja. */
+    is_cash: boolean;
+  }
   | { kind: "expense"; name: string; amount: number; concept: string; notes: string | null; is_cash: boolean }
   | { kind: "handoff"; from_name: string; to_name: string; amount: number };
 
@@ -50,13 +60,21 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
   const s = supabaseAdmin();
   // ?user=<uuid> narrows every figure to that admin's caja; without it the
   // view is the club's, where handoffs are internal and move nothing.
-  const scope = new URL(req.url).searchParams.get("user");
+  const params = new URL(req.url).searchParams;
+  const scope = params.get("user");
+  // ?kind=training|dues|tournament lists only that income. Balances are not
+  // affected: the caja is what it is, the filter only picks what to show.
+  const kindParam = params.get("kind");
+  const kindFilter = (IncomeKinds as readonly string[]).includes(kindParam ?? "")
+    ? kindParam as IncomeKind
+    : null;
 
   const [usersRes, paymentsRes, expensesRes, handoffsRes] = await Promise.all([
     s.from("users").select("id,first_name,last_name,groups"),
+    // Bank payments (the dues) come along too: they are listed, and they
+    // just never enter a caja.
     s.from("payments")
-      .select("registered_by_user_id,amount,created_at,slot_weekday,slot_hour,concept")
-      .eq("is_cash", true)
+      .select("registered_by_user_id,amount,created_at,slot_weekday,slot_hour,concept,is_cash")
       .not("registered_by_user_id", "is", null),
     s.from("expenses").select("paid_by,amount,concept,notes,is_cash,created_at"),
     s.from("cash_handoffs").select("id,amount,from_user,to_user,created_at,accepted_at"),
@@ -77,7 +95,9 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
     balances.set(userId, balances.get(userId)! + delta);
   };
 
-  for (const p of paymentsRes.data ?? []) add(p.registered_by_user_id, Number(p.amount));
+  for (const p of paymentsRes.data ?? []) {
+    if (p.is_cash) add(p.registered_by_user_id, Number(p.amount));
+  }
   for (const e of expensesRes.data ?? []) {
     if (e.is_cash) add(e.paid_by, -Number(e.amount));
   }
@@ -127,17 +147,20 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
     slot_weekday: p.slot_weekday,
     slot_hour: p.slot_hour,
     concept: p.concept,
+    is_cash: p.is_cash,
   })));
   for (const g of incomeGroups) {
     if (scope && g.user_id !== scope) continue;
     movements.push({
       kind: "income",
       at: g.start,
-      delta: g.amount,
+      delta: g.is_cash ? g.amount : 0,
       name: nameOf.get(g.user_id) ?? "?",
       amount: g.amount,
       count: g.count,
       slot: g.slot,
+      income: g.kind,
+      is_cash: g.is_cash,
     });
   }
 
@@ -162,7 +185,10 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
   // Everything before the cutoff — plus any overflow past the display limit —
   // becomes the opening balance, so the first listed movement starts from a
   // figure that already accounts for it.
-  const shown = movements.filter((m) => m.at >= HistoryFrom);
+  const shown = movements.filter((m) =>
+    m.at >= HistoryFrom &&
+    (kindFilter === null || (m.kind === "income" && m.income === kindFilter))
+  );
   const foldedCount = movements.length - shown.length +
     Math.max(0, shown.length - HistoryLimit);
   const displayed = shown.slice(-HistoryLimit);
@@ -185,6 +211,7 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
   return NextResponse.json({
     me: sess.id,
     scope,
+    kind: kindFilter,
     users,
     pending,
     opening,
