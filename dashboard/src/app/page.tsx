@@ -6,7 +6,7 @@ import ProtectedPage from "./components/ProtectedPage";
 import { usePageTitle } from "./components/PageTitleContext";
 
 const BUTTONS = [
-  { href: "/training-sessions", label: "📋 Asistencia y Pagos" },
+  { href: "/training-sessions", label: "📋 Entrenamientos" },
   { href: "/torneos", label: "🏆 Torneos" },
   { href: "/players/new", label: "🧑🏻‍🦽‍➡️ Nuevo Jugador" },
   { href: "/payments", label: "🏛️ Cuota Social" },
