@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { dayAfter, futureSession, tariffAt, todayBA, writableSession, type Fixture } from "./fixtures";
+import { dayAfter, futureSession, sessionIn, tariffAt, todayBA, writableSession, type Fixture } from "./fixtures";
 
 // The rules that say what may be registered, enforced by the SERVICE. They are
 // money rules: a stale tab, a retry or a direct call has to hit the same wall
@@ -233,4 +233,57 @@ test("medio mes cobra lo que queda, y sólo como primer pago del período", asyn
   const again = await pay(page, "half month", expected, second);
   expect(again.status()).toBe(409);
   expect(await again.text()).toContain("primer pago");
+});
+
+test("un pago de deuda salda el mes viejo, no el mes en que se registró", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  const s = admin();
+
+  // Two closed months of the same period, read from a third. August is left
+  // unpaid; in September the player pays off August and nothing of September.
+  const [aug, sep, oct] = ["2026-08", "2026-09", "2026-10"];
+  const sessionsOf = async (month: string) => {
+    const { data } = await s.from("training_sessions").select("date").eq("hour", 22)
+      .gte("date", `${month}-01`).lt("date", month === aug ? "2026-09-01" : "2026-10-01")
+      .order("date").limit(2);
+    return (data ?? []).map((r) => String(r.date));
+  };
+  const augDates = await sessionsOf(aug);
+  const sepDates = await sessionsOf(sep);
+  expect(augDates.length).toBe(2);
+  expect(sepDates.length).toBe(2);
+
+  await s.from("attendances").insert([...augDates, ...sepDates].map((d) => ({
+    player_id: playerId, session: `${d} 22hs`, attended: true,
+  })));
+
+  const view = async (month: string) => {
+    const roster = await (await page.request.get(
+      `/api/training-sessions/${await sessionIn(month)}`,
+    )).json();
+    return roster.players.find((p: { id: string }) => p.id === playerId);
+  };
+
+  // What August left owing, as September sees it.
+  const augDebt = (await view(sep)).debt;
+  expect(augDebt).toBeGreaterThan(0);
+
+  const weekday = new Date(`${sepDates[0]}T12:00:00Z`).getUTCDay() || 7;
+  const { error } = await s.from("payments").insert({
+    id: crypto.randomUUID(), player_id: playerId, concept: "debt settlement", amount: augDebt, month: sep,
+    slot_weekday: weekday, slot_hour: 22, registered_by: "test", is_cash: true,
+  });
+  expect(error).toBeNull();
+
+  const row = await view(oct);
+  const [augRow, sepRow] = row.debt_months;
+  expect(augRow.month).toBe(aug);
+  expect(augRow.settled, "agosto quedó saldado en septiembre").toBe(augDebt);
+  expect(augRow.outstanding).toBe(0);
+  expect(sepRow.month).toBe(sep);
+  expect(sepRow.paid, "el pago de deuda no pagó septiembre").toBe(0);
+  expect(sepRow.outstanding).toBe(sepRow.charge);
+  expect(row.debt).toBe(sepRow.charge);
+
+  await s.from("attendances").delete().eq("player_id", playerId);
 });
