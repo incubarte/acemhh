@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
-import { groupIncomeByDay, IncomeKinds, type IncomeKind } from "@/lib/cashflow";
+import {
+  groupIncomeByDay,
+  type IncomeItem,
+  IncomeKinds,
+  type IncomeKind,
+  isCashConcept,
+} from "@/lib/cashflow";
 
 export type CajaUser = {
   id: string;
@@ -30,7 +36,12 @@ type FlowKind =
     income: IncomeKind;
     /** Bank income is listed but moves no caja. */
     is_cash: boolean;
+    /** Each payment of the group, for the breakdown the screen opens. */
+    items: IncomeItem[];
   }
+  /** Money with no player behind it (a colecta): one entry each, never
+   * grouped, always cash. */
+  | { kind: "other income"; name: string; amount: number; concept: string; notes: string | null }
   | { kind: "expense"; name: string; amount: number; concept: string; notes: string | null; is_cash: boolean }
   | { kind: "handoff"; from_name: string; to_name: string; amount: number };
 
@@ -54,6 +65,7 @@ const HistoryFrom = "2026-08-01";
 
 // Balances are derived, never stored:
 //   caja(admin) = cash payments they registered
+//               + other income they received
 //               - cash expenses they paid
 //               - handoffs given + handoffs received (accepted only)
 export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) => {
@@ -62,25 +74,29 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
   // view is the club's, where handoffs are internal and move nothing.
   const params = new URL(req.url).searchParams;
   const scope = params.get("user");
-  // ?kind=training|dues|tournament lists only that income. Balances are not
+  // ?kind=training|dues|tournament|other lists only that income. Balances are not
   // affected: the caja is what it is, the filter only picks what to show.
   const kindParam = params.get("kind");
   const kindFilter = (IncomeKinds as readonly string[]).includes(kindParam ?? "")
     ? kindParam as IncomeKind
     : null;
 
-  const [usersRes, paymentsRes, expensesRes, handoffsRes] = await Promise.all([
+  const [usersRes, paymentsRes, incomesRes, expensesRes, handoffsRes, playersRes] = await Promise.all([
     s.from("users").select("id,first_name,last_name,groups"),
     // Bank payments (the dues) come along too: they are listed, and they
     // just never enter a caja.
     s.from("payments")
-      .select("registered_by_user_id,amount,created_at,slot_weekday,slot_hour,concept,is_cash")
+      .select("id,player_id,registered_by_user_id,amount,created_at,slot_weekday,slot_hour,concept,notes")
       .not("registered_by_user_id", "is", null),
+    s.from("incomes").select("received_by,amount,concept,notes,created_at"),
     s.from("expenses").select("paid_by,amount,concept,notes,is_cash,created_at"),
     s.from("cash_handoffs").select("id,amount,from_user,to_user,created_at,accepted_at"),
+    // Only for the names in each group's breakdown.
+    s.from("players").select("id,name,last_name"),
   ]);
 
-  const firstError = usersRes.error ?? paymentsRes.error ?? expensesRes.error ?? handoffsRes.error;
+  const firstError = usersRes.error ?? paymentsRes.error ?? incomesRes.error ??
+    expensesRes.error ?? handoffsRes.error ?? playersRes.error;
   if (firstError) return new NextResponse(firstError.message, { status: 500 });
 
   const admins = (usersRes.data ?? []).filter((u) => (u.groups ?? []).length > 0);
@@ -95,8 +111,16 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
     balances.set(userId, balances.get(userId)! + delta);
   };
 
+  const playerName = new Map((playersRes.data ?? []).map((p) => [
+    p.id,
+    `${p.last_name}, ${p.name}`,
+  ]));
+
   for (const p of paymentsRes.data ?? []) {
-    if (p.is_cash) add(p.registered_by_user_id, Number(p.amount));
+    if (isCashConcept(p.concept)) add(p.registered_by_user_id, Number(p.amount));
+  }
+  for (const i of incomesRes.data ?? []) {
+    add(i.received_by, Number(i.amount));
   }
   for (const e of expensesRes.data ?? []) {
     if (e.is_cash) add(e.paid_by, -Number(e.amount));
@@ -147,7 +171,9 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
     slot_weekday: p.slot_weekday,
     slot_hour: p.slot_hour,
     concept: p.concept,
-    is_cash: p.is_cash,
+    id: p.id,
+    player: playerName.get(p.player_id) ?? "?",
+    notes: p.notes,
   })));
   for (const g of incomeGroups) {
     if (scope && g.user_id !== scope) continue;
@@ -161,6 +187,20 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
       slot: g.slot,
       income: g.kind,
       is_cash: g.is_cash,
+      items: g.items,
+    });
+  }
+
+  for (const i of incomesRes.data ?? []) {
+    if (scope && i.received_by !== scope) continue;
+    movements.push({
+      kind: "other income",
+      at: i.created_at,
+      delta: Number(i.amount),
+      name: nameOf.get(i.received_by) ?? "?",
+      amount: Number(i.amount),
+      concept: i.concept,
+      notes: i.notes,
     });
   }
 
@@ -187,7 +227,9 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
   // figure that already accounts for it.
   const shown = movements.filter((m) =>
     m.at >= HistoryFrom &&
-    (kindFilter === null || (m.kind === "income" && m.income === kindFilter))
+    (kindFilter === null ||
+      (m.kind === "income" && m.income === kindFilter) ||
+      (m.kind === "other income" && kindFilter === "other"))
   );
   const foldedCount = movements.length - shown.length +
     Math.max(0, shown.length - HistoryLimit);

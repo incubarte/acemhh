@@ -91,7 +91,6 @@ async function seed() {
       slot_weekday: 4,
       slot_hour: 22,
       amount: 75000,
-      is_cash: true,
     },
     {
       id: crypto.randomUUID(),
@@ -103,7 +102,6 @@ async function seed() {
       session: SESSION_STR,
       month: MONTH,
       amount: PRICE,
-      is_cash: true,
     },
     // Otracategoria paid their OWN slot's month bundle: that belongs to
     // their own slot's screen, not this one.
@@ -116,7 +114,6 @@ async function seed() {
       slot_weekday: 4,
       slot_hour: 23,
       amount: 75000,
-      is_cash: true,
     },
     // Abonado bought the bundle FOR this slot: a legit absentee even with no
     // attendance history.
@@ -129,7 +126,6 @@ async function seed() {
       slot_weekday: 4,
       slot_hour: 22,
       amount: 75000,
-      is_cash: true,
     },
     // Visitante paid THIS session: must show even without qualifying.
     {
@@ -142,7 +138,6 @@ async function seed() {
       session: SESSION_STR,
       month: MONTH,
       amount: PRICE,
-      is_cash: true,
     },
   ]);
   if (payError) throw new Error(JSON.stringify(payError));
@@ -362,6 +357,9 @@ test("el modal de cobro ofrece sesión, mes y otro, y confirma con el detalle", 
 
 test("el pago aparece entre paréntesis sin esperar el refresh", async ({ page }) => {
   await openPage(page);
+  // The same amount again moments after the last one: the screen asks whether
+  // it is really another payment, and here it is.
+  page.on("dialog", (d) => d.accept());
   const row = page.getByTestId("section-presentes")
     .locator(`[data-player-row="${ids.get("Fantasma")}"]`);
 

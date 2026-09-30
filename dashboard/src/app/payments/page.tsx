@@ -5,6 +5,8 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, Suspense } from "react";
 import ProtectedPage from "../components/ProtectedPage";
 import { usePageTitle } from "../components/PageTitleContext";
+import NoteField from "../components/NoteField";
+import { postMoney } from "@/lib/postMoney";
 
 type Player = {
   id: string;
@@ -51,6 +53,7 @@ function PaymentsPageContent() {
   const [customAmount, setCustomAmount] = useState("");
   const [showCustomAmount, setShowCustomAmount] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [notes, setNotes] = useState("");
   const [successTimeoutId, setSuccessTimeoutId] = useState<NodeJS.Timeout | null>(null);
 
   const suggestions = useMemo(
@@ -332,21 +335,21 @@ function PaymentsPageContent() {
     const confirm = async () => {
       setLoading(true);
       setErr(null);
-      const res = await fetch("/api/payments/dues", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          player_id: step.player.id,
-          amount: step.amount,
-          month: step.month,
-        }),
+      const res = await postMoney("/api/payments/dues", {
+        player_id: step.player.id,
+        amount: step.amount,
+        month: step.month,
+        notes: notes.trim() || null,
       });
       setLoading(false);
+      // Not sent: it was the same payment registered twice.
+      if (!res) return;
       if (!res.ok) {
         setErr(await res.text());
         return;
       }
       setShowSuccess(true);
+      setNotes("");
       const timeoutId = setTimeout(() => {
         setShowSuccess(false);
         setQ("");
@@ -375,6 +378,11 @@ function PaymentsPageContent() {
           <div><strong>Jugador:</strong> {step.player.last_name}, {step.player.name}</div>
           <div><strong>Concepto:</strong> Cuota social</div>
           <div><strong>Monto:</strong> {formatArs(step.amount)}</div>
+          {!showSuccess && (
+            <div style={{ display: "flex", flexDirection: "column", marginTop: 8 }}>
+              <NoteField value={notes} onChange={setNotes} />
+            </div>
+          )}
         </div>
 
         {err ? <p style={{ marginTop: 12, color: "crimson" }}>{err}</p> : null}

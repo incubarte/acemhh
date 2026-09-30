@@ -13,6 +13,7 @@ const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ??
 
 const RECEIVER_NAME = "__test-cajero";
 const EXPENSE_NOTES = "__test-egreso";
+const INCOME_CONCEPT = "__test-colecta";
 
 function admin(): SupabaseClient {
   return createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
@@ -23,6 +24,7 @@ function admin(): SupabaseClient {
 async function cleanup() {
   const s = admin();
   await s.from("expenses").delete().eq("notes", EXPENSE_NOTES);
+  await s.from("incomes").delete().like("concept", `${INCOME_CONCEPT}%`);
   const { data: testPlayers } = await s.from("players").select("id").eq("last_name", RECEIVER_NAME);
   const playerIds = (testPlayers ?? []).map((p) => p.id);
   if (playerIds.length > 0) {
@@ -162,7 +164,6 @@ test("los movimientos arrancan en agosto, pero el saldo cuenta todo", async ({ p
     session: "2026-05-07 22hs",
     month: createdAt.slice(0, 7),
     amount,
-    is_cash: true,
     created_at: createdAt,
   });
   // One pre-caja collection and one after the cutoff.
@@ -213,7 +214,6 @@ test("saldo inicial, balance corrido y filtro por persona", async ({ page }) => 
     session: "2026-05-07 22hs",
     month: createdAt.slice(0, 7),
     amount,
-    is_cash: true,
     created_at: createdAt,
   });
   const { error } = await s.from("payments").insert([
@@ -283,7 +283,6 @@ test("los cobros se discriminan por slot, y la entrega dice cuánto fue", async 
     session: `2026-08-13 ${hour}hs`,
     month: "2026-08",
     amount,
-    is_cash: true,
     created_at: createdAt,
   });
   // One night, two trainings: the 21hs takings must not be lumped in with
@@ -371,7 +370,7 @@ test("el filtro por tipo separa entrenamientos, matrículas y torneo; la matríc
     .select("id").single();
   const { error } = await s.from("payments").insert({
     id: crypto.randomUUID(), player_id: player!.id, registered_by: "__test",
-    registered_by_user_id: me.id, concept: "membership dues", month: "2026-09", amount: 70000, is_cash: false,
+    registered_by_user_id: me.id, concept: "membership dues", month: "2026-09", amount: 70000,
   });
   if (error) throw new Error(JSON.stringify(error));
 
@@ -398,4 +397,99 @@ test("el filtro por tipo separa entrenamientos, matrículas y torneo; la matríc
   await expect(page.getByTestId("caja-opening")).toHaveCount(0);
   await expect(page.getByTestId("caja-flow").first()).toContainText("cuota social");
   await expect(page.getByTestId("caja-flow").first()).toContainText("(banco)");
+});
+
+test("un ingreso sin jugador (colecta) entra a la caja de quien lo registra", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  const me = await (await page.request.get("/api/me")).json() as { id: string };
+  const balanceOf = (c: { users: { id: string; balance: number }[] }) => c.users.find((u) => u.id === me.id)!.balance;
+  const before = balanceOf(await (await page.request.get("/api/caja")).json());
+
+  await page.goto("/caja");
+  await page.getByRole("button", { name: "Registrar ingreso" }).click();
+  await page.waitForURL("**/caja/ingreso");
+  await page.getByTestId("income-amount").fill("25000");
+  await page.getByTestId("income-concept").fill(INCOME_CONCEPT);
+  await page.getByRole("button", { name: "Guardar" }).click();
+  await page.waitForURL("**/caja");
+
+  const after = await (await page.request.get("/api/caja")).json();
+  expect(balanceOf(after)).toBe(before + 25000);
+
+  const other = await (await page.request.get(`/api/caja?user=${me.id}&kind=other`)).json();
+  expect(other.history.length).toBeGreaterThan(0);
+  expect(other.history.every((h: { kind: string }) => h.kind === "other income")).toBe(true);
+  expect(other.history.at(-1)).toMatchObject({ concept: INCOME_CONCEPT, amount: 25000, delta: 25000 });
+
+  await page.getByTestId("caja-kind").selectOption("other");
+  await expect(page.getByTestId("caja-flow").first()).toContainText(INCOME_CONCEPT);
+});
+
+test("el mismo movimiento dos veces seguidas pide confirmación antes de registrarse", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  const body = { amount: 12345, concept: INCOME_CONCEPT };
+
+  expect((await page.request.post("/api/incomes", { data: body })).status()).toBe(200);
+  const again = await page.request.post("/api/incomes", { data: body });
+  expect(again.status()).toBe(409);
+  expect(await again.json()).toMatchObject({ duplicate: true });
+  // Another amount is another movement.
+  expect((await page.request.post("/api/incomes", { data: { ...body, amount: 12346 } })).status()).toBe(200);
+  // Confirmed, it goes through.
+  expect((await page.request.post("/api/incomes", {
+    data: { ...body, confirm_duplicate: true },
+  })).status()).toBe(200);
+
+  const expense = { amount: 4321, concept: "otros", notes: EXPENSE_NOTES };
+  expect((await page.request.post("/api/expenses", { data: expense })).status()).toBe(200);
+  expect((await page.request.post("/api/expenses", { data: expense })).status()).toBe(409);
+
+  // On screen: the admin is asked, and saying no registers nothing.
+  const { count: before } = await admin().from("incomes")
+    .select("id", { count: "exact", head: true }).eq("concept", INCOME_CONCEPT);
+  let asked = "";
+  page.once("dialog", (d) => { asked = d.message(); d.dismiss(); });
+  await page.goto("/caja/ingreso");
+  await page.getByTestId("income-amount").fill("12345");
+  await page.getByTestId("income-concept").fill(INCOME_CONCEPT);
+  await page.getByRole("button", { name: "Guardar" }).click();
+  await expect.poll(() => asked).toContain("se registró un ingreso igual");
+  await expect(page).toHaveURL(/\/caja\/ingreso$/);
+  const { count: after } = await admin().from("incomes")
+    .select("id", { count: "exact", head: true }).eq("concept", INCOME_CONCEPT);
+  expect(after).toBe(before);
+});
+
+test("la nota de un cobro se lee al abrir su grupo en la caja", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  const me = await (await page.request.get("/api/me")).json() as { id: string };
+  const s = admin();
+  const { data: player } = await s.from("players")
+    .insert({ name: "__test-nota", last_name: RECEIVER_NAME, dni: "99001105", categories: ["cat-b"], player_type: "player", trains: false, invitee: false })
+    .select("id").single();
+  const note = "me lo transfirieron a mi cuenta";
+  const { error } = await s.from("payments").insert({
+    id: crypto.randomUUID(), player_id: player!.id, registered_by: "__test",
+    registered_by_user_id: me.id, concept: "session", slot_weekday: 4, slot_hour: 22,
+    session: "2026-08-13 22hs", month: "2026-08", amount: 15000, notes: note,
+    created_at: "2026-08-14T01:00:00Z",
+  });
+  if (error) throw new Error(JSON.stringify(error));
+
+  const caja = await (await page.request.get(`/api/caja?user=${me.id}&kind=training`)).json();
+  const group = caja.history.find((h: { items?: { notes: string | null }[] }) =>
+    h.items?.some((i) => i.notes === note));
+  expect(group).toBeTruthy();
+  expect(group.items.find((i: { notes: string | null }) => i.notes === note))
+    .toMatchObject({ player: `${RECEIVER_NAME}, __test-nota`, concept: "session", amount: 15000 });
+
+  await page.goto("/caja");
+  await page.getByTestId("caja-scope").selectOption(me.id);
+  const reloaded = page.waitForResponse((r) => r.url().includes("kind=training"));
+  await page.getByTestId("caja-kind").selectOption("training");
+  await reloaded;
+  const line = page.getByTestId("caja-flow").filter({ has: page.getByTestId("caja-notes-badge") }).first();
+  await expect(page.getByTestId("caja-breakdown")).toHaveCount(0);
+  await line.click();
+  await expect(page.getByTestId("caja-breakdown-note").filter({ hasText: note })).toBeVisible();
 });

@@ -9,6 +9,8 @@ import ExperienceToggle from "../../components/ExperienceToggle";
 import { usePageTitle } from "../../components/PageTitleContext";
 import { paymentThresholdOverride } from "@/lib/thresholds";
 import DebtBreakdown from "../../components/DebtBreakdown";
+import NoteField from "../../components/NoteField";
+import { postMoney } from "@/lib/postMoney";
 import type { PaymentConcept } from "@shared/tokens";
 
 type Player = {
@@ -80,6 +82,7 @@ function TrainingSessionDetailContent() {
   >(null);
   const [customAmountMode, setCustomAmountMode] = useState<string | null>(null);
   const [customAmount, setCustomAmount] = useState("");
+  const [paymentNote, setPaymentNote] = useState("");
   const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [addInviteeStep, setAddInviteeStep] = useState<'choose' | 'selectCategory' | 'selectPlayer' | null>(null);
@@ -183,16 +186,18 @@ function TrainingSessionDetailContent() {
     setPaymentProcessing(true);
 
     try {
-      const res = await fetch(`/api/training-sessions/${session}/payment`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          player_id: playerId,
-          amount,
-          concept,
-        }),
+      const res = await postMoney(`/api/training-sessions/${session}/payment`, {
+        player_id: playerId,
+        amount,
+        concept,
+        notes: paymentNote.trim() || null,
       });
 
+      // Not sent: it was the same payment registered twice.
+      if (!res) {
+        setPaymentProcessing(false);
+        return;
+      }
       if (!res.ok) {
         const errorText = await res.text();
         if (errorText.includes("duplicate") || errorText.includes("23505")) {
@@ -227,6 +232,7 @@ function TrainingSessionDetailContent() {
       setPaymentProcessing(false);
       setPaymentSuccess(true);
 
+      setPaymentNote("");
       setTimeout(() => {
         setPaymentSuccess(false);
         setPendingPayment(null);
@@ -242,6 +248,7 @@ function TrainingSessionDetailContent() {
   const cancelPayment = () => {
     setExpandedPlayerId(null);
     setPendingPayment(null);
+    setPaymentNote("");
     setCustomAmountMode(null);
     setCustomAmount("");
     setPaymentProcessing(false);
@@ -536,8 +543,9 @@ function TrainingSessionDetailContent() {
                     borderBottom: "1px solid rgba(255,255,255,0.05)"
                   }}>
                     <span style={{ fontSize: "0.9rem", paddingTop: "2px" }}>↳</span>
-                    <span style={{ fontSize: "0.9rem" }}>
+                    <span style={{ fontSize: "0.9rem", display: "flex", flexDirection: "column", gap: 4 }}>
                       Registrar pago de ${formatArs(pendingPayment.amount)}?
+                      <NoteField value={paymentNote} onChange={setPaymentNote} />
                     </span>
                     <div style={{ display: "flex", gap: 6 }}>
                       <button

@@ -74,8 +74,8 @@ export const GET = withPermission('api', '/api/torneos/equipos', 'GET', async (_
           standing: fee === "installments"
             ? feeStanding(head.category.installments, head.category.upfront_price, mine, today)
             : feeStanding([], null, mine, today),
-          payments: mine.map(({ id, amount, concept, is_cash, created_at, registered_by }) => ({
-            id, amount, concept, is_cash, created_at, registered_by,
+          payments: mine.map(({ id, amount, concept, notes, created_at, registered_by }) => ({
+            id, amount, concept, notes, created_at, registered_by,
           })),
         };
       })

@@ -312,7 +312,6 @@ Deno.test("fetchMonthStatuses aggregates payments and attendance per month", asy
                 slot_hour: 22,
                 month: "2026-09",
                 amount: 100000,
-                is_cash: true,
             },
             // October: paid one session.
             {
@@ -325,7 +324,6 @@ Deno.test("fetchMonthStatuses aggregates payments and attendance per month", asy
                 session: "2026-10-08 22hs",
                 month: "2026-10",
                 amount: 30000,
-                is_cash: true,
             },
         ]);
         if (payError) throw new Error(JSON.stringify(payError));

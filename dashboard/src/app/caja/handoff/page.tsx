@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { postMoney } from "@/lib/postMoney";
 import ProtectedPage from "../../components/ProtectedPage";
 import { usePageTitle } from "../../components/PageTitleContext";
 import type { CajaUser } from "../../api/caja/route";
@@ -37,12 +38,10 @@ function HandoffContent() {
     setConfirmingLow(false);
     setLoading(true);
     setErr(null);
-    const res = await fetch("/api/handoffs", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ amount: parsedAmount, to_user: toUser }),
-    });
+    const res = await postMoney("/api/handoffs", { amount: parsedAmount, to_user: toUser });
     setLoading(false);
+    // Not sent: it was the same handoff registered twice.
+    if (!res) return;
     if (!res.ok) {
       setErr(await res.text());
       return;

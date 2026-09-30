@@ -27,7 +27,7 @@ test("un entrenamiento nocturno y sus cobros pasada la medianoche son un solo d�
     pay(A, "2026-08-14T04:00:00Z"), // 01hs del 14
   ]);
 
-  expect(groups).toEqual([
+  expect(groups).toMatchObject([
     { user_id: A, start: "2026-08-14T00:00:00Z", day: "2026-08-13", slot: "jue 22hs", amount: 3000, count: 3 },
   ]);
 });
@@ -70,8 +70,12 @@ test("el orden de llegada no altera la agrupación ni el inicio del día", () =>
     pay(A, "2026-08-14T01:00:00Z"),
   ]);
 
-  expect(shuffled).toEqual([
+  expect(shuffled).toMatchObject([
     { user_id: A, start: "2026-08-14T00:00:00Z", day: "2026-08-13", slot: "jue 22hs", amount: 3000, count: 3 },
+  ]);
+  // The breakdown lists them in the order they happened, not as they came.
+  expect(shuffled[0].items.map((i) => i.at)).toEqual([
+    "2026-08-14T00:00:00Z", "2026-08-14T01:00:00Z", "2026-08-14T04:00:00Z",
   ]);
 });
 
@@ -113,4 +117,30 @@ test("los cobros viejos sin slot quedan en su propia entrada", () => {
 
   expect(groups).toHaveLength(2);
   expect(groups.map((g) => g.slot).sort()).toEqual(["jue 22hs", NoSlotLabel]);
+});
+
+test("el grupo guarda el detalle de cada cobro, con su nota", () => {
+  const groups = groupIncomeByDay([
+    { ...pay(A, "2026-08-14T00:00:00Z", 30000), id: "p1", player: "Uno, Ana", concept: "session" },
+    {
+      ...pay(A, "2026-08-14T00:10:00Z", 15000), id: "p2", player: "Dos, Beto", concept: "session",
+      notes: "me lo transfirieron a mi cuenta",
+    },
+  ]);
+  expect(groups).toHaveLength(1);
+  expect(groups[0].items).toEqual([
+    { id: "p1", player: "Uno, Ana", concept: "session", amount: 30000, notes: null, at: "2026-08-14T00:00:00Z" },
+    {
+      id: "p2", player: "Dos, Beto", concept: "session", amount: 15000,
+      notes: "me lo transfirieron a mi cuenta", at: "2026-08-14T00:10:00Z",
+    },
+  ]);
+});
+
+test("la matrícula es banco y el resto efectivo, lo dice el concepto", () => {
+  const groups = groupIncomeByDay([
+    { ...pay(A, "2026-08-14T00:00:00Z", 70000, null), concept: "membership dues" },
+    { ...pay(A, "2026-08-14T00:05:00Z", 30000), concept: "session" },
+  ]);
+  expect(groups.map((g) => [g.kind, g.is_cash])).toEqual([["dues", false], ["training", true]]);
 });

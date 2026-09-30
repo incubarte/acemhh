@@ -121,7 +121,6 @@ test.beforeAll(async () => {
     concept: "tournament",
     month,
     amount,
-    is_cash: true,
   });
   const { error: payErr } = await s.from("payments").insert([
     pay(TEAM_NEW, "Parcial", 30000),
@@ -209,6 +208,9 @@ test("titulares, suplentes y arqueros van en secciones distintas", async ({ page
 });
 
 test("el detalle lista los pagos y completar lo vencido deja el mes en verde", async ({ page }) => {
+  // The same amount again moments after the last one: the screen asks whether
+  // it is really another payment, and here it is.
+  page.on("dialog", (d) => d.accept());
   await page.goto(`/torneos/equipos/${teams.get(TEAM_NEW)}`);
   await page.locator(`[data-player-row="${players.get("Parcial")}"]`).click();
 
@@ -252,11 +254,22 @@ test("un monto libre se registra tal cual, y 45 quiere decir 45k", async ({ page
   await modal.getByTestId("custom-amount").fill("45");
   await modal.getByTestId("custom-ok").click();
   await expect(modal).toContainText("$45k");
+  // The note is folded away until asked for.
+  await expect(modal.getByTestId("note-input")).toHaveCount(0);
+  await modal.getByTestId("note-toggle").click();
+  await modal.getByTestId("note-input").fill("me lo transfirieron a mi cuenta");
   await modal.getByTestId("confirm-payment").click();
   await expect(page.getByTestId("payment-toast")).toBeVisible();
 
   await expectStatuses(page, "Nada", ["partial", "upcoming", "upcoming", "upcoming"]);
   await expect(standingOf(page, "Nada")).toHaveText("debe $15k");
+
+  const { data: saved } = await admin().from("payments").select("notes")
+    .eq("player_id", players.get("Nada")!);
+  expect(saved!.map((p) => p.notes)).toEqual(["me lo transfirieron a mi cuenta"]);
+  // And the player's detail shows it.
+  await page.locator(`[data-player-row="${players.get("Nada")}"]`).click();
+  await expect(page.getByTestId("payment-list")).toContainText("me lo transfirieron a mi cuenta");
 });
 
 test("el torneo anticipado deja todo en verde", async ({ page }) => {
@@ -275,13 +288,12 @@ test("el torneo anticipado deja todo en verde", async ({ page }) => {
   await expect(standingOf(page, "Adelantado")).toHaveText("torneo pago por anticipado");
 
   const { data } = await admin().from("payments")
-    .select("concept,amount,is_cash,team_id,slot_weekday,session")
+    .select("concept,amount,team_id,slot_weekday,session")
     .eq("player_id", players.get("Adelantado")!);
   expect(data).toHaveLength(1);
   expect({ ...data![0], amount: Number(data![0].amount) }).toEqual({
     concept: "tournament upfront",
     amount: UPFRONT,
-    is_cash: true,
     team_id: teams.get(TEAM_NEW),
     slot_weekday: null,
     session: null,
@@ -397,11 +409,10 @@ test("el servicio no deja pasar un anticipado fuera de regla", async ({ page }) 
 
 test("la cuota es efectivo: suma a la caja de quien la registra, y la caja la llama torneo", async ({ page }) => {
   const { data: fromScreen } = await admin().from("payments")
-    .select("is_cash")
+    .select("id")
     .in("player_id", [players.get("Parcial")!, players.get("Nada")!, players.get("Adelantado")!])
     .not("registered_by_user_id", "is", null);
   expect(fromScreen!.length).toBeGreaterThan(0);
-  expect(fromScreen!.every((p) => p.is_cash === true)).toBe(true);
 
   const res = await page.request.get("/api/caja");
   expect(res.ok()).toBeTruthy();

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
 import { EXPENSE_CONCEPTS } from "@/lib/expenses";
+import { cleanNotes, duplicateResponse, recentDuplicate } from "@/lib/moneyWrites";
 
 export const POST = withPermission('api', '/api/expenses', 'POST', async (sess, req) => {
   const body = (await req.json()) as {
@@ -9,6 +10,7 @@ export const POST = withPermission('api', '/api/expenses', 'POST', async (sess, 
     concept: string;
     notes?: string | null;
     is_cash?: boolean;
+    confirm_duplicate?: boolean;
   };
 
   const amount = Number(body?.amount);
@@ -21,12 +23,21 @@ export const POST = withPermission('api', '/api/expenses', 'POST', async (sess, 
     return new NextResponse("Invalid concept", { status: 400 });
   }
 
-  const notes = (body?.notes ?? "").trim() || null;
+  const notes = cleanNotes(body?.notes);
   if (concept === "otros" && !notes) {
     return new NextResponse("Las notas son obligatorias para el concepto 'otros'", { status: 400 });
   }
 
-  const { data, error } = await supabaseAdmin()
+  const s = supabaseAdmin();
+  if (!body.confirm_duplicate && await recentDuplicate(s, "expenses", {
+    paid_by: sess.id,
+    concept,
+    amount,
+  })) {
+    return duplicateResponse("un egreso");
+  }
+
+  const { data, error } = await s
     .from("expenses")
     .insert([{
       amount,

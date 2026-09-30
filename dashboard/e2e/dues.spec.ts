@@ -61,7 +61,6 @@ test.beforeAll(async () => {
     concept: "membership dues",
     month,
     amount,
-    is_cash: false,
   });
   const { error: payError } = await s.from("payments").insert([
     // Parcial: only the first installment.

@@ -78,7 +78,6 @@ async function seed() {
     session: SESSION_STR,
     month: SESSION.slice(0, 7),
     amount: PRICE,
-    is_cash: true,
   }]);
   if (payError) throw new Error(JSON.stringify(payError));
 }
@@ -322,6 +321,9 @@ test("el refresh no reordena las filas mientras el dedo sigue marcando", async (
 });
 
 test("una respuesta vieja no pisa un cambio que ya está en pantalla", async ({ page }) => {
+  // The same amount again moments after the last one: the screen asks whether
+  // it is really another payment, and here it is.
+  page.on("dialog", (d) => d.accept());
   // Moroso is left absent by the previous test; this one needs them present.
   await admin().from("attendances")
     .update({ attended: true })

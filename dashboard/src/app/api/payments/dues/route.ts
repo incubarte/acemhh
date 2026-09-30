@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission, type AuthSession } from "@/lib/authMiddleware";
+import { cleanNotes, duplicateResponse, recentDuplicate } from "@/lib/moneyWrites";
 
 function formatRegisteredBy(sess: AuthSession | null): string {
   if (!sess) return "[unknown]";
@@ -19,7 +20,13 @@ function currentYearMonth() {
 
 export const POST = withPermission('api', '/api/payments/dues', 'POST', async (sess, req) => {
 
-  const body = (await req.json()) as { player_id: string; amount: number; month?: string };
+  const body = (await req.json()) as {
+    player_id: string;
+    amount: number;
+    month?: string;
+    notes?: string | null;
+    confirm_duplicate?: boolean;
+  };
   if (!body?.player_id || !body?.amount) {
     return new NextResponse("Missing fields", { status: 400 });
   }
@@ -36,6 +43,14 @@ export const POST = withPermission('api', '/api/payments/dues', 'POST', async (s
 
   const s = supabaseAdmin();
 
+  if (!body.confirm_duplicate && await recentDuplicate(s, "payments", {
+    player_id: body.player_id,
+    concept: "membership dues",
+    amount,
+  })) {
+    return duplicateResponse("una matrícula");
+  }
+
   // Keep consistent with existing payments schema constraints:
   // - concept='monthly' uses month and no session
   // - dashboard dues uses concept='membership dues'
@@ -48,9 +63,9 @@ export const POST = withPermission('api', '/api/payments/dues', 'POST', async (s
       concept: "membership dues",
       month,
       amount,
-      // Dues are paid straight to the bank account, never in cash, so they
-      // must not count toward the registering admin's caja.
-      is_cash: false,
+      // Paid straight to the bank account: the concept alone keeps it out of
+      // the registering admin's caja.
+      notes: cleanNotes(body.notes),
     },
   ]);
 

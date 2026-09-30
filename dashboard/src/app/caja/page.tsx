@@ -5,6 +5,7 @@ import Link from "next/link";
 import ProtectedPage from "../components/ProtectedPage";
 import { usePageTitle } from "../components/PageTitleContext";
 import type { CajaUser, FlowEntry, PendingHandoff } from "../api/caja/route";
+import type { IncomeItem } from "@/lib/cashflow";
 import { Card, formatArs, formatWhen } from "./ui";
 
 type CajaData = {
@@ -24,15 +25,63 @@ function deltaLabel(delta: number) {
   return `${delta > 0 ? "+" : "-"}${formatArs(Math.abs(delta))}`;
 }
 
-function FlowLine({ entry }: { entry: FlowEntry }) {
-  const row = (icon: string, text: React.ReactNode) => (
-    <div data-testid="caja-flow" data-at={entry.at} style={{
-      display: "flex",
-      alignItems: "baseline",
-      gap: 8,
-      padding: "8px 0",
+/** What each payment was for, as the breakdown names it. */
+const ConceptLabel: Record<string, string> = {
+  session: "sesión",
+  monthly: "mes",
+  "half month": "medio mes",
+  "debt settlement": "deuda",
+  "membership dues": "matrícula",
+  tournament: "torneo",
+  "tournament upfront": "torneo anticipado",
+};
+
+/** The payments behind a grouped entry, each with its note: at the arqueo,
+ * "me lo transfirieron" is what explains the caja not matching the bills. */
+function IncomeBreakdown({ items }: { items: IncomeItem[] }) {
+  return (
+    <div data-testid="caja-breakdown" style={{
+      padding: "4px 0 8px 26px",
       borderBottom: "1px solid rgba(255,255,255,0.07)",
+      fontSize: "0.85rem",
     }}>
+      {items.map((i) => (
+        <div key={i.id} data-testid="caja-breakdown-item" style={{ padding: "4px 0" }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <span style={{ flex: 1 }}>
+              {i.player}
+              <span style={{ opacity: 0.55 }}> · {ConceptLabel[i.concept] ?? i.concept}</span>
+            </span>
+            <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatArs(i.amount)}</span>
+          </div>
+          {i.notes && (
+            <div data-testid="caja-breakdown-note" style={{ opacity: 0.75, fontStyle: "italic" }}>
+              📝 {i.notes}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FlowLine({ entry }: { entry: FlowEntry }) {
+  const [open, setOpen] = useState(false);
+  const expandable = entry.kind === "income";
+  const row = (icon: string, text: React.ReactNode) => (
+    <div
+      data-testid="caja-flow"
+      data-at={entry.at}
+      onClick={expandable ? () => setOpen((o) => !o) : undefined}
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        gap: 8,
+        padding: "8px 0",
+        borderBottom: expandable && open ? "none" : "1px solid rgba(255,255,255,0.07)",
+        cursor: expandable ? "pointer" : undefined,
+      }}
+    >
       <span>{icon}</span>
       <span style={{ flex: 1 }}>
         {text}
@@ -50,12 +99,35 @@ function FlowLine({ entry }: { entry: FlowEntry }) {
   );
 
   if (entry.kind === "income") {
-    return row(
-      "💵",
+    const notes = entry.items.filter((i) => i.notes).length;
+    return (
       <>
-        {entry.name} cobró {entry.count === 1 ? "1 pago" : `${entry.count} pagos`}
-        {" "}en <strong>{entry.slot}</strong>
-        {entry.is_cash ? "" : " (banco)"}
+        {row(
+          "💵",
+          <>
+            {entry.name} cobró {entry.count === 1 ? "1 pago" : `${entry.count} pagos`}
+            {" "}en <strong>{entry.slot}</strong>
+            {entry.is_cash ? "" : " (banco)"}
+            {notes > 0 && (
+              <span data-testid="caja-notes-badge" style={{ marginLeft: 6, opacity: 0.8 }}>
+                📝{notes > 1 ? ` ${notes}` : ""}
+              </span>
+            )}
+            <span style={{ marginLeft: 6, opacity: 0.45, fontSize: "0.8rem" }}>
+              {open ? "▾" : "▸"}
+            </span>
+          </>,
+        )}
+        {open && <IncomeBreakdown items={entry.items} />}
+      </>
+    );
+  }
+  if (entry.kind === "other income") {
+    return row(
+      "💰",
+      <>
+        {entry.name} recibió <strong>{entry.concept}</strong>
+        {entry.notes ? ` — ${entry.notes}` : ""}
       </>,
     );
   }
@@ -155,6 +227,9 @@ function CajaContent() {
       {/* Las acciones van arriba: se llega acá para registrar algo, y el
           historial de abajo es largo. */}
       <div data-testid="caja-actions" style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 16 }}>
+        <Link href="/caja/ingreso" style={{ textDecoration: "none" }}>
+          <button className="btnPrimary" style={{ width: "100%" }}>💰 Registrar ingreso</button>
+        </Link>
         <Link href="/caja/egreso" style={{ textDecoration: "none" }}>
           <button className="btnPrimary" style={{ width: "100%" }}>📤 Registrar egreso</button>
         </Link>
@@ -212,12 +287,17 @@ function CajaContent() {
           <option value="training">Cobros de entrenamiento</option>
           <option value="dues">Matrículas anuales</option>
           <option value="tournament">Cobros de torneo</option>
+          <option value="other">Otros ingresos</option>
         </select>
 
         {/* Newest first: what just happened is what one comes to check. The
             running balance still reads top-down as the caja right after each
             movement, ending in what it opened with. */}
-        {[...data.history].reverse().map((e, i) => <FlowLine key={i} entry={e} />)}
+        {[...data.history].reverse().map((e, i) => (
+          // Keyed by the movement, not its position: an opened breakdown
+          // stays with its entry when the list reloads.
+          <FlowLine key={`${e.kind}|${e.at}|${i}`} entry={e} />
+        ))}
 
         {/* The ledger opened with what was already in the caja: everything
             before August, which the movements list does not itemize. With a

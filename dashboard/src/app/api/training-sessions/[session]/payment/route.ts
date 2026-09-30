@@ -10,6 +10,7 @@ import {
 } from "@shared/tokens";
 import { ledgerExtrasFor } from "@/lib/rosterLedger";
 import { todayBA } from "@/lib/trainingDay";
+import { cleanNotes, duplicateResponse, recentDuplicate } from "@/lib/moneyWrites";
 
 /** `date` shifted by `days`, as YYYY-MM-DD. */
 function shiftDay(date: string, days: number): string {
@@ -38,6 +39,8 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
       player_id: string;
       amount: number;
       concept?: PaymentConcept;
+      notes?: string | null;
+      confirm_duplicate?: boolean;
     };
 
     if (!body?.player_id || !body?.amount) {
@@ -138,6 +141,22 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
     );
     if (refusal) return new NextResponse(refusal, { status: 409 });
 
+    // A session payment names its session: paying today's and a missed one
+    // back to back is two payments, not one typed twice.
+    const paidSession = concept === "session" || concept === "half month"
+      ? `${isoDate} ${hour}hs`
+      : null;
+    if (!body.confirm_duplicate && await recentDuplicate(s, "payments", {
+      player_id: body.player_id,
+      concept,
+      amount,
+      slot_weekday: isoWeekday(isoDate),
+      slot_hour: Number(hour),
+      session: paidSession,
+    })) {
+      return duplicateResponse("un cobro");
+    }
+
     const { error } = await s
       .from("payments")
       .insert([{
@@ -153,11 +172,9 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
         month: selectedMonth,
         // A half month names its session too: that is what says how many
         // sessions it bought.
-        session: concept === "session" || concept === "half month"
-          ? `${isoDate} ${hour}hs`
-          : null,
+        session: paidSession,
         amount,
-        is_cash: true,
+        notes: cleanNotes(body.notes),
       }]);
 
     if (error) {

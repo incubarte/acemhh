@@ -32,18 +32,28 @@ export type IncomePayment = {
    * and never reach the caja anyway (they go to the bank). */
   slot_weekday: number | null;
   slot_hour: number | null;
-  /** What was paid for: decides the kind of income and, for money outside
-   * training, what the entry is called. */
+  /** What was paid for: decides the kind of income, whether it is cash and,
+   * for money outside training, what the entry is called. */
   concept?: string;
-  /** Bank money is listed but never enters a caja. Defaults to cash. */
-  is_cash?: boolean;
+  /** For the group's breakdown: which payment, whose, and what the collector
+   * wrote on it. */
+  id?: string;
+  player?: string;
+  notes?: string | null;
 };
 
-/** The three kinds of money that come in: training (sessions, months, debt),
- * the annual membership dues, and tournament fees. */
-export type IncomeKind = "training" | "dues" | "tournament";
+/** Membership dues are paid straight to the bank account; everything else is
+ * collected in hand and enters the caja of whoever registered it. */
+export function isCashConcept(concept: string | undefined): boolean {
+  return concept !== "membership dues";
+}
 
-export const IncomeKinds: readonly IncomeKind[] = ["training", "dues", "tournament"];
+/** The kinds of money that come in: training (sessions, months, debt), the
+ * annual membership dues, tournament fees, and "other" — money with no player
+ * behind it (a colecta), which lives in its own table and is never grouped. */
+export type IncomeKind = "training" | "dues" | "tournament" | "other";
+
+export const IncomeKinds: readonly IncomeKind[] = ["training", "dues", "tournament", "other"];
 
 export function incomeKind(concept: string | undefined): IncomeKind {
   if (concept === "membership dues") return "dues";
@@ -60,6 +70,16 @@ export const TournamentLabel = "torneo";
 /** What membership dues income is called on screen. */
 export const DuesLabel = "cuota social";
 
+/** One payment inside a group, for the breakdown the caja opens on demand. */
+export type IncomeItem = {
+  id: string;
+  player: string;
+  concept: string;
+  amount: number;
+  notes: string | null;
+  at: string;
+};
+
 export type IncomeGroup = {
   user_id: string;
   /** created_at of the first payment of the group; the entry sorts by it. */
@@ -71,6 +91,8 @@ export type IncomeGroup = {
   is_cash: boolean;
   amount: number;
   count: number;
+  /** The payments behind the group, oldest first. */
+  items: IncomeItem[];
 };
 
 /** One entry per collector per collection day per slot. A single night runs
@@ -82,7 +104,7 @@ export function groupIncomeByDay(payments: IncomePayment[]): IncomeGroup[] {
   for (const p of [...payments].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
     const day = collectionDay(p.created_at);
     const kind = incomeKind(p.concept);
-    const isCash = p.is_cash ?? true;
+    const isCash = isCashConcept(p.concept);
     const slot = kind === "tournament"
       ? TournamentLabel
       : kind === "dues"
@@ -91,10 +113,19 @@ export function groupIncomeByDay(payments: IncomePayment[]): IncomeGroup[] {
       ? slotLabel(p.slot_weekday, p.slot_hour)
       : NoSlotLabel;
     const key = `${p.user_id}|${day}|${slot}|${isCash}`;
+    const item: IncomeItem = {
+      id: p.id ?? "",
+      player: p.player ?? "?",
+      concept: p.concept ?? "",
+      amount: p.amount,
+      notes: p.notes ?? null,
+      at: p.created_at,
+    };
     const existing = groups.get(key);
     if (existing) {
       existing.amount += p.amount;
       existing.count += 1;
+      existing.items.push(item);
     } else {
       groups.set(key, {
         user_id: p.user_id,
@@ -105,6 +136,7 @@ export function groupIncomeByDay(payments: IncomePayment[]): IncomeGroup[] {
         is_cash: isCash,
         amount: p.amount,
         count: 1,
+        items: [item],
       });
     }
   }

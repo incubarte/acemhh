@@ -69,30 +69,6 @@ async function setup(admin: SupabaseClient): Promise<Ids> {
     };
 }
 
-Deno.test("membership dues cannot be registered as cash", async () => {
-    const admin = createAdmin();
-    try {
-        const ids = await setup(admin);
-        const { error } = await admin.from("payments").insert([{
-            id: crypto.randomUUID(),
-            player_id: ids.playerId,
-            registered_by: TestName,
-            registered_by_user_id: ids.userA,
-            concept: "membership dues",
-            month: "2026-08",
-            amount: 1000,
-            is_cash: true,
-        }]);
-        assert(error, "cash membership dues must be rejected");
-        assert(
-            error!.message.includes("payments_dues_not_cash"),
-            "unexpected error: " + error!.message,
-        );
-    } finally {
-        await cleanup(admin);
-    }
-});
-
 Deno.test("a handoff to oneself is rejected", async () => {
     const admin = createAdmin();
     try {
@@ -133,7 +109,6 @@ Deno.test("caja balances add up", async () => {
                 session: "2026-08-13 22hs",
                 month: "2026-08",
                 amount: 5000,
-                is_cash: true,
             },
             // Bank dues: counts for nobody.
             {
@@ -144,7 +119,6 @@ Deno.test("caja balances add up", async () => {
                 concept: "membership dues",
                 month: "2026-08",
                 amount: 9999,
-                is_cash: false,
             },
         ]);
         await insert("expenses", [
@@ -159,8 +133,9 @@ Deno.test("caja balances add up", async () => {
         ]);
 
         const [payments, expenses, handoffs] = await Promise.all([
+            // Everything but the dues is cash: the concept says so.
             admin.from("payments").select("registered_by_user_id,amount")
-                .eq("is_cash", true).not("registered_by_user_id", "is", null),
+                .neq("concept", "membership dues").not("registered_by_user_id", "is", null),
             admin.from("expenses").select("paid_by,amount").eq("is_cash", true),
             admin.from("cash_handoffs").select("amount,from_user,to_user,accepted_at"),
         ]);

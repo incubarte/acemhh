@@ -4,6 +4,7 @@ import { withPermission } from "@/lib/authMiddleware";
 import { todayBA } from "@/lib/trainingDay";
 import { feeStanding, TournamentConcepts, type TournamentConcept } from "@/lib/tournamentFees";
 import { feeKindOf, loadTeam, paymentsForTeams, registeredBy } from "@/lib/tournaments";
+import { cleanNotes, duplicateResponse, recentDuplicate } from "@/lib/moneyWrites";
 
 // Registrar un pago de la cuota del torneo para un jugador del equipo.
 //
@@ -20,7 +21,8 @@ export const POST = withPermission('api', '/api/torneos/pago', 'POST', async (se
       player_id?: string;
       amount?: number;
       concept?: TournamentConcept;
-      is_cash?: boolean;
+      notes?: string | null;
+      confirm_duplicate?: boolean;
     };
     if (!body?.player_id || body?.amount === undefined) {
       return new NextResponse("Missing fields", { status: 400 });
@@ -33,7 +35,6 @@ export const POST = withPermission('api', '/api/torneos/pago', 'POST', async (se
     if (!(TournamentConcepts as readonly string[]).includes(concept)) {
       return new NextResponse("Concepto inválido", { status: 400 });
     }
-    const isCash = body.is_cash ?? true;
 
     const s = supabaseAdmin();
     const head = await loadTeam(s, teamId);
@@ -90,6 +91,15 @@ export const POST = withPermission('api', '/api/torneos/pago', 'POST', async (se
       }
     }
 
+    if (!body.confirm_duplicate && await recentDuplicate(s, "payments", {
+      player_id: body.player_id,
+      team_id: teamId,
+      concept,
+      amount,
+    })) {
+      return duplicateResponse("un pago");
+    }
+
     const paymentId = crypto.randomUUID();
     const { error } = await s.from("payments").insert([{
       id: paymentId,
@@ -102,7 +112,9 @@ export const POST = withPermission('api', '/api/torneos/pago', 'POST', async (se
       // se cobró. La columna es obligatoria para todos los conceptos.
       month: today,
       amount,
-      is_cash: isCash,
+      // En efectivo, como todo lo que no es matrícula: suma a la caja de quien
+      // lo registra.
+      notes: cleanNotes(body.notes),
     }]);
     if (error) {
       console.error(error);

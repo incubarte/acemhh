@@ -10,6 +10,8 @@ import { usePageTitle } from "../../components/PageTitleContext";
 import type { PaymentConcept } from "@shared/tokens";
 import { categoryLabel } from "@/lib/categories";
 import DebtBreakdown from "../../components/DebtBreakdown";
+import NoteField from "../../components/NoteField";
+import { postMoney } from "@/lib/postMoney";
 
 // Redesigned attendance & payments screen. Presence is expressed by the
 // section a player sits in, and toggled with a horizontal thumb-wheel on the
@@ -608,10 +610,11 @@ function PaymentModal({
   sessionLabel: string;
   monthLabel: string;
   onClose: () => void;
-  onConfirm: (amount: number, concept: PaymentConcept) => void;
+  onConfirm: (amount: number, concept: PaymentConcept, notes: string) => void;
   busy: boolean;
 }) {
   const [chosen, setChosen] = useState<{ amount: number; concept: PaymentConcept } | null>(null);
+  const [notes, setNotes] = useState("");
   const [custom, setCustom] = useState("");
   // "Otro..." has to say WHAT it is: the amount no longer decides.
   const [customConcept, setCustomConcept] = useState<PaymentConcept>("session");
@@ -771,6 +774,9 @@ function PaymentModal({
               <p style={{ margin: "4px 0 0", opacity: 0.75, fontSize: "0.9rem" }}>
                 {conceptLabel[chosen.concept]}
               </p>
+              <div style={{ display: "flex", flexDirection: "column", marginTop: 10 }}>
+                <NoteField value={notes} onChange={setNotes} />
+              </div>
               <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
                 <button
                   style={{ ...button, textAlign: "center" }}
@@ -783,7 +789,7 @@ function PaymentModal({
                   className="btnPrimary"
                   style={{ flex: 1 }}
                   disabled={busy}
-                  onClick={() => onConfirm(chosen.amount, chosen.concept)}
+                  onClick={() => onConfirm(chosen.amount, chosen.concept, notes)}
                 >
                   Confirmar
                 </button>
@@ -1161,14 +1167,18 @@ function TrainingSessionBetaContent() {
     playerId: string,
     amount: number,
     concept: PaymentConcept,
+    notes: string,
   ) => {
     setBusy(true);
-    const res = await fetch(`/api/training-sessions/${session}/payment`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ player_id: playerId, amount, concept }),
+    const res = await postMoney(`/api/training-sessions/${session}/payment`, {
+      player_id: playerId,
+      amount,
+      concept,
+      notes: notes.trim() || null,
     });
     setBusy(false);
+    // Not sent: it was the same payment registered twice.
+    if (!res) return;
     if (!res.ok) {
       // The service refuses with a reason the admin can act on; show it
       // instead of a generic failure.
@@ -1342,7 +1352,8 @@ function TrainingSessionBetaContent() {
           monthLabel={monthLabel}
           busy={busy}
           onClose={() => setPayModalPlayer(null)}
-          onConfirm={(amount, concept) => registerPayment(payModalPlayer.id, amount, concept)}
+          onConfirm={(amount, concept, notes) =>
+            registerPayment(payModalPlayer.id, amount, concept, notes)}
         />
       )}
 

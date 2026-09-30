@@ -80,7 +80,6 @@ test.beforeAll(async () => {
       // Every training payment names the slot it was taken at.
       slot_weekday: 4,
       slot_hour: SLOT_HOUR,
-      is_cash: true,
     };
     if (c.pay === "month") {
       return { ...base, concept: "monthly", amount: 100000 };

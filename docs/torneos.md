@@ -82,7 +82,11 @@ plata y no puede vivir sólo en el botón.
 | `team_id` | El equipo. Obligatorio para estos conceptos, nulo para el resto. |
 | `month` | Cuándo se cobró, no a qué cuota va. La columna es obligatoria para todo concepto. |
 | `slot_weekday`, `slot_hour`, `session` | Nulos: el torneo no pertenece a ningún entrenamiento. |
-| `is_cash` | Siempre `true`: la cuota se cobra en efectivo, suma a la caja de quien la registra, y la caja la lista como "torneo". |
+| `notes` | Opcional: lo que quien cobra quiera recordar en el arqueo. |
+
+La cuota se cobra en efectivo: suma a la caja de quien la registra, y la caja
+la lista como "torneo". Sólo la matrícula va al banco, y eso lo dice el
+concepto.
 
 Todo lo que lee `payments` filtra por lista de conceptos, así que los pagos de
 torneo no entran al ledger de entrenamientos, al análisis ni a la credencial.
@@ -90,14 +94,15 @@ torneo no entran al ledger de entrenamientos, al análisis ni a la credencial.
 ## Clausura 2026
 
 La migración `20260914100000_tournaments.sql` deja creado el Interclubes
-Clausura 2026 con estas cuotas:
+Clausura 2026. Las cuotas de Rookies cambiaron en
+`20260930100000_incomes_notes_and_rookies_fees.sql`; hoy son:
 
 | Categoría | Sep | Oct | Nov | Dic | Suma | Anticipado |
 |---|---|---|---|---|---|---|
 | Elite | 60.000 | 55.000 | 55.000 | 25.000 | 195.000 | 178.000 |
 | Master | 100.000 | 90.000 | 85.000 | 35.000 | 310.000 | 282.000 |
 | Senior | 80.000 | 75.000 | 70.000 | 30.000 | 255.000 | 232.000 |
-| Rookies | 50.000 | 50.000 | 45.000 | 20.000 | 165.000 | 151.000 |
+| Rookies | 40.000 | 40.000 | 50.000 | 20.000 | 150.000 | 140.000 |
 
 Las tarifas se acordaron como A/B/C/D y acá están mapeadas en el orden de las
 categorías. **Si el mapeo es otro, es un UPDATE sobre esas filas**, no un

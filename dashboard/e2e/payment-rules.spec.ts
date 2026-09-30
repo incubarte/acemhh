@@ -271,7 +271,7 @@ test("un pago de deuda salda el mes viejo, no el mes en que se registró", async
   const weekday = new Date(`${sepDates[0]}T12:00:00Z`).getUTCDay() || 7;
   const { error } = await s.from("payments").insert({
     id: crypto.randomUUID(), player_id: playerId, concept: "debt settlement", amount: augDebt, month: sep,
-    slot_weekday: weekday, slot_hour: 22, registered_by: "test", is_cash: true,
+    slot_weekday: weekday, slot_hour: 22, registered_by: "test",
   });
   expect(error).toBeNull();
 
@@ -286,4 +286,25 @@ test("un pago de deuda salda el mes viejo, no el mes en que se registró", async
   expect(row.debt).toBe(sepRow.charge);
 
   await s.from("attendances").delete().eq("player_id", playerId);
+});
+
+test("el cobro guarda su nota, y el mismo cobro dos veces seguidas pide confirmación", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  const url = `/api/training-sessions/${fx.session}/payment`;
+  const body = { player_id: playerId, amount: 30000, concept: "session", notes: "  me lo transfirieron  " };
+
+  const first = await page.request.post(url, { data: body });
+  expect(first.status(), await first.text()).toBe(200);
+  const { data: saved } = await admin().from("payments").select("notes").eq("player_id", playerId).single();
+  expect(saved!.notes).toBe("me lo transfirieron");
+
+  const again = await page.request.post(url, { data: body });
+  expect(again.status()).toBe(409);
+  expect(await again.json()).toMatchObject({ duplicate: true });
+
+  const confirmed = await page.request.post(url, { data: { ...body, notes: "", confirm_duplicate: true } });
+  expect(confirmed.status(), await confirmed.text()).toBe(200);
+  const { data: rows } = await admin().from("payments").select("notes").eq("player_id", playerId);
+  // An empty note is no note.
+  expect(rows!.map((r) => r.notes).sort()).toEqual(["me lo transfirieron", null]);
 });

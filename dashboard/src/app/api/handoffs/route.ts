@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
+import { duplicateResponse, recentDuplicate } from "@/lib/moneyWrites";
 
 // The giver registers the handoff; it stays pending (and out of balances)
 // until the receiver accepts it in /api/handoffs/accept.
 export const POST = withPermission('api', '/api/handoffs', 'POST', async (sess, req) => {
-  const body = (await req.json()) as { amount: number; to_user: string };
+  const body = (await req.json()) as {
+    amount: number;
+    to_user: string;
+    confirm_duplicate?: boolean;
+  };
 
   const amount = Number(body?.amount);
   if (!Number.isFinite(amount) || amount <= 0) {
@@ -29,6 +34,14 @@ export const POST = withPermission('api', '/api/handoffs', 'POST', async (sess, 
   if (receiverError) return new NextResponse(receiverError.message, { status: 500 });
   if (!receiver || (receiver.groups ?? []).length === 0) {
     return new NextResponse("El destinatario no es un admin", { status: 400 });
+  }
+
+  if (!body.confirm_duplicate && await recentDuplicate(s, "cash_handoffs", {
+    from_user: sess.id,
+    to_user: toUser,
+    amount,
+  })) {
+    return duplicateResponse("una entrega");
   }
 
   const { data, error } = await s

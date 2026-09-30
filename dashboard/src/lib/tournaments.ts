@@ -11,7 +11,7 @@ export type TeamPaymentRow = {
   team_id: string;
   amount: number;
   concept: TournamentConcept;
-  is_cash: boolean;
+  notes: string | null;
   created_at: string;
   registered_by: string;
 };
@@ -24,7 +24,7 @@ export async function paymentsForTeams(
   if (teamIds.length === 0) return [];
   const { data, error } = await s
     .from("payments")
-    .select("id,player_id,team_id,amount,concept,is_cash,created_at,registered_by")
+    .select("id,player_id,team_id,amount,concept,notes,created_at,registered_by")
     .in("team_id", teamIds)
     .in("concept", [...TournamentConcepts])
     .order("created_at");
@@ -35,7 +35,7 @@ export async function paymentsForTeams(
     team_id: String(p.team_id),
     amount: Number(p.amount),
     concept: p.concept as TournamentConcept,
-    is_cash: Boolean(p.is_cash),
+    notes: p.notes ? String(p.notes) : null,
     created_at: String(p.created_at),
     registered_by: String(p.registered_by),
   }));
