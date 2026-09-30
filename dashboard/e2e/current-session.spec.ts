@@ -210,7 +210,7 @@ test("el ledger funciona en meses de 30 días", async ({ page }) => {
   // Regression: the roster query bounded training_sessions with `${month}-31`,
   // which Postgres rejects outright in 30-day months, silently dropping every
   // ledger figure (debt, presets, bonified sessions) for that session.
-  const september = "2026-09-24"; // a seeded Thursday
+  const september = "2026-09-17"; // a seeded Thursday
   await page.request.post("/api/auth/dev");
 
   for (const base of ["training-sessions", "training-sessions-beta"]) {

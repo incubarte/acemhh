@@ -15,6 +15,15 @@ function admin(): SupabaseClient {
   });
 }
 
+/** The first day money may still be written for: Monday of the previous
+ * week (withinWriteWindow in supabase/functions/_shared/tokens.ts). */
+function writeWindowStart(today: string): string {
+  const d = new Date(`${today}T12:00:00Z`);
+  const iso = d.getUTCDay() === 0 ? 7 : d.getUTCDay();
+  d.setUTCDate(d.getUTCDate() - (iso - 1) - 7);
+  return d.toISOString().slice(0, 10);
+}
+
 /** Buenos Aires "today", the reference the server uses. */
 export function todayBA(): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -76,20 +85,26 @@ function shiftMonth(month: string, by: number): string {
 }
 
 /**
- * The most recent training of a slot that is still writable — at most six days
- * back with weekly trainings, so always inside the window — plus the one
- * before it.
+ * The most recent training of a slot that is still writable, plus the one
+ * before it. Usually the last one already held; but a week without training
+ * (a day off taken off the agenda) can leave that one outside the window, and
+ * then it is the next one to come — the window has no upper bound.
  */
 export async function writableSession(hour = 22): Promise<Fixture> {
   const { data, error } = await admin().from("training_sessions")
-    .select("date").eq("hour", hour).lte("date", todayBA())
-    .order("date", { ascending: false }).limit(2);
+    .select("date").eq("hour", hour).gte("date", writeWindowStart(todayBA()))
+    .order("date");
   if (error) throw new Error(JSON.stringify(error));
-  if ((data ?? []).length < 2) {
-    throw new Error(`La agenda no tiene dos entrenamientos de ${hour}hs hasta hoy`);
-  }
-  const date = String(data![0].date);
-  const prev = String(data![1].date);
+  const dates = (data ?? []).map((r) => String(r.date));
+  const held = dates.filter((d) => d <= todayBA());
+  const date = held.at(-1) ?? dates[0];
+  if (!date) throw new Error(`La agenda no tiene entrenamientos de ${hour}hs cobrables`);
+
+  const { data: before } = await admin().from("training_sessions")
+    .select("date").eq("hour", hour).lt("date", date)
+    .order("date", { ascending: false }).limit(1);
+  if (!before?.[0]) throw new Error(`La agenda no tiene un entrenamiento de ${hour}hs antes del ${date}`);
+  const prev = String(before[0].date);
   const month = date.slice(0, 7);
   return {
     session: `${date}-${hour}`,
