@@ -151,6 +151,9 @@ export type MonthResult = {
   used: number;
   /** Tokens handed to the next month. */
   carryoverOut: number;
+  /** Per slot, how much of the opening balance went into its monthly
+   * payment instead of waiting for an attendance. */
+  monthlyCredit: Map<SlotKey, number>;
 };
 
 /** The rates a player actually pays. A goalkeeper has one price that serves as
@@ -241,6 +244,26 @@ export function ledgerMonth(
   }
 
   const tokensOf = (pesos: number) => (promo > 0 ? pesos / promo : 0);
+
+  // --- The opening balance pays for the month first.
+  //
+  // A session the club still owes the player (a training it charged and did
+  // not give) is part of what buys this month: whoever comes in with one pays
+  // the month one session cheaper. It only fills the gap between what the
+  // monthly paid and what the month holds — a month paid in full anyway leaves
+  // it for the attendances, as before — and once spent there it is gone from
+  // the opening balance, so it cannot also cover a session elsewhere.
+  let creditLeft = state.carryover;
+  const monthlyCredit = new Map<SlotKey, number>();
+  for (const [slot, e] of promoBySlot) {
+    if (e.monthlyPaid === 0) continue;
+    const gap = Math.max(0, e.monthlyHeld - tokensOf(e.monthlyPaid));
+    const credit = Math.min(creditLeft, gap);
+    if (credit <= 0) continue;
+    monthlyCredit.set(slot, credit);
+    creditLeft -= credit;
+  }
+
   for (const [, e] of promoBySlot) {
     // A full month is an ANTICIPO: it grants the whole month whatever was
     // paid. A half month is a plain purchase: it grants what it bought.
@@ -258,7 +281,7 @@ export function ledgerMonth(
   let individualLeft = individual > 0 ? individualPaid / individual : 0;
 
   // --- Consumption.
-  let carryLeft = state.carryover;
+  let carryLeft = creditLeft;
   const promoLeft = new Map<SlotKey, number>(
     [...promoBySlot].map(([k, e]) => [k, e.granted]),
   );
@@ -305,7 +328,8 @@ export function ledgerMonth(
     // Only a full month can fall short: a half month bought exactly what it
     // paid for, so it owes nothing and has nothing to forgive.
     if (e.monthlyPaid === 0) continue;
-    const full = Math.round(e.monthlyHeld * promo);
+    // The month costs what it holds, minus what the opening balance paid.
+    const full = Math.round((e.monthlyHeld - (monthlyCredit.get(slot) ?? 0)) * promo);
     if (e.monthlyPaid >= full) continue;
     const short = full - e.monthlyPaid;
     pending += short;
@@ -343,6 +367,7 @@ export function ledgerMonth(
       (individual > 0 ? individualPaid / individual : 0),
     used,
     carryoverOut,
+    monthlyCredit,
   };
 }
 

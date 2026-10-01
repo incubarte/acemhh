@@ -39,8 +39,11 @@ export type LedgerExtras = {
     outstanding: number;
   }[];
   /** What this screen's slot costs for the whole month, at the promotional
-   * rate. Null when the slot holds no sessions this month. */
+   * rate, less the sessions the player comes in with. Null when the slot
+   * holds no sessions this month. */
   month_preset: number | null;
+  /** Sessions in favour that month_preset already discounts. */
+  month_credit: number;
   /** What one session costs this player on its own. */
   session_preset: number | null;
   /** What the sessions still to come cost — this session included. Only for
@@ -70,6 +73,7 @@ export const LEDGER_DEFAULTS: LedgerExtras = {
   debt_outstanding: 0,
   debt_months: [],
   month_preset: null,
+  month_credit: 0,
   session_preset: null,
   half_month_preset: null,
   owed_now: 0,
@@ -368,6 +372,13 @@ export async function ledgerExtrasFor(
     const prevRow = debtMonths.find((d) => d.month === prevMonth);
 
     const heldThisMonth = sessionsPerSlot.get(selectedMonth)?.get(screenSlot) ?? 0;
+    // Sessions in favour pay for the month first (see ledgerMonth): whatever
+    // another slot's monthly has not already taken discounts this one.
+    const creditElsewhere = [...now.monthlyCredit]
+      .filter(([slot]) => slot !== screenSlot)
+      .reduce((sum, [, c]) => sum + c, 0);
+    const monthCredit = Math.min(heldThisMonth, Math.max(0, state.carryover - creditElsewhere));
+    const monthPrice = Math.round((heldThisMonth - monthCredit) * rates.promo);
     // Half month is for the player's FIRST payment of the period. Membership
     // dues are orthogonal and never counted here.
     const paidSomethingThisPeriod = [...payMonths.values()].some((ps) => ps.length > 0);
@@ -383,9 +394,10 @@ export async function ledgerExtrasFor(
       debt_months: debtMonths,
       // A full scholarship has nothing to charge: no preset, rather than a
       // button offering to collect $0.
-      month_preset: heldThisMonth > 0 && rates.promo > 0
-        ? Math.round(heldThisMonth * rates.promo)
+      month_preset: heldThisMonth > 0 && rates.promo > 0 && monthPrice > 0
+        ? monthPrice
         : null,
+      month_credit: monthCredit,
       session_preset: rates.individual > 0 ? rates.individual : null,
       half_month_preset:
         !paidSomethingThisPeriod && stillToCome > 0 && stillToCome < heldThisMonth &&
@@ -394,7 +406,7 @@ export async function ledgerExtrasFor(
           : null,
       owed_now: now.pending,
       owes_now: now.pending > 0,
-      bought_month: heldThisMonth > 0 && monthlyPaid >= Math.round(heldThisMonth * rates.promo),
+      bought_month: heldThisMonth > 0 && monthlyPaid > 0 && monthlyPaid >= monthPrice,
       owes_if_present: owesWith([...withoutThis, thisOne]),
       owes_if_absent: owesWith(withoutThis),
       // Net of what this month's debt payments already settled: a month paid

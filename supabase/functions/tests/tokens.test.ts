@@ -226,6 +226,36 @@ Deno.test("el ejemplo combinado del documento da 2 tokens de carryover", () => {
     assertEquals(r.carryoverOut, 2);
 });
 
+Deno.test("la sesión a favor paga parte del mes: con 1 de crédito, el mes de 3 cuesta 2", () => {
+    // Septiembre le cobró una sesión que no se dio; octubre tiene 3. Paga 2.
+    const r = run({ debt: 0, carryover: 1 }, month({ held: 3, attended: 3, monthly: 50000 }));
+    assertEquals(r.pending, 0);
+    assertEquals(r.monthlyCredit.get(S22), 1);
+    // El crédito se gastó en el mes: no queda nada para pasar.
+    assertEquals(r.carryoverOut, 0);
+});
+
+Deno.test("el crédito que pagó el mes no cubre además una sesión en otro slot", () => {
+    // Usó la sesión a favor para el mes de las 22; ir a las 23 sin pagar debe.
+    const input = month({ held: 3, attended: 3, monthly: 50000, heldS23: 3, attendedS23: 1 });
+    const r = run({ debt: 0, carryover: 1 }, input);
+    assertEquals(r.pending, PRICE.session_price);
+});
+
+Deno.test("quien paga el mes entero teniendo crédito lo usa en las asistencias, como antes", () => {
+    const r = run({ debt: 0, carryover: 1 }, month({ held: 3, attended: 3, monthly: 75000 }));
+    assertEquals(r.pending, 0);
+    assertEquals(r.monthlyCredit.size, 0);
+    assertEquals(r.carryoverOut, 0);
+});
+
+Deno.test("el crédito no alcanza para un parcial: debe lo que falta del mes con descuento", () => {
+    // 1 de crédito y 20k pagos en un mes de 3: el mes cuesta 50k, faltan 30k.
+    const r = run({ debt: 0, carryover: 1 }, month({ held: 3, attended: 0, monthly: 20000 }));
+    assertEquals(r.monthlyCredit.get(S22), 1);
+    assertEquals(r.pending, 30000);
+});
+
 // ////////////////////////////////////
 // PARCIAL MENSUAL Y CONDONACIÓN
 // ////////////////////////////////////

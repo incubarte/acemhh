@@ -38,6 +38,8 @@ type RosterPlayer = {
   debt: number;
   debt_months: { month: string; charge: number; paid: number; settled: number; outstanding: number }[];
   month_preset: number | null;
+  /** Sessions in favour the month preset already discounts. */
+  month_credit: number;
   session_preset: number | null;
   half_month_preset: number | null;
   owes_now: boolean | null;
@@ -598,6 +600,13 @@ function SearchButton({
 
 // ---- Payment modal ----
 
+/** "1 sesión", "2 sesiones", "0,64 sesiones": credit can be fractional. */
+function formatSessions(n: number): string {
+  const rounded = Math.round(n * 100) / 100;
+  const text = rounded.toLocaleString("es-AR", { maximumFractionDigits: 2 });
+  return `${text} ${rounded === 1 ? "sesión" : "sesiones"}`;
+}
+
 function PaymentModal({
   player,
   sessionLabel,
@@ -702,6 +711,14 @@ function PaymentModal({
                       onClick={() => setChosen({ amount: monthPreset, concept: "monthly" })}
                     >
                       Mes completo · <strong>${formatArs(monthPreset)}</strong>
+                      {player.month_credit > 0 && (
+                        <span
+                          data-testid="month-credit"
+                          style={{ display: "block", fontSize: "0.75rem", opacity: 0.65 }}
+                        >
+                          descuenta {formatSessions(player.month_credit)} a favor
+                        </span>
+                      )}
                     </button>
                   )}
                   {/* Only for somebody starting the period with the month
