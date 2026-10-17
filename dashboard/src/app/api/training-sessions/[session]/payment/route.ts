@@ -12,13 +12,6 @@ import { ledgerExtrasFor } from "@/lib/rosterLedger";
 import { todayBA } from "@/lib/trainingDay";
 import { cleanNotes, duplicateResponse, recentDuplicate } from "@/lib/moneyWrites";
 
-/** `date` shifted by `days`, as YYYY-MM-DD. */
-function shiftDay(date: string, days: number): string {
-  const d = new Date(`${date}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
 export const POST = withPermission('api', '/api/training-sessions/payment', 'POST', async (sess, req) => {
   try {
     const url = new URL(req.url);
@@ -107,20 +100,6 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
       } else individualSlots.add(k);
     }
 
-    // The month closes one day after the slot's second session.
-    const { data: slotSessions } = await s
-      .from("training_sessions")
-      .select("date")
-      .eq("hour", Number(hour))
-      .gte("date", `${selectedMonth}-01`)
-      .lte("date", `${selectedMonth}-31`)
-      .order("date");
-    const sameWeekday = (slotSessions ?? [])
-      .map((r) => String(r.date))
-      .filter((d) => isoWeekday(d) === isoWeekday(isoDate));
-    const second = sameWeekday[1];
-    const monthlyClosed = second !== undefined && todayBA() > shiftDay(second, 1);
-
     const refusal = checkPayment(
       { concept, amount, slot },
       {
@@ -131,7 +110,6 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
         individualSlots,
         monthPrice: extras?.month_preset ?? 0,
         monthlyPaid,
-        monthlyClosed,
         // Half month is the first thing a late starter pays. The ledger has
         // already worked out whether that is the case and what it costs.
         firstOfPeriod: extras?.half_month_preset !== null &&

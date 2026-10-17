@@ -512,9 +512,6 @@ export type PaymentGuard = {
   monthPrice: number;
   /** Already paid towards that month. */
   monthlyPaid: number;
-  /** Whether the window to buy this month has passed — it closes one day
-   * after the slot's second session. */
-  monthlyClosed: boolean;
 };
 
 /**
@@ -575,9 +572,6 @@ export function checkPayment(intent: PaymentIntent, ctx: PaymentGuard): string |
         return "El segundo pago tiene que completar el mes";
       }
       return null;
-    }
-    if (ctx.monthlyClosed) {
-      return "El pago mensual se registra hasta la segunda sesión del mes";
     }
     if (intent.amount < ctx.monthPrice && intent.amount < MinPartialMonthly) {
       return `Un pago parcial del mes no puede ser menor a $${MinPartialMonthly / 1000}k`;

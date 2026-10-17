@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { dayAfter, futureSession, sessionIn, tariffAt, todayBA, writableSession, type Fixture } from "./fixtures";
+import { futureSession, sessionIn, tariffAt, writableSession, type Fixture } from "./fixtures";
 
 // The rules that say what may be registered, enforced by the SERVICE. They are
 // money rules: a stale tab, a retry or a direct call has to hit the same wall
@@ -90,23 +90,17 @@ test("no se mezcla mensual con individual en el mismo mes y horario", async ({ p
   expect(await res.text()).toContain("pago de sesión");
 });
 
-test("pasada la segunda sesión del mes ya no se compra el mes", async ({ page }) => {
-  // The month closes for monthly payments one day after the slot's second
-  // training. Early in a month that has not happened yet, and there is
-  // nothing late about buying it — so the rule can only be seen later on.
-  const { data } = await admin().from("training_sessions").select("date")
-    .eq("hour", 22).gte("date", `${fx.month}-01`).lte("date", fx.date).order("date");
-  const second = (data ?? []).map((r) => String(r.date))[1];
-  test.skip(
-    second === undefined || todayBA() <= dayAfter(second),
-    "el mes todavía no pasó su segunda sesión",
-  );
-
+test("el mes se cobra en cualquier momento, también pasada la segunda sesión", async ({ page }) => {
+  // There used to be a deadline: one day after the slot's second training.
+  // A payment that cannot be registered is money that ends up nowhere, so
+  // there is none. fx is the latest training already held — as late in its
+  // month as the agenda allows.
   await page.request.post("/api/auth/dev");
-  // fx is the latest training already held, so its month is well under way.
-  const late = await pay(page, "monthly", 100000);
-  expect(late.status()).toBe(409);
-  expect(await late.text()).toContain("segunda sesión");
+  const { data } = await page.request.get(`/api/training-sessions/${fx.session}`)
+    .then((r) => r.json())
+    .then((r) => ({ data: r.players.find((p: { id: string }) => p.id === playerId) }));
+  const res = await pay(page, "monthly", data.month_preset);
+  expect(res.status(), await res.text()).toBe(200);
 });
 
 test("un parcial mensual tiene mínimo, y el segundo pago completa el mes", async ({ page }) => {

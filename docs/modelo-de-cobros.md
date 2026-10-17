@@ -283,9 +283,9 @@ el jugador se pone contento y no es un problema del admin.
 
 ### Pago mensual
 
-- Sólo puede registrarse **hasta la segunda sesión del slot** que se está
-  pagando, más **un día de gracia** (por si el admin bajó los cobros a papel y
-  los vuelca al día siguiente).
+- Se puede registrar **en cualquier momento del mes**. Hubo un límite (hasta un
+  día después de la segunda sesión del slot) y se quitó: un cobro que no se
+  puede registrar es plata que no queda en ningún lado.
 - La primera semana admite un **pago parcial, mínimo 40.000**. Desde la segunda
   semana el resto ya es saldo del mes.
 - Un parcial sólo puede completarse con un pago que llegue al **100%** del valor
@@ -433,11 +433,6 @@ entre runtimes es cómo se traen los datos, no la aritmética.
 imports y Next no; mientras el módulo no importe, los dos lo consumen igual.
 
 ## Dos cosas que sorprenden en la práctica
-
-**El mes casi nunca está disponible.** Se compra hasta un día después de la
-segunda sesión del slot, así que pasada la primera quincena la única opción es
-la sesión suelta. Es el diseño —el precio promocional se gana pagando por
-adelantado— pero conviene saberlo antes de que un admin pregunte.
 
 **En el primer mes de un período no puede haber deuda cerrada.** La deuda son
 meses cerrados y el cálculo no cruza períodos, así que en marzo y en agosto el

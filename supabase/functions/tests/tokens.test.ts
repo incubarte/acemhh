@@ -423,7 +423,6 @@ const OPEN: PaymentGuard = {
     individualSlots: new Set(),
     monthPrice: 100000,
     monthlyPaid: 0,
-    monthlyClosed: false,
 };
 const pay = (concept: PaymentConcept, amount: number) => ({
     concept, amount, slot: S22,
@@ -490,11 +489,10 @@ Deno.test("un parcial se completa, no se extiende: no hay tercera cuota", () => 
     assertEquals(checkPayment(pay("monthly", 30000), conParcial)?.includes("completar"), true);
 });
 
-Deno.test("pasada la segunda sesión ya no se compra el mes", () => {
-    const tarde = { ...OPEN, monthlyClosed: true };
-    assertEquals(checkPayment(pay("monthly", 100000), tarde)?.includes("segunda sesión"), true);
-    // Pero completar un parcial que ya se empezó sí se puede.
-    assertEquals(checkPayment(pay("monthly", 60000), { ...tarde, monthlyPaid: 40000 }), null);
+Deno.test("el mes se puede pagar en cualquier momento: un cobro nunca se rechaza por tarde", () => {
+    // Antes se cerraba después de la segunda sesión; un cobro que no se puede
+    // registrar es plata que no queda en ningún lado.
+    assertEquals(checkPayment(pay("monthly", 100000), OPEN), null);
 });
 
 Deno.test("un horario sin entrenamientos este mes no tiene mes que vender", () => {
