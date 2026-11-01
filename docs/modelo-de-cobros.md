@@ -132,6 +132,10 @@ No toda asistencia consume un token.
 arquero que va a las 22hs o a las 23hs no paga esa sesión. No se marca nada:
 sale del flag del slot.
 
+Desde octubre de 2026 el slot de las 21hs tiene `goalies = false`: no hay slot
+de arqueros, así que los arqueros no pagan el entrenamiento. La tarifa del
+arquero no cambió; lo que cambió es que no hay dónde aplicarla.
+
 El arquero **invitado** paga más que el del club, y esa es la única cosa que el
 flag `invitee` cambia — para un jugador de campo no cambia nada.
 

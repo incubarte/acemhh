@@ -352,13 +352,17 @@ export async function ledgerExtrasFor(
     const withoutThis = nowAttendances.filter(
       (a) => !(a.date === isoDate && a.slot === screenSlot),
     );
+    const here = featuresAt.get(`${isoDate}|${Number(session.slice(11))}`);
     const thisOne: AttendanceRow = {
       date: isoDate,
       slot: screenSlot,
-      categories: featuresAt.get(`${isoDate}|${Number(session.slice(11))}`)?.categories ?? [],
-      goalies: featuresAt.get(`${isoDate}|${Number(session.slice(11))}`)?.goalies ?? false,
+      categories: here?.categories ?? [],
+      goalies: here?.goalies ?? false,
       bonified: false,
     };
+    // A goalkeeper is only charged the goalkeepers' slot: anywhere else there
+    // is nothing to collect.
+    const chargedHere = !billing.goalkeeper || thisOne.goalies;
     const owesWith = (attendances: AttendanceRow[]) =>
       ledgerMonth(state, inputFor(selectedMonth, attendances), price, billing).pending > 0;
 
@@ -392,16 +396,17 @@ export async function ledgerExtrasFor(
       debt: state.debt,
       debt_outstanding: Math.max(0, state.debt - settledThisMonth),
       debt_months: debtMonths,
-      // A full scholarship has nothing to charge: no preset, rather than a
-      // button offering to collect $0.
-      month_preset: heldThisMonth > 0 && rates.promo > 0 && monthPrice > 0
+      // A full scholarship, or a goalkeeper outside the goalkeepers' slot, has
+      // nothing to charge: no preset, rather than a button offering to
+      // collect $0 — or money nobody owes.
+      month_preset: chargedHere && heldThisMonth > 0 && rates.promo > 0 && monthPrice > 0
         ? monthPrice
         : null,
       month_credit: monthCredit,
-      session_preset: rates.individual > 0 ? rates.individual : null,
+      session_preset: chargedHere && rates.individual > 0 ? rates.individual : null,
       half_month_preset:
-        !paidSomethingThisPeriod && stillToCome > 0 && stillToCome < heldThisMonth &&
-          rates.promo > 0
+        chargedHere && !paidSomethingThisPeriod && stillToCome > 0 &&
+          stillToCome < heldThisMonth && rates.promo > 0
           ? Math.round(stillToCome * rates.promo)
           : null,
       owed_now: now.pending,

@@ -128,8 +128,12 @@ export function monthsWindow(
 export type MonthStatus = {
     month: string; // YYYY-MM
     /** Sessions the club charges this player for — goalkeepers outside their
-     * slot and youth second sessions are already out. */
+     * slot and youth second sessions are already out. In a free month, every
+     * session attended: there is nothing to charge, but going still counts. */
     attended: number;
+    /** Nothing this month could be charged to this player: a goalkeeper in a
+     * month with no goalkeepers' slot (none since October 2026). */
+    free: boolean;
     /** Everything paid that month, whatever the concept. */
     totalPaid: number;
     /** What one session costs this player on its own, that month. */
@@ -201,12 +205,16 @@ export async function fetchMonthStatuses(
         });
     }
 
+    const goalieSessions = trainingsFor(slots, [], true);
+
     return months.map((month) => {
         const monthPayments = (payments.data ?? []).filter((p) => p.month === month);
         const rows = attByMonth.get(month) ?? [];
+        const free = player.goalkeeper && !goalieSessions.get(month);
         return {
             month,
-            attended: billableAttendances(rows, player).length,
+            attended: free ? rows.length : billableAttendances(rows, player).length,
+            free,
             totalPaid: monthPayments.reduce((sum, p) => sum + Number(p.amount), 0),
             sessionPrice: ratesFor(priceFor(prices, month), player).individual,
             input: {
@@ -316,6 +324,21 @@ const WORDING: Record<Voice, {
     },
 };
 
+/** What part of the month's attendance was bonified. The ledger counts
+ * fractions of a session — a payment of 4 sessions at the old rate is 3.6 at
+ * the new one — so a leftover share reads as a percentage, rounded down. */
+export function bonifiedText(n: number): string {
+    // Token arithmetic leaves dust (0.9999999 for a whole session): it is not
+    // a share of anything.
+    const clean = Math.round(n * 1e6) / 1e6;
+    const whole = Math.floor(clean);
+    const pct = Math.floor((clean - whole) * 100);
+    const wholeText = `${whole} bonificada${whole === 1 ? "" : "s"}`;
+    if (pct === 0) return wholeText;
+    if (whole === 0) return `una sesión bonificada al ${pct}%`;
+    return `${wholeText} y otra al ${pct}%`;
+}
+
 function sessionsText(n: number): string {
     return n === 1 ? "1 sesión" : `${n} sesiones`;
 }
@@ -332,9 +355,7 @@ export function formatMonthLine(l: LedgerMonth, opts: LineOpts): string {
     const name = monthName(l.month);
     const w = WORDING[opts.voice];
     const bonifiedUsed = Math.min(l.carryoverIn, l.attended);
-    const bonified = bonifiedUsed > 0
-        ? ` (${bonifiedUsed} bonificada${bonifiedUsed === 1 ? "" : "s"})`
-        : "";
+    const bonified = bonifiedUsed > 0 ? ` (${bonifiedText(bonifiedUsed)})` : "";
     const attendance = l.attended > 0
         ? `${w.attended} ${times(l.attended)}${bonified}`
         : w.notAttended;
@@ -346,6 +367,15 @@ export function formatMonthLine(l: LedgerMonth, opts: LineOpts): string {
     }
 
     const icon = l.debtAfter > 0 ? "❌" : "✅";
+
+    // Nothing to charge this month: the attendance is all there is to say —
+    // bonified or not makes no difference — and the icon still carries any
+    // debt left from before.
+    if (l.free && l.totalPaid === 0) {
+        return l.attended > 0
+            ? `- ${name}: ${w.attended} ${times(l.attended)} ${icon}`
+            : `- ${name}: ${w.notAttended}`;
+    }
 
     if (l.boughtMonth) {
         return `- ${name}: ${attendance} / ${w.paid} el mes ${icon}`;

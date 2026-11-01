@@ -10,6 +10,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { assertEquals } from "jsr:@std/assert";
 import {
     activeMonths,
+    bonifiedText,
     buildPlayerSection,
     computeLedger,
     fetchMonthStatuses,
@@ -122,6 +123,7 @@ function raw(
     return {
         month,
         attended,
+        free: false,
         totalPaid,
         sessionPrice: 30000,
         input: {
@@ -205,6 +207,39 @@ Deno.test("formatMonthLine: full scholarship reports attendance only", () => {
         formatMonthLine(base, { voice: "el", fullScholarship: true }),
         "- Agosto: no asistió aunque tiene beca",
     );
+});
+
+Deno.test("bonifiedText: a share of a session reads as a percentage", () => {
+    assertEquals(bonifiedText(1), "1 bonificada");
+    assertEquals(bonifiedText(2), "2 bonificadas");
+    assertEquals(bonifiedText(0.6363636363636362), "una sesión bonificada al 63%");
+    assertEquals(bonifiedText(1.5), "1 bonificada y otra al 50%");
+    // Floating point leftovers do not invent a share.
+    assertEquals(bonifiedText(0.9999999), "1 bonificada");
+    assertEquals(bonifiedText(1.0000001), "1 bonificada");
+});
+
+Deno.test("formatMonthLine: a free month reports attendance only", () => {
+    const base = {
+        ...raw("2026-10", 0, 0),
+        free: true,
+        boughtMonth: false,
+        charge: 0,
+        carryoverIn: 0,
+        carryoverOut: 0,
+        debtAfter: 0,
+    };
+
+    assertEquals(
+        formatMonthLine({ ...base, attended: 2 }, VOS),
+        "- Octubre: asististe 2 veces ✅",
+    );
+    // A carryover has nothing to pay for in a free month: no "bonificada".
+    assertEquals(
+        formatMonthLine({ ...base, attended: 2, carryoverIn: 1, debtAfter: 20000 }, EL),
+        "- Octubre: asistió 2 veces ❌",
+    );
+    assertEquals(formatMonthLine(base, VOS), "- Octubre: no asististe");
 });
 
 Deno.test("buildPlayerSection: last 3 months plus debt and bonified lines", () => {
@@ -349,7 +384,9 @@ Deno.test("fetchMonthStatuses aggregates payments and attendance per month", asy
 
         // August's unpaid sessions stay as debt: September's prepaid month
         // covers only itself (use-it-or-lose-it) and October's session covers
-        // October.
+        // October. September held three sessions, not four (the 24th was
+        // off): the 100k bought 3.63 at 27.5k, and what the club did not give
+        // comes back in October as part of a session.
         assertEquals(
             buildPlayerSection(
                 computeLedger(statuses, prices, billing),
@@ -360,7 +397,7 @@ Deno.test("fetchMonthStatuses aggregates payments and attendance per month", asy
                 "Registro de tus pagos en los últimos meses:",
                 "- Agosto: asististe 2 veces / no pagaste ❌",
                 "- Septiembre: no asististe / pagaste el mes ❌",
-                "- Octubre: asististe 1 vez / pagaste 1 sesión ❌",
+                "- Octubre: asististe 1 vez (una sesión bonificada al 63%) / pagaste $30.000 ❌",
                 "Deuda pendiente: $60.000",
             ].join("\n"),
         );
@@ -376,15 +413,18 @@ Deno.test("trainingsFor counts each slot-group's dates from training_sessions", 
 
     const slots = await fetchTrainingSlots(admin);
 
-    // Every Thursday of the season: 4 in September, 5 in October — for every
-    // category and for goalkeepers (the 21hs slot is goalie-friendly).
+    // Every Thursday of the season but the days off: 3 in September (not the
+    // 24th) and 3 in October (not the 15th nor the 29th) — for every category
+    // and for goalkeepers (the 21hs slot was theirs). From October on there is no
+    // goalkeepers' slot, so they have nothing to pay for.
     for (const group of [["cat-a"], ["cat-c"], ["youth"]]) {
         const trainings = trainingsFor(slots, group, false);
-        assertEquals(trainings.get("2026-09"), 4, group.join());
-        assertEquals(trainings.get("2026-10"), 5, group.join());
+        assertEquals(trainings.get("2026-09"), 3, group.join());
+        assertEquals(trainings.get("2026-10"), 3, group.join());
     }
     const goalies = trainingsFor(slots, [], true);
-    assertEquals(goalies.get("2026-09"), 4);
+    assertEquals(goalies.get("2026-09"), 3);
+    assertEquals(goalies.get("2026-10"), undefined);
 
     // July is a training month — the winter break falls inside it, not around
     // it: the season stops after Thursday the 9th and resumes on August 6th.
