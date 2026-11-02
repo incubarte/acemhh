@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { sessionIn, writableSession, type Fixture } from "./fixtures";
+import { closedDebt, writableSession, type Fixture } from "./fixtures";
 
 // The two things the screen has to get right about money: the admin declares
 // what a payment IS, and marking somebody present who owes is worth a word.
@@ -12,6 +12,8 @@ const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ??
 const LAST = "Cobros";
 let fx: Fixture;
 let debtorId: string;
+/** A writable session from which the debtor's unpaid one is closed debt. */
+let later: string;
 let clearId: string;
 
 function admin(): SupabaseClient {
@@ -48,8 +50,10 @@ test.beforeAll(async () => {
   clearId = data!.find((p) => p.name === "Aldia")!.id;
 
   // The debtor attended and never paid; the other one is simply absent.
+  const debt = await closedDebt(fx);
+  later = debt.view;
   await s.from("attendances")
-    .insert({ player_id: debtorId, session: fx.sessionStr, attended: true });
+    .insert({ player_id: debtorId, session: debt.debtStr, attended: true });
 });
 test.afterAll(cleanup);
 
@@ -88,9 +92,9 @@ test("el modal pide el concepto: el monto ya no lo decide", async ({ page }) => 
 
 test("con deuda cerrada, lo único que se ofrece es saldarla", async ({ page }) => {
   // Closed debt means a month that already ended, so this has to be read from
-  // a later month of the same period — the unpaid session is this month's.
+  // a later month of the same period than the unpaid session.
   await page.request.post("/api/auth/dev");
-  await page.goto(`/training-sessions-beta/${await sessionIn(fx.nextMonth)}`);
+  await page.goto(`/training-sessions-beta/${later}`);
   await expect(page.getByTestId("section-presentes")).toBeVisible();
   const more = page.getByRole("button", { name: /Más jugadores/ });
   if (await more.isVisible().catch(() => false)) await more.click();
@@ -104,9 +108,8 @@ test("con deuda cerrada, lo único que se ofrece es saldarla", async ({ page }) 
 });
 
 test("marcar presente a alguien que debe avisa, pero nunca impide", async ({ page }) => {
-  // From the following month, this month's unpaid session is closed debt —
-  // exactly the case the warning exists for.
-  const later = await sessionIn(fx.nextMonth);
+  // From a later month, the unpaid session is closed debt — exactly the case
+  // the warning exists for.
   await page.request.post("/api/auth/dev");
   await page.goto(`/training-sessions-beta/${later}`);
   await expect(page.getByTestId("section-presentes")).toBeVisible();
@@ -214,11 +217,13 @@ test("la pantalla dice primero qué entrenamiento es", async ({ page }) => {
 
 test("el slot de arqueros lo dice", async ({ page }) => {
   await page.request.post("/api/auth/dev");
-  const { data } = await admin().from("training_sessions")
-    .select("date").eq("hour", 21).lte("date", new Date().toISOString().slice(0, 10))
+  // Which slot is the goalkeepers' changes over time (21hs stopped being it in
+  // October 2026), so it is looked up, not assumed.
+  const { data } = await admin().from("training_sessions_resolved")
+    .select("date,hour").eq("goalies", true).lte("date", new Date().toISOString().slice(0, 10))
     .order("date", { ascending: false }).limit(1);
-  test.skip(!data?.length, "la agenda no tiene un entrenamiento de 21hs");
+  test.skip(!data?.length, "la agenda no tiene un entrenamiento de arqueros");
 
-  await page.goto(`/training-sessions-beta/${data![0].date}-21`);
+  await page.goto(`/training-sessions-beta/${data![0].date}-${data![0].hour}`);
   await expect(page.getByTestId("session-heading")).toContainText("arqueros");
 });

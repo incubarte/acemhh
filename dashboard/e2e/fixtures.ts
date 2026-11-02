@@ -118,6 +118,49 @@ export async function writableSession(hour = 22): Promise<Fixture> {
   };
 }
 
+/** The club's activity period a month belongs to: March–July, August–December,
+ * and the summer break (periodMonths in supabase/functions/_shared/tokens.ts).
+ * Debt does not cross from one into the next. */
+function periodOf(month: string): string {
+  const m = Number(month.slice(5, 7));
+  return `${month.slice(0, 4)}-${m >= 8 ? "b" : m >= 3 ? "a" : "summer"}`;
+}
+
+/** The first training of `month` at `hour`, if the agenda has one. */
+async function firstDateIn(month: string, hour: number): Promise<string | null> {
+  const { data } = await admin().from("training_sessions")
+    .select("date").eq("hour", hour)
+    .gte("date", `${month}-01`).lt("date", `${shiftMonth(month, 1)}-01`)
+    .order("date").limit(1);
+  return data?.[0]?.date ? String(data[0].date) : null;
+}
+
+/**
+ * Closed debt needs two months of one period: one to leave a session unpaid
+ * in, and one `gap` months later to look at it from — with a session there
+ * still writable, to pay or mark. Normally that is fx's own month seen from a
+ * coming one. But the end of a period has no coming month that trains (2026
+ * has no December), and then it is an earlier month seen from fx's own.
+ */
+export async function closedDebt(fx: Fixture, gap = 1, hour = 22): Promise<{
+  /** "YYYY-MM-DD HHhs": the session to leave unpaid. */
+  debtStr: string;
+  /** What a session cost on that date. */
+  debtPrice: number;
+  /** YYYY-MM-DD-HH: a writable session of the later month. */
+  view: string;
+}> {
+  const ahead = await firstDateIn(shiftMonth(fx.month, gap), hour);
+  if (ahead && periodOf(ahead.slice(0, 7)) === periodOf(fx.month)) {
+    return { debtStr: fx.sessionStr, debtPrice: fx.sessionPrice, view: `${ahead}-${hour}` };
+  }
+  const before = await firstDateIn(shiftMonth(fx.month, -gap), hour);
+  if (!before || periodOf(before.slice(0, 7)) !== periodOf(fx.month)) {
+    throw new Error(`La agenda no tiene dos meses de ${hour}hs a ${gap} de distancia en el período de ${fx.month}`);
+  }
+  return { debtStr: `${before} ${hour}hs`, debtPrice: await sessionPriceAt(before), view: fx.session };
+}
+
 /** A session of `month` at `hour`, for read-only assertions about later
  * months. Falls back to the first of the month when the agenda has none. */
 export async function sessionIn(month: string, hour = 22): Promise<string> {

@@ -1,6 +1,13 @@
 import { test, expect } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { futureSession, sessionIn, tariffAt, writableSession, type Fixture } from "./fixtures";
+import {
+  closedDebt,
+  futureSession,
+  sessionIn,
+  tariffAt,
+  writableSession,
+  type Fixture,
+} from "./fixtures";
 
 // The rules that say what may be registered, enforced by the SERVICE. They are
 // money rules: a stale tab, a retry or a direct call has to hit the same wall
@@ -136,14 +143,12 @@ test("un parcial mensual tiene mínimo, y el segundo pago completa el mes", asyn
 test("la deuda cerrada bloquea cobrar cualquier otra cosa", async ({ page }) => {
   await page.request.post("/api/auth/dev");
 
-  // Attend this month and never pay: seen from a LATER month, that is closed
-  // debt. It has to be a later month of the same period — debt does not cross
-  // from one period into the next.
+  // Attend one month and never pay: seen from a LATER month of the same
+  // period, that is closed debt.
+  const debt = await closedDebt(fx);
   await admin().from("attendances")
-    .insert({ player_id: playerId, session: fx.sessionStr, attended: true });
-  // `ahead` may still be this same month early on; the debt only exists
-  // from the next one.
-  const later = await futureSession(22, fx.nextMonth);
+    .insert({ player_id: playerId, session: debt.debtStr, attended: true });
+  const later = { session: debt.view };
 
   const blocked = await pay(page, "session", 30000, later.session);
   expect(blocked.status(), await blocked.text()).toBe(409);
@@ -159,7 +164,7 @@ test("la deuda cerrada bloquea cobrar cualquier otra cosa", async ({ page }) => 
   expect(await tooMuch.text()).toContain("superar");
 
   // Settling it — one session at that date's price — unblocks the rest.
-  expect((await pay(page, "debt settlement", fx.sessionPrice, later.session)).status()).toBe(200);
+  expect((await pay(page, "debt settlement", debt.debtPrice, later.session)).status()).toBe(200);
   const after = await pay(page, "session", 30000, later.session);
   expect(after.status(), await after.text()).toBe(200);
 

@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { k, sessionIn, writableSession } from "./fixtures";
+import { closedDebt, k, writableSession, type Fixture } from "./fixtures";
 
 // How the redesigned screen reads at a glance: what each section says about
 // the rows in it, what the debtors list spells out, and the gesture that
@@ -17,8 +17,7 @@ let SESSION: string;
 let SESSION_STR: string;
 /** What a session costs on SESSION's date. */
 let PRICE: number;
-let NEXT_MONTH_SESSION: string;
-let MONTH_AFTER_NEXT_SESSION: string;
+let FX: Fixture;
 const LAST = "Secciones";
 
 function admin(): SupabaseClient {
@@ -98,11 +97,10 @@ test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async () => {
   const fx = await writableSession(22);
+  FX = fx;
   SESSION = fx.session;
   SESSION_STR = fx.sessionStr;
   PRICE = fx.sessionPrice;
-  NEXT_MONTH_SESSION = await sessionIn(fx.nextMonth);
-  MONTH_AFTER_NEXT_SESSION = await sessionIn(fx.monthAfterNext);
   await cleanup();
   await seed();
 });
@@ -188,20 +186,53 @@ test("el deudor lleva sus cifras del mes, alineado a la izquierda; el resto va c
     .toHaveCount(0);
 });
 
+/** Atrasado: one unpaid session `gap` months before the session returned,
+ * and nothing else. Moroso's debt is this month's, which is not always a month
+ * with a later one to look from (2026 has no December). */
+async function seedLate(gap: number): Promise<string> {
+  const debt = await closedDebt(FX, gap);
+  const { data, error } = await admin().from("players").insert({
+    name: "Atrasado", last_name: LAST, dni: "99000603", categories: ["cat-b"],
+    player_type: "player", trains: true, invitee: false,
+  }).select("id").single();
+  if (error) throw new Error(JSON.stringify(error));
+  ids.set("Atrasado", data.id);
+  const { error: attError } = await admin().from("attendances")
+    .insert({ player_id: data.id, session: debt.debtStr, attended: true });
+  if (attError) throw new Error(JSON.stringify(attError));
+  return debt.view;
+}
+
+async function dropLate() {
+  const id = ids.get("Atrasado");
+  if (!id) return;
+  await admin().from("attendances").delete().eq("player_id", id);
+  await admin().from("players").delete().eq("id", id);
+  ids.delete("Atrasado");
+}
+
 test("desde el mes siguiente se ve la deuda anterior, y el corriente es un guión", async ({ page }) => {
-  // Moroso's attendance went unpaid. Seen from the following month that is
+  // Atrasado's attendance went unpaid. Seen from the following month that is
   // last month's debt — shown as attendance/payments — while the new month
   // owes nothing yet, so it collapses to a dash.
-  await openPage(page, NEXT_MONTH_SESSION);
-  await expect(rowIn(page, "section-deudores", "Moroso").getByTestId("debtor-stats"))
-    .toHaveText("1/0 -");
+  try {
+    await openPage(page, await seedLate(1));
+    await expect(rowIn(page, "section-deudores", "Atrasado").getByTestId("debtor-stats"))
+      .toHaveText("1/0 -");
+  } finally {
+    await dropLate();
+  }
 });
 
 test("la deuda no se arrastra dos meses", async ({ page }) => {
   // Two months on, the previous month owes nothing and the original debt is
   // two months back — deliberately out of this screen's reach.
-  await openPage(page, MONTH_AFTER_NEXT_SESSION);
-  await expect(rowIn(page, "section-deudores", "Moroso")).toHaveCount(0);
+  try {
+    await openPage(page, await seedLate(2));
+    await expect(rowIn(page, "section-deudores", "Atrasado")).toHaveCount(0);
+  } finally {
+    await dropLate();
+  }
 });
 
 test("la fila de Deben no toma el gesto: ni desliza ni cambia de color", async ({ page }) => {
