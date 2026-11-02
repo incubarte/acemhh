@@ -9,6 +9,7 @@ supabase/.temp/
 supabase/.branches/
 supabase/functions/.env
 supabase/functions/.env.*
+supabase/.env.deploy
 
 dashboard/node_modules/
 dashboard/.next/
