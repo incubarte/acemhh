@@ -133,3 +133,73 @@ this single response; the `whatsapp_sessions` table still exists but is unused.
   with `curl -s "https://graph.facebook.com/v21.0/me" -H "Authorization: Bearer <t>"`.
 - Deploy with `supabase functions deploy whatsapp-webhook`.
 - Admin identity in prod is manual: set each admin's `users.phone` by hand.
+
+## Recordatorio de deuda de los jueves
+
+`supabase/functions/debt-reminders`. pg_cron la llama todos los jueves a las 11:00
+UTC (8am en Buenos Aires). Si ese día no tiene `training_sessions`, no hace nada.
+Si tiene, le escribe a cada jugador que deba algo: meses cerrados del período, el
+mes en curso o los dos. Los montos son los mismos que muestra el dashboard
+(deuda cerrada y saldo del mes). El mensaje va al teléfono del jugador **y** al
+del tutor. Las becas completas no reciben nada.
+
+Cada envío queda en `whatsapp_reminders`, con una fila por (día, jugador,
+teléfono), lo que se le dijo y si Meta lo aceptó. Una corrida repetida no le
+escribe dos veces a nadie, y los envíos fallidos se reintentan.
+
+### El template
+
+Un mensaje que inicia el club, fuera de la ventana de 24h, tiene que ser un
+template aprobado, y Meta cobra cada uno. Se crea en **WhatsApp Manager >
+Message templates**:
+
+- Nombre: `recordatorio_deuda`, categoría **Utility**, idioma **Spanish (ARG)** (`es_AR`)
+- Cuerpo:
+
+  ```
+  Hola! Te escribimos del club porque {{1}} tiene un saldo pendiente de {{2}}. Hoy hay entrenamiento y se puede regularizar ahí. Si ya está pago, avisanos y lo revisamos.
+  ```
+
+- Ejemplos para la revisión: `{{1}}` = `tu cuenta`, `{{2}}` = `$30.000 de meses anteriores y $35.000 de noviembre`
+
+`{{1}}` es `tu cuenta` para el jugador y `la cuenta de <nombre>` para el tutor. Si
+el template se aprueba con otro nombre o idioma, se cambia con
+`WHATSAPP_REMINDER_TEMPLATE` / `WHATSAPP_REMINDER_LANGUAGE`. Hasta que esté
+aprobado, cada envío falla y queda `failed` con el error de Meta.
+
+Sin la verificación del negocio, Meta limita los mensajes que inicia el club a 250
+por día. Los recordatorios entran de sobra.
+
+### Puesta en producción
+
+1. El secreto que comparten el cron y la función:
+
+   ```
+   SECRET=$(openssl rand -hex 32)
+   supabase secrets set DEBT_REMINDERS_SECRET=$SECRET
+   ```
+
+2. El mismo secreto y la URL del proyecto en el vault (SQL editor):
+
+   ```sql
+   select vault.create_secret('https://<ref>.supabase.co', 'project_url');
+   select vault.create_secret('<SECRET>', 'debt_reminders_secret');
+   ```
+
+   Sin `project_url`, el job corre y no llama a nadie.
+
+3. `supabase db push` (tabla y cron) y `supabase functions deploy debt-reminders --no-verify-jwt`.
+
+4. Antes del primer jueves, revisar a quién le escribiría sin mandar nada:
+
+   ```
+   curl -s -X POST 'https://<ref>.supabase.co/functions/v1/debt-reminders' \
+     -H "x-reminders-secret: $SECRET" -H 'content-type: application/json' \
+     -d '{"dry": true, "date": "2026-11-12"}'
+   ```
+
+   `dry` calcula y devuelve la lista. `date` sólo se acepta junto con `dry`.
+
+Para ver qué salió: `select * from whatsapp_reminders order by created_at desc;`
+Las corridas del cron: `select * from cron.job_run_details order by start_time desc;`
+Las respuestas de la función: `select * from net._http_response order by created desc;`
