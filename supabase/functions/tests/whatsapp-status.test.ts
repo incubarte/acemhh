@@ -11,6 +11,7 @@ import { assertEquals } from "jsr:@std/assert";
 import {
     activeMonths,
     bonifiedText,
+    buildMonthStatuses,
     buildPlayerSection,
     computeLedger,
     fetchMonthStatuses,
@@ -150,7 +151,7 @@ function ledgerOf(...statuses: MonthStatus[]) {
 // ////////////////////////////////////
 
 Deno.test("formatMonthLine: wording per payment shape and voice", () => {
-    const ok = { boughtMonth: false, charge: 0, carryoverIn: 0, carryoverOut: 0, debtAfter: 0 };
+    const ok = { boughtMonth: false, charge: 0, carryoverIn: 0, carryoverOut: 0, debtAfter: 0, closedDebt: 0, pending: 0 };
     const debt = { ...ok, debtAfter: 1 };
 
     assertEquals(
@@ -193,6 +194,8 @@ Deno.test("formatMonthLine: full scholarship reports attendance only", () => {
         carryoverIn: 0,
         carryoverOut: 0,
         debtAfter: 0,
+        closedDebt: 0,
+        pending: 0,
     };
 
     assertEquals(
@@ -228,6 +231,8 @@ Deno.test("formatMonthLine: a free month reports attendance only", () => {
         carryoverIn: 0,
         carryoverOut: 0,
         debtAfter: 0,
+        closedDebt: 0,
+        pending: 0,
     };
 
     assertEquals(
@@ -293,6 +298,73 @@ Deno.test("buildPlayerSection: empty window means no section at all", () => {
 // ////////////////////////////////////
 // DB INTEGRATION
 // ////////////////////////////////////
+
+// ////////////////////////////////////
+// READING THE ROWS LIKE THE DASHBOARD
+// ////////////////////////////////////
+
+// Three Thursdays of November: youth at 21hs, cat-b at 22hs.
+const NOV_AGENDA = ["2026-11-12", "2026-11-19", "2026-11-26"].flatMap((date) => [
+    { date, hour: 21, categories: ["youth"], goalies: false },
+    { date, hour: 22, categories: ["cat-b"], goalies: false },
+]);
+const OCT_AGENDA = ["2026-10-01", "2026-10-08"].map((date) => ({
+    date, hour: 22, categories: ["cat-b"], goalies: false,
+}));
+
+function payment(month: string, concept: string, amount: number, hour = 22, session: string | null = null) {
+    return { month, concept, amount, slot_weekday: 4, slot_hour: hour, session };
+}
+
+Deno.test("buildMonthStatuses: un medio mes cubre las sesiones que vendió", () => {
+    // Sold on the 19th: two sessions to come, at the prepaid rate.
+    const statuses = buildMonthStatuses(
+        [payment("2026-11", "half month", 2 * 25000, 22, "2026-11-19 22hs")],
+        [{ session: "2026-11-19 22hs", bonified: false }, { session: "2026-11-26 22hs", bonified: false }],
+        ["2026-11"],
+        PRICES,
+        NOV_AGENDA,
+        PLAYER,
+    );
+    const [nov] = computeLedger(statuses, PRICES, PLAYER);
+    assertEquals(nov.pending, 0);
+    assertEquals(nov.debtAfter, 0);
+});
+
+Deno.test("buildMonthStatuses: el mes youth pago bonifica la sesión extra aunque no vaya a la de youth", () => {
+    const youth = { ...PLAYER, categories: ["youth"] };
+    const statuses = buildMonthStatuses(
+        [payment("2026-11", "monthly", 3 * 25000, 21)],
+        [{ session: "2026-11-12 22hs", bonified: false }],
+        ["2026-11"],
+        PRICES,
+        NOV_AGENDA,
+        youth,
+    );
+    const [nov] = computeLedger(statuses, PRICES, youth);
+    assertEquals(nov.attended, 0);
+    assertEquals(nov.pending, 0);
+});
+
+Deno.test("computeLedger: separa la deuda cerrada del saldo del mes", () => {
+    // October: one session, unpaid. November: one session, unpaid, and a debt
+    // payment that settles part of October.
+    const agenda = [...OCT_AGENDA, ...NOV_AGENDA];
+    const statuses = buildMonthStatuses(
+        [payment("2026-11", "debt settlement", 10000)],
+        [{ session: "2026-10-01 22hs", bonified: false }, { session: "2026-11-12 22hs", bonified: false }],
+        ["2026-10", "2026-11"],
+        PRICES,
+        agenda,
+        PLAYER,
+    );
+    const [oct, nov] = computeLedger(statuses, PRICES, PLAYER);
+    assertEquals(oct.closedDebt, 0);
+    assertEquals(oct.pending, 30000);
+    assertEquals(nov.closedDebt, 20000);
+    assertEquals(nov.pending, 30000);
+    assertEquals(nov.debtAfter, 50000);
+});
 
 Deno.test("fetchMonthStatuses aggregates payments and attendance per month", async () => {
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {

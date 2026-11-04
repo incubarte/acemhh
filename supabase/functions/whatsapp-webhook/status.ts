@@ -150,6 +150,25 @@ function parseSession(session: string): { date: string; hour: number } {
     };
 }
 
+/** A payments row, as the ledger reads it. */
+export type PaymentRow = {
+    month: string;
+    concept: string;
+    amount: number | string;
+    slot_weekday: number | null;
+    slot_hour: number | null;
+    /** "YYYY-MM-DD HHhs" — where a half month was sold. */
+    session: string | null;
+};
+
+/** An attendances row (attended = true only). */
+export type AttendanceDbRow = {
+    session: string;
+    bonified: boolean | null;
+};
+
+export const LedgerConcepts = ["monthly", "session", "half month", "debt settlement"];
+
 export async function fetchMonthStatuses(
     supabase: SupabaseClient,
     playerId: string,
@@ -160,10 +179,10 @@ export async function fetchMonthStatuses(
 ): Promise<MonthStatus[]> {
     const [payments, attendances] = await Promise.all([
         supabase.from("payments")
-            .select("month,concept,amount,slot_weekday,slot_hour")
+            .select("month,concept,amount,slot_weekday,slot_hour,session")
             .eq("player_id", playerId)
             .in("month", months)
-            .in("concept", ["monthly", "session", "debt settlement"]),
+            .in("concept", LedgerConcepts),
         supabase.from("attendances")
             .select("session,bonified")
             .eq("player_id", playerId)
@@ -174,9 +193,28 @@ export async function fetchMonthStatuses(
     if (payments.error) throw new Error("payments: " + payments.error.message);
     if (attendances.error) throw new Error("attendances: " + attendances.error.message);
 
-    // The agenda, indexed both ways the ledger needs it.
-    const featuresAt = new Map<string, { slot: string; categories: string[]; goalies: boolean }>();
-    const perMonth = new Map<string, Map<string, number>>();
+    return buildMonthStatuses(
+        payments.data ?? [],
+        attendances.data ?? [],
+        months,
+        prices,
+        slots,
+        player,
+    );
+}
+
+/** The agenda, indexed both ways the ledger needs it: what each session was,
+ * and how many sessions each slot held each month. */
+export type Agenda = {
+    featuresAt: Map<string, { slot: string; categories: string[]; goalies: boolean }>;
+    perMonth: Map<string, Map<string, number>>;
+    /** Months with at least one goalkeepers' session. */
+    goalieSessions: Map<string, number>;
+};
+
+export function indexAgenda(slots: TrainingSlotRow[]): Agenda {
+    const featuresAt: Agenda["featuresAt"] = new Map();
+    const perMonth: Agenda["perMonth"] = new Map();
     for (const s of slots) {
         const weekday = isoWeekday(s.date);
         const slot = slotKey(weekday, s.hour);
@@ -186,9 +224,31 @@ export async function fetchMonthStatuses(
         const counts = perMonth.get(month)!;
         counts.set(slot, (counts.get(slot) ?? 0) + 1);
     }
+    return { featuresAt, perMonth, goalieSessions: trainingsFor(slots, [], true) };
+}
+
+/**
+ * One player's months, priced from rows already fetched. Pure, so the bot can
+ * fetch per player and the reminders can fetch everyone at once.
+ *
+ * Must read the rows the way the dashboard does (rosterLedger.ts): what the
+ * bot tells a player and what the admin sees on the roster are the same
+ * number, or one of them is lying.
+ */
+export function buildMonthStatuses(
+    payments: PaymentRow[],
+    attendances: AttendanceDbRow[],
+    months: string[],
+    prices: LedgerPrice[],
+    slots: TrainingSlotRow[] | Agenda,
+    player: PlayerBilling,
+): MonthStatus[] {
+    const { featuresAt, perMonth, goalieSessions } = Array.isArray(slots)
+        ? indexAgenda(slots)
+        : slots;
 
     const attByMonth = new Map<string, AttendanceRow[]>();
-    for (const a of attendances.data ?? []) {
+    for (const a of attendances) {
         const { date, hour } = parseSession(String(a.session));
         const f = featuresAt.get(`${date}|${hour}`);
         // An attendance whose session the agenda no longer has cannot be
@@ -205,27 +265,45 @@ export async function fetchMonthStatuses(
         });
     }
 
-    const goalieSessions = trainingsFor(slots, [], true);
+    /** Sessions of a slot in their month from `date` onward, that one
+     * included: what a half month sold on that date is entitled to. */
+    const sessionsFrom = (date: string, slot: string) =>
+        [...featuresAt.entries()].filter(([key, f]) =>
+            f.slot === slot && key.slice(0, 10) >= date && key.slice(0, 7) === date.slice(0, 7)
+        ).length;
 
     return months.map((month) => {
-        const monthPayments = (payments.data ?? []).filter((p) => p.month === month);
+        const monthPayments = payments.filter((p) => p.month === month);
+        const ledgerPayments = monthPayments
+            .filter((p) => p.slot_weekday !== null && p.slot_hour !== null)
+            .map((p): MonthPayment => {
+                const slot = slotKey(Number(p.slot_weekday), Number(p.slot_hour));
+                return {
+                    concept: p.concept as MonthPayment["concept"],
+                    amount: Number(p.amount),
+                    slot,
+                    ...(p.concept === "half month" && p.session
+                        ? { coversSessions: sessionsFrom(String(p.session).slice(0, 10), slot) }
+                        : {}),
+                };
+            });
+        // Paying the youth slot's month is what buys the youth bonus.
+        const bonusPaid = ledgerPayments.some((p) =>
+            (p.concept === "monthly" || p.concept === "half month") &&
+            [...featuresAt.values()].some((f) => f.slot === p.slot && f.categories.includes("youth"))
+        );
         const rows = attByMonth.get(month) ?? [];
+        const billable = billableAttendances(rows, player, bonusPaid);
         const free = player.goalkeeper && !goalieSessions.get(month);
         return {
             month,
-            attended: free ? rows.length : billableAttendances(rows, player).length,
+            attended: free ? rows.length : billable.length,
             free,
             totalPaid: monthPayments.reduce((sum, p) => sum + Number(p.amount), 0),
             sessionPrice: ratesFor(priceFor(prices, month), player).individual,
             input: {
-                attendances: billableAttendances(rows, player),
-                payments: monthPayments
-                    .filter((p) => p.slot_weekday !== null && p.slot_hour !== null)
-                    .map((p): MonthPayment => ({
-                        concept: p.concept as MonthPayment["concept"],
-                        amount: Number(p.amount),
-                        slot: slotKey(Number(p.slot_weekday), Number(p.slot_hour)),
-                    })),
+                attendances: billable,
+                payments: ledgerPayments,
                 sessionsPerSlot: perMonth.get(month) ?? new Map(),
             },
         };
@@ -241,6 +319,13 @@ export type LedgerMonth = MonthStatus & {
     carryoverOut: number;
     /** Pesos owed from closed months, through this one. */
     debtAfter: number;
+    /** What earlier months still owe, net of the debt payments registered
+     * this month. The dashboard's "deuda cerrada". */
+    closedDebt: number;
+    /** What this month is still waiting for, right now — shown as debt while
+     * the month runs, even if closing may forgive part of it. The
+     * dashboard's "saldo del mes". */
+    pending: number;
 };
 
 /**
@@ -269,6 +354,10 @@ export function computeLedger(
             carryoverIn: state.carryover,
             carryoverOut: r.carryoverOut,
             debtAfter: r.next.debt,
+            closedDebt: Math.max(0, state.debt - s.input.payments
+                .filter((p) => p.concept === "debt settlement")
+                .reduce((sum, p) => sum + p.amount, 0)),
+            pending: r.pending,
         };
         state = r.next;
         return row;
