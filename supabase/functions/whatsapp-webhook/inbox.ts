@@ -178,12 +178,14 @@ export function relayDecision(m: {
 
 export type DeliveryStatus = "sent" | "delivered" | "read" | "failed";
 
-/** Meta's ticks, as reactions on the club's message in the topic. Telegram
- * only lets a bot react with its standard set, which has no check mark. */
-export const StatusReaction: Record<Exclude<DeliveryStatus, "failed">, string> = {
+/** Meta's ticks, as reactions on the club's message in the topic, and the
+ * mark of one that did not get there. Telegram only lets a bot react with its
+ * standard set, which has neither a check mark nor ⚠️. */
+export const StatusReaction: Record<DeliveryStatus, string> = {
     sent: "🕊",
     delivered: "👌",
     read: "👀",
+    failed: "💔",
 };
 
 const StatusRank: Record<DeliveryStatus, number> = { sent: 1, delivered: 2, read: 3, failed: 4 };

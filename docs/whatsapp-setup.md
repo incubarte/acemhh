@@ -247,8 +247,9 @@ las reacciones estándar, y cada una reemplaza a la anterior:
 - 👌 entregado: llegó al teléfono;
 - 👀 leído: solo si la persona tiene activadas las confirmaciones de lectura.
 
-Si Meta lo rechaza después de aceptarlo, la reacción se saca y el bot contesta ⚠️
-con el motivo. Un mensaje sin reacción y sin aviso no salió: por ejemplo, porque
+Lo que no sale queda con 💔 (Telegram tampoco permite ⚠️), y el bot contesta ⚠️
+con el motivo: pasaron más de 24h, era una foto o un archivo, o WhatsApp lo
+rechazó, en el momento o después de haberlo aceptado. Un mensaje sin reacción y sin aviso no salió: por ejemplo, porque
 empezaba con `//`. El vínculo entre cada mensaje de WhatsApp y su mensaje en
 Telegram está en `whatsapp_relay_marks`. Los avisos llegan por el mismo webhook de
 Meta, en el campo `messages`, que ya está suscripto.

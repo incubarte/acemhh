@@ -39,7 +39,10 @@ export async function applyStatus(s: SupabaseClient, token: string, status: any)
     if (incoming === "failed") {
         // deno-lint-ignore no-explicit-any
         const reason = (status?.errors ?? []).map((e: any) => e?.title ?? e?.message).filter(Boolean).join("; ");
-        await telegramCall(token, "setMessageReaction", { ...where, reaction: [] });
+        await telegramCall(token, "setMessageReaction", {
+            ...where,
+            reaction: [{ type: "emoji", emoji: StatusReaction.failed }],
+        });
         const res = await telegramCall(token, "sendMessage", {
             chat_id: mark.chat_id,
             message_thread_id: Number(mark.thread_id),
@@ -52,7 +55,7 @@ export async function applyStatus(s: SupabaseClient, token: string, status: any)
 
     const res = await telegramCall(token, "setMessageReaction", {
         ...where,
-        reaction: [{ type: "emoji", emoji: StatusReaction[incoming as Exclude<DeliveryStatus, "failed">] }],
+        reaction: [{ type: "emoji", emoji: StatusReaction[incoming as DeliveryStatus] }],
     });
     if (!res.ok) console.error("Relay reaction failed:", res.description);
 }

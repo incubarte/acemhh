@@ -34,5 +34,5 @@ Deno.test("advancesStatus: enviado, entregado, leído, sin volver atrás", () =>
 });
 
 Deno.test("StatusReaction: cada estado con su reacción", () => {
-    assertEquals(StatusReaction, { sent: "🕊", delivered: "👌", read: "👀" });
+    assertEquals(StatusReaction, { sent: "🕊", delivered: "👌", read: "👀", failed: "💔" });
 });
