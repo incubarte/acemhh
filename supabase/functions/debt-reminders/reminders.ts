@@ -3,6 +3,7 @@
 
 import { type LedgerMonth, monthName } from "../whatsapp-webhook/status.ts";
 import { isoWeekday } from "../_shared/slot.ts";
+import { reminderWho } from "../_shared/reminderTemplate.ts";
 
 /** Training day the reminder goes out on: ISO weekday 4. */
 export const ReminderWeekday = 4;
@@ -83,7 +84,7 @@ export function remindersFor(player: ReminderPlayer, ledger: LedgerMonth[]): Rem
             relation,
             closedDebt,
             monthDebt,
-            params: [relation === "self" ? "tu cuenta" : `la cuenta de ${player.name}`, detail],
+            params: [reminderWho(relation, player.name), detail],
         });
     };
     add(player.phone, "self");

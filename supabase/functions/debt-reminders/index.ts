@@ -36,8 +36,10 @@ import {
     periodActiveMonths,
 } from "../whatsapp-webhook/status.ts";
 import { isReminderDay, type Reminder, remindersFor, templatePayload, todayBA } from "./reminders.ts";
+import { reminderSummary, type SummaryRow } from "../whatsapp-webhook/inbox.ts";
+import { telegramCall, telegramTruncate } from "../_shared/telegram.ts";
+import { sendWhatsapp } from "../_shared/whatsapp.ts";
 
-const GraphVersionDefault = "v23.0";
 const PageSize = 1000;
 
 const supabaseAdmin = createClient(
@@ -86,7 +88,7 @@ async function run(s: SupabaseClient, date: string, dry: boolean) {
         fetchPrices(s),
         fetchAll<PlayerRow>((from, to) =>
             s.from("players")
-                .select("id,name,categories,invitee,player_type,scholarship,sibling_rank,phone,guardian_phone")
+                .select("id,name,last_name,categories,invitee,player_type,scholarship,sibling_rank,phone,guardian_phone")
                 .or("phone.not.is.null,guardian_phone.not.is.null")
                 .order("id")
                 .range(from, to)
@@ -150,13 +152,23 @@ async function run(s: SupabaseClient, date: string, dry: boolean) {
         name: Deno.env.get("WHATSAPP_REMINDER_TEMPLATE") ?? "recordatorio_deuda",
         language: Deno.env.get("WHATSAPP_REMINDER_LANGUAGE") ?? "es_AR",
     };
+    const names = new Map(players.map((p) => [p.id, `${p.name} ${p.last_name}`.trim()]));
+    const summary: SummaryRow[] = [];
     let sent = 0, failed = 0, skipped = 0;
     for (const r of reminders) {
         if (!await claim(s, date, r)) {
             skipped++;
             continue;
         }
-        const outcome = await send(templatePayload(r, template));
+        const { messaging_product: _, ...payload } = templatePayload(r, template);
+        const outcome = await sendWhatsapp(payload);
+        summary.push({
+            player: names.get(r.playerId) ?? r.playerId,
+            relation: r.relation,
+            detail: r.params[1],
+            ok: outcome.ok,
+            error: "error" in outcome ? outcome.error : undefined,
+        });
         // strict is off, so `ok` alone does not narrow the union.
         const { error } = await s.from("whatsapp_reminders")
             .update("error" in outcome
@@ -167,12 +179,30 @@ async function run(s: SupabaseClient, date: string, dry: boolean) {
         if (outcome.ok) sent++;
         else failed++;
     }
+    if (summary.length > 0) await postSummary(date, summary);
     return { date, count: reminders.length, sent, failed, skipped };
+}
+
+/** Thursday's report, in the inbox group's General topic. Nobody's topic
+ * opens for a reminder: that waits until they answer. */
+async function postSummary(date: string, rows: SummaryRow[]) {
+    const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
+    const chatId = Deno.env.get("WHATSAPP_INBOX_TELEGRAM_CHAT_ID");
+    if (!token || !chatId) {
+        console.error("TELEGRAM_BOT_TOKEN or WHATSAPP_INBOX_TELEGRAM_CHAT_ID not configured: no summary");
+        return;
+    }
+    const res = await telegramCall(token, "sendMessage", {
+        chat_id: chatId,
+        text: telegramTruncate(reminderSummary(date, rows)),
+    });
+    if (!res.ok) console.error("Reminder summary failed:", res.description);
 }
 
 type PlayerRow = {
     id: string;
     name: string;
+    last_name: string;
     categories: string[] | null;
     invitee: boolean | null;
     player_type: string | null;
@@ -208,6 +238,7 @@ async function claim(s: SupabaseClient, date: string, r: Reminder): Promise<bool
         relation: r.relation,
         closed_debt: r.closedDebt,
         month_debt: r.monthDebt,
+        params: r.params,
         status: "pending",
     };
     const inserted = await s.from("whatsapp_reminders")
@@ -223,33 +254,6 @@ async function claim(s: SupabaseClient, date: string, r: Reminder): Promise<bool
         .select("id");
     if (retried.error) throw new Error("whatsapp_reminders: " + retried.error.message);
     return (retried.data ?? []).length > 0;
-}
-
-type SendOutcome = { ok: true; wamid: string | null } | { ok: false; error: string };
-
-async function send(payload: Record<string, unknown>): Promise<SendOutcome> {
-    const token = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
-    const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
-    const version = (Deno.env.get("WHATSAPP_GRAPH_VERSION") ?? GraphVersionDefault).trim();
-    if (!token || !phoneNumberId) {
-        return { ok: false, error: "WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID not configured" };
-    }
-    try {
-        const res = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, {
-            method: "POST",
-            headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-            body: JSON.stringify(payload),
-        });
-        const text = await res.text();
-        if (!res.ok) {
-            console.error(`Reminder send failed (${res.status}):`, text);
-            return { ok: false, error: `${res.status} ${text}`.slice(0, 1000) };
-        }
-        const wamid = (JSON.parse(text)?.messages?.[0]?.id as string | undefined) ?? null;
-        return { ok: true, wamid };
-    } catch (e) {
-        return { ok: false, error: String(e).slice(0, 1000) };
-    }
 }
 
 /* To invoke locally (sends nothing with "dry"):

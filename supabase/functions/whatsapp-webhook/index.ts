@@ -25,7 +25,17 @@ import {
     periodActiveMonths,
     trainingsFor,
 } from "./status.ts";
-import { inboxMessage, type InboxSender, type RecentReminder } from "./inbox.ts";
+import {
+    clubIsAnswering,
+    conversationSeparator,
+    inboundPost,
+    type InboxSender,
+    reminderPost,
+    startsNewConversation,
+} from "./inbox.ts";
+import { ensureTopic, findTopic, inboxConfig, postToTopic } from "./topics.ts";
+import { renderReminder } from "../_shared/reminderTemplate.ts";
+import { CustomerWindowMs } from "../_shared/whatsapp.ts";
 
 const GraphVersionDefault = "v23.0";
 
@@ -364,8 +374,12 @@ async function handleIncoming(incoming: Incoming) {
     ]);
     const self = players.find((p) => p.relation === "self") ?? null;
 
-    const forwarded = await forwardToInbox(incoming, players, admin !== null);
+    const { forwarded, clubAnswering } = await forwardToInbox(incoming, players, admin !== null);
     const forwardedLine = "Le pasamos tu mensaje al club.";
+
+    // Somebody from the club is talking to them in the topic: the automatic
+    // status would interrupt the conversation, every single message.
+    if (clubAnswering) return;
 
     if (!admin && players.length === 0) {
         await sendText(incoming.waId, forwarded ? `Hola! Te conozco?\n\n${forwardedLine}` : "Hola! Te conozco?");
@@ -437,27 +451,54 @@ async function handleIncoming(incoming: Incoming) {
 // INBOX
 // ////////////////////////////////////
 
-/** How far back a reminder still explains why somebody is writing. */
-const InboxReminderDays = 7;
+type InboxOutcome = {
+    /** The message reached the group. */
+    forwarded: boolean;
+    /** The club wrote in the topic within the window. */
+    clubAnswering: boolean;
+};
 
 /**
- * Hands the message to the club's Telegram group, with who wrote it and the
- * reminder they are probably answering. True when Telegram took it. Never
- * throws: the sender still gets their reply when the group is unreachable.
+ * Hands the message to the number's topic in the club's Telegram group,
+ * opening, reopening or reusing it. Reminders the person got and the topic has
+ * not shown yet go first, so the reply reads in context. Never throws: the
+ * sender still gets their reply when the group is unreachable.
  */
 async function forwardToInbox(
     incoming: Incoming,
     players: PlayerLink[],
     isAdmin: boolean,
-): Promise<boolean> {
-    const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
-    const chatId = Deno.env.get("WHATSAPP_INBOX_TELEGRAM_CHAT_ID");
-    if (!token || !chatId) {
+): Promise<InboxOutcome> {
+    const cfg = inboxConfig();
+    if (!cfg) {
         console.error("TELEGRAM_BOT_TOKEN or WHATSAPP_INBOX_TELEGRAM_CHAT_ID not configured: message not forwarded");
-        return false;
+        return { forwarded: false, clubAnswering: false };
     }
 
+    let clubAnswering = false;
     try {
+        const now = new Date();
+        const known = await findTopic(supabaseAdmin, incoming.waId);
+        clubAnswering = clubIsAnswering(known?.last_club_at ?? null, now, CustomerWindowMs);
+
+        const { data: pending, error } = await supabaseAdmin
+            .from("whatsapp_reminders")
+            .select("id,sent_on,params")
+            .eq("wa_id", incoming.waId)
+            .eq("status", "sent")
+            .is("shown_in_topic_at", null)
+            .order("sent_on")
+            .order("id");
+        if (error) console.error("Inbox reminder lookup failed:", error);
+        const reminders = pending ?? [];
+
+        // Admins write to get their login link, which is not news for the
+        // group — unless they play too and are answering their reminder, or
+        // the club is already talking to them.
+        if (isAdmin && reminders.length === 0 && !clubAnswering) {
+            return { forwarded: false, clubAnswering };
+        }
+
         const self = players.find((p) => p.relation === "self");
         const sender: InboxSender = self
             ? { kind: "player", name: self.name, lastName: self.last_name }
@@ -465,56 +506,42 @@ async function forwardToInbox(
             ? { kind: "guardian", of: players.map((p) => ({ name: p.name, lastName: p.last_name })) }
             : { kind: "unknown" };
 
-        const since = new Date(Date.now() - InboxReminderDays * 24 * 60 * 60 * 1000)
-            .toISOString().slice(0, 10);
-        const { data, error } = await supabaseAdmin
-            .from("whatsapp_reminders")
-            .select("sent_on,closed_debt,month_debt,players(name)")
-            .eq("wa_id", incoming.waId)
-            .eq("status", "sent")
-            .gte("sent_on", since)
-            .order("sent_on", { ascending: false });
-        if (error) console.error("Inbox reminder lookup failed:", error);
-        // Only the latest Thursday: an older one was already superseded.
-        const latest = data?.[0]?.sent_on;
-        const reminders: RecentReminder[] = (data ?? [])
-            .filter((r) => r.sent_on === latest)
-            .map((r) => ({
-                sent_on: String(r.sent_on),
-                // deno-lint-ignore no-explicit-any
-                player_name: String((r.players as any)?.name ?? ""),
-                closed_debt: Number(r.closed_debt),
-                month_debt: Number(r.month_debt),
-            }));
+        let thread = await ensureTopic(supabaseAdmin, cfg, incoming.waId, sender, known);
+        const post = async (text: string) => {
+            thread = await postToTopic(supabaseAdmin, cfg, incoming.waId, sender, thread, text);
+        };
 
-        // Admins write to get their login link, which is not news for the
-        // group — unless they play too and are answering their own reminder.
-        if (isAdmin && reminders.length === 0) return false;
-
-        const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-                chat_id: chatId,
-                text: truncate(inboxMessage({
-                    waId: incoming.waId,
-                    sender,
-                    kind: incoming.kind,
-                    text: incoming.text,
-                    reminders,
-                }), 4096),
-                link_preview_options: { is_disabled: true },
-            }),
-        });
-        if (!res.ok) {
-            console.error(`Inbox forward failed (${res.status}):`, await res.text().catch(() => ""));
-            return false;
+        if (known && startsNewConversation(known.last_inbound_at, known.last_club_at, now, CustomerWindowMs)) {
+            await post(conversationSeparator(todayInBA(now)));
         }
-        return true;
+        for (const r of reminders) {
+            const params = Array.isArray(r.params) ? r.params.map(String) : [];
+            await post(reminderPost(String(r.sent_on), renderReminder(params)));
+            const marked = await supabaseAdmin.from("whatsapp_reminders")
+                .update({ shown_in_topic_at: now.toISOString() })
+                .eq("id", r.id);
+            if (marked.error) console.error("Reminder mark failed:", marked.error);
+        }
+        await post(inboundPost(incoming.kind, incoming.text));
+
+        const touched = await supabaseAdmin.from("whatsapp_inbox_topics")
+            .update({ last_inbound_at: now.toISOString() })
+            .eq("wa_id", incoming.waId);
+        if (touched.error) console.error("Topic touch failed:", touched.error);
+        return { forwarded: true, clubAnswering };
     } catch (e) {
         console.error("Inbox forward failed:", e);
-        return false;
+        return { forwarded: false, clubAnswering };
     }
+}
+
+function todayInBA(now: Date): string {
+    return new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Argentina/Buenos_Aires",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).format(now);
 }
 
 // ////////////////////////////////////

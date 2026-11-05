@@ -21,6 +21,7 @@ import type {
     ParseMode,
 } from "https://deno.land/x/grammy@v1.40.0/types.ts";
 import { sortBy, sum } from "https://deno.land/x/lodash@4.17.15-es/lodash.js";
+import { inboxChatId, relayFromTopic } from "./inboxRelay.ts";
 
 console.log("Hello from telegram-webhook!");
 
@@ -1524,6 +1525,29 @@ function parseAttendanceMessage(text: string): Partial<HeaderAttendance> {
 async function OnMessage(
     ctx: Filter<Context, "message">,
 ): Promise<Message.TextMessage> {
+    // A WhatsApp conversation's topic in the inbox group: what the club writes
+    // there goes to that number. Checked first — every message in a topic
+    // carries a reply_to_message, which the payment flows below would misread.
+    const msg = ctx.msg;
+    if (msg.is_topic_message && msg.message_thread_id && String(ctx.chat.id) === inboxChatId()) {
+        const refusal = await relayFromTopic(supabaseAdmin, {
+            chatId: ctx.chat.id,
+            threadId: msg.message_thread_id,
+            fromBot: Boolean(ctx.from?.is_bot),
+            // A caption alone would go out without its photo: media is refused whole.
+            text: msg.text ?? null,
+            hasMedia: Boolean(msg.photo || msg.voice || msg.audio || msg.video || msg.video_note ||
+                msg.document || msg.sticker || msg.animation),
+        });
+        if (refusal) {
+            return bot.api.sendMessage(ctx.chat.id, refusal, {
+                message_thread_id: msg.message_thread_id,
+                reply_parameters: { message_id: msg.message_id },
+            });
+        }
+        return;
+    }
+
     const repliedText = ctx.update.message?.reply_to_message?.text;
     if (repliedText) {
         if (repliedText.includes("ASISTPAGO_CTX:") || repliedText.includes("ASISTPAGO\\_CTX:")) {

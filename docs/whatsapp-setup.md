@@ -94,8 +94,9 @@ Whatever the message says, the sender gets one reply, composed by `handleIncomin
   the dashboard (15 minutes, hash-stored in `whatsapp_login_tokens`).
 - Someone who is both gets both sections in one message; an unknown number gets
   "Hola! Te conozco?".
-- Anyone who is not an admin also gets "Le pasamos tu mensaje al club." when the
-  message reached the Telegram group (see below).
+- Whoever's message reached the Telegram group also gets "Le pasamos tu mensaje
+  al club.". While the club is answering from the group (it wrote in the last
+  24h), there is no automatic reply at all (see below).
 
 Identity note: an inbound `wa_id` arrives Meta-signed and is matched against phone
 columns we curate, so it is as trustworthy as a login. Names in replies come from our
@@ -206,31 +207,56 @@ Para ver qué salió: `select * from whatsapp_reminders order by created_at desc
 Las corridas del cron: `select * from cron.job_run_details order by start_time desc;`
 Las respuestas de la función: `select * from net._http_response order by created desc;`
 
-## Los mensajes que entran van a un grupo de Telegram
+## Las conversaciones, en un grupo de Telegram con topics
 
-El número vive en la Cloud API y no se puede abrir desde la app, así que nadie
-leería lo que la gente escribe, ni siquiera las respuestas a un recordatorio. El
-webhook reenvía cada mensaje que entra a un grupo de Telegram. Para cada mensaje
-el grupo ve:
+El número vive en la Cloud API y no se puede abrir desde la app. Las
+conversaciones se leen y se contestan en un supergrupo de Telegram con
+**topics**, un topic por número.
 
-- quién escribió, según nuestras tablas: jugador, tutor de quién, o número desconocido;
-- un link `https://wa.me/<número>`. El admin que lo toca le contesta desde su
-  propio WhatsApp;
-- el recordatorio que le llegó a ese número en los últimos 7 días, con los montos;
-- el texto. Un audio o una imagen solo se avisa: no se reenvía.
+**Cuando alguien escribe**, el webhook busca el topic de ese número. Si no hay,
+lo crea, con el nombre del jugador, "Tutor de …" o el número. Si estaba cerrado,
+lo reabre. Si alguien lo borró, crea otro. Después publica, en este orden:
 
-Los mensajes de los admins (que escriben para pedir el link de login) no se
-reenvían. Si Telegram no responde, el que escribió igual recibe su respuesta, sin
-la línea "Le pasamos tu mensaje al club.".
+1. un separador `━━━━  12/11  ━━━━`, si en el topic no hubo movimiento en las
+   últimas 24h: marca dónde empieza una conversación nueva;
+2. los recordatorios que esa persona recibió y el topic todavía no mostró, con el
+   texto exacto que le llegó;
+3. su mensaje. De un audio o una imagen solo llega el aviso.
 
-Puesta en marcha:
+**Un recordatorio no abre topic.** Se muestra la primera vez que la persona
+escribe después de recibirlo. Si nunca contesta, el único rastro en Telegram es
+el resumen del jueves, que va al topic General: enviados, fallidos y el error de
+cada uno.
 
-1. Crear el grupo en Telegram y agregar al bot del club (el de `telegram-webhook`).
-2. Escribir `/chatid` en el grupo. El bot contesta el id (un número negativo).
-3. `supabase secrets set WHATSAPP_INBOX_TELEGRAM_CHAT_ID=<id>`. `TELEGRAM_BOT_TOKEN`
-   ya está cargado para el bot de Telegram: los secretos son de todo el proyecto.
-4. Desplegar `whatsapp-webhook` y `telegram-webhook`.
+**Lo que el club escribe en el topic** le llega a esa persona por WhatsApp como un
+mensaje del club, sin firma. Excepciones:
 
-En un grupo, el bot de Telegram no contesta los mensajes que no son comandos suyos,
-así que los admins pueden hablar y responder ahí sin que el bot conteste
-"Unexpected message".
+- lo que empieza con `//` es un comentario interno y queda en el grupo;
+- fotos, audios y archivos no se reenvían; el bot avisa en el topic;
+- WhatsApp solo deja escribir texto libre hasta 24h después del último mensaje
+  de la persona. Un recordatorio **no** abre esa ventana. Pasadas las 24h, el bot
+  avisa en el topic que no le llegó, y hay que esperar a que vuelva a escribir.
+
+**La respuesta automática** (el registro de pagos) no sale mientras el club haya
+escrito en el topic en las últimas 24h: alguien le está contestando. Fuera de eso,
+a cada mensaje le sigue respondiendo como siempre, más "Le pasamos tu mensaje al
+club.". Los mensajes de los admins, que escriben para pedir el link de login, no
+van al grupo, salvo que estén contestando un recordatorio o que el club ya esté
+hablando con ellos.
+
+### Puesta en marcha
+
+1. Crear un grupo en Telegram y activar **Topics** en la configuración del grupo
+   (eso lo convierte en supergrupo).
+2. Agregar al bot del club (el de `telegram-webhook`) y hacerlo **administrador**
+   con permiso para **gestionar topics**. Siendo admin recibe todos los mensajes
+   del grupo, no solo los comandos: es lo que necesita para reenviar lo que
+   escriben en los topics.
+3. Escribir `/chatid` en el grupo. El bot contesta el id (empieza con `-100`).
+4. `supabase secrets set WHATSAPP_INBOX_TELEGRAM_CHAT_ID=<id>`. `TELEGRAM_BOT_TOKEN`
+   y los de WhatsApp ya están cargados: los secretos son de todo el proyecto.
+5. `supabase db push` y desplegar `whatsapp-webhook`, `telegram-webhook` y
+   `debt-reminders`.
+
+Fuera de los topics de conversaciones, el bot no contesta en el grupo lo que no
+es un comando suyo.
