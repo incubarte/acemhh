@@ -94,6 +94,8 @@ Whatever the message says, the sender gets one reply, composed by `handleIncomin
   the dashboard (15 minutes, hash-stored in `whatsapp_login_tokens`).
 - Someone who is both gets both sections in one message; an unknown number gets
   "Hola! Te conozco?".
+- Anyone who is not an admin also gets "Le pasamos tu mensaje al club." when the
+  message reached the Telegram group (see below).
 
 Identity note: an inbound `wa_id` arrives Meta-signed and is matched against phone
 columns we curate, so it is as trustworthy as a login. Names in replies come from our
@@ -157,7 +159,7 @@ Message templates**:
 - Cuerpo:
 
   ```
-  Hola! Te escribimos del club porque {{1}} tiene un saldo pendiente de {{2}}. Hoy hay entrenamiento y se puede regularizar ahí. Si ya está pago, avisanos y lo revisamos.
+  Hola! Te escribimos del club porque {{1}} tiene un saldo pendiente de {{2}}. Hoy hay entrenamiento y se puede regularizar ahí. Si ya está pago, respondé este mensaje y lo revisamos.
   ```
 
 - Ejemplos para la revisión: `{{1}}` = `tu cuenta`, `{{2}}` = `$30.000 de meses anteriores y $35.000 de noviembre`
@@ -203,3 +205,32 @@ por día. Los recordatorios entran de sobra.
 Para ver qué salió: `select * from whatsapp_reminders order by created_at desc;`
 Las corridas del cron: `select * from cron.job_run_details order by start_time desc;`
 Las respuestas de la función: `select * from net._http_response order by created desc;`
+
+## Los mensajes que entran van a un grupo de Telegram
+
+El número vive en la Cloud API y no se puede abrir desde la app, así que nadie
+leería lo que la gente escribe, ni siquiera las respuestas a un recordatorio. El
+webhook reenvía cada mensaje que entra a un grupo de Telegram. Para cada mensaje
+el grupo ve:
+
+- quién escribió, según nuestras tablas: jugador, tutor de quién, o número desconocido;
+- un link `https://wa.me/<número>`. El admin que lo toca le contesta desde su
+  propio WhatsApp;
+- el recordatorio que le llegó a ese número en los últimos 7 días, con los montos;
+- el texto. Un audio o una imagen solo se avisa: no se reenvía.
+
+Los mensajes de los admins (que escriben para pedir el link de login) no se
+reenvían. Si Telegram no responde, el que escribió igual recibe su respuesta, sin
+la línea "Le pasamos tu mensaje al club.".
+
+Puesta en marcha:
+
+1. Crear el grupo en Telegram y agregar al bot del club (el de `telegram-webhook`).
+2. Escribir `/chatid` en el grupo. El bot contesta el id (un número negativo).
+3. `supabase secrets set WHATSAPP_INBOX_TELEGRAM_CHAT_ID=<id>`. `TELEGRAM_BOT_TOKEN`
+   ya está cargado para el bot de Telegram: los secretos son de todo el proyecto.
+4. Desplegar `whatsapp-webhook` y `telegram-webhook`.
+
+En un grupo, el bot de Telegram no contesta los mensajes que no son comandos suyos,
+así que los admins pueden hablar y responder ahí sin que el bot conteste
+"Unexpected message".

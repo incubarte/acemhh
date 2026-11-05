@@ -25,6 +25,7 @@ import {
     periodActiveMonths,
     trainingsFor,
 } from "./status.ts";
+import { inboxMessage, type InboxSender, type RecentReminder } from "./inbox.ts";
 
 const GraphVersionDefault = "v23.0";
 
@@ -49,6 +50,8 @@ type Incoming = {
     text: string | null;
     /** id payload of an interactive button or list reply — WhatsApp's callback_data. */
     replyId: string | null;
+    /** WhatsApp message type: "text", "audio", "image", "button", … */
+    kind: string;
 };
 
 /** A dashboard admin, resolved from the sender's phone. id is the users.id uuid. */
@@ -254,7 +257,7 @@ function toIncoming(message: any, contacts: any[]): Incoming | null {
         text = message.button?.text ?? null;
     }
 
-    return { waId, messageId, profileName, text, replyId };
+    return { waId, messageId, profileName, text, replyId, kind: String(message.type ?? "unknown") };
 }
 
 /** Returns false if this message id was already handled. */
@@ -361,8 +364,11 @@ async function handleIncoming(incoming: Incoming) {
     ]);
     const self = players.find((p) => p.relation === "self") ?? null;
 
+    const forwarded = await forwardToInbox(incoming, players, admin !== null);
+    const forwardedLine = "Le pasamos tu mensaje al club.";
+
     if (!admin && players.length === 0) {
-        await sendText(incoming.waId, "Hola! Te conozco?");
+        await sendText(incoming.waId, forwarded ? `Hola! Te conozco?\n\n${forwardedLine}` : "Hola! Te conozco?");
         return;
     }
 
@@ -422,7 +428,93 @@ async function handleIncoming(incoming: Incoming) {
         if (loginSection) sections.push(loginSection);
     }
 
+    if (forwarded) sections.push(forwardedLine);
+
     await sendText(incoming.waId, sections.join("\n\n"));
+}
+
+// ////////////////////////////////////
+// INBOX
+// ////////////////////////////////////
+
+/** How far back a reminder still explains why somebody is writing. */
+const InboxReminderDays = 7;
+
+/**
+ * Hands the message to the club's Telegram group, with who wrote it and the
+ * reminder they are probably answering. True when Telegram took it. Never
+ * throws: the sender still gets their reply when the group is unreachable.
+ */
+async function forwardToInbox(
+    incoming: Incoming,
+    players: PlayerLink[],
+    isAdmin: boolean,
+): Promise<boolean> {
+    const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
+    const chatId = Deno.env.get("WHATSAPP_INBOX_TELEGRAM_CHAT_ID");
+    if (!token || !chatId) {
+        console.error("TELEGRAM_BOT_TOKEN or WHATSAPP_INBOX_TELEGRAM_CHAT_ID not configured: message not forwarded");
+        return false;
+    }
+
+    try {
+        const self = players.find((p) => p.relation === "self");
+        const sender: InboxSender = self
+            ? { kind: "player", name: self.name, lastName: self.last_name }
+            : players.length > 0
+            ? { kind: "guardian", of: players.map((p) => ({ name: p.name, lastName: p.last_name })) }
+            : { kind: "unknown" };
+
+        const since = new Date(Date.now() - InboxReminderDays * 24 * 60 * 60 * 1000)
+            .toISOString().slice(0, 10);
+        const { data, error } = await supabaseAdmin
+            .from("whatsapp_reminders")
+            .select("sent_on,closed_debt,month_debt,players(name)")
+            .eq("wa_id", incoming.waId)
+            .eq("status", "sent")
+            .gte("sent_on", since)
+            .order("sent_on", { ascending: false });
+        if (error) console.error("Inbox reminder lookup failed:", error);
+        // Only the latest Thursday: an older one was already superseded.
+        const latest = data?.[0]?.sent_on;
+        const reminders: RecentReminder[] = (data ?? [])
+            .filter((r) => r.sent_on === latest)
+            .map((r) => ({
+                sent_on: String(r.sent_on),
+                // deno-lint-ignore no-explicit-any
+                player_name: String((r.players as any)?.name ?? ""),
+                closed_debt: Number(r.closed_debt),
+                month_debt: Number(r.month_debt),
+            }));
+
+        // Admins write to get their login link, which is not news for the
+        // group — unless they play too and are answering their own reminder.
+        if (isAdmin && reminders.length === 0) return false;
+
+        const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                chat_id: chatId,
+                text: truncate(inboxMessage({
+                    waId: incoming.waId,
+                    sender,
+                    kind: incoming.kind,
+                    text: incoming.text,
+                    reminders,
+                }), 4096),
+                link_preview_options: { is_disabled: true },
+            }),
+        });
+        if (!res.ok) {
+            console.error(`Inbox forward failed (${res.status}):`, await res.text().catch(() => ""));
+            return false;
+        }
+        return true;
+    } catch (e) {
+        console.error("Inbox forward failed:", e);
+        return false;
+    }
 }
 
 // ////////////////////////////////////

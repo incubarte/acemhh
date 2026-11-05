@@ -63,6 +63,10 @@ const supabaseAdmin = createClient(
 const bot = new Bot((Deno.env.get("TELEGRAM_BOT_TOKEN"))!);
 
 bot.command("start", (ctx) => reply(ctx, "Welcome! Up and running."));
+// The WhatsApp inbox posts into a group, and configuring it needs that
+// group's id (WHATSAPP_INBOX_TELEGRAM_CHAT_ID). Commands reach the bot even
+// with group privacy on.
+bot.command("chatid", (ctx) => ctx.reply(String(ctx.chat.id)));
 bot.command(CMD_RP, catchAll(CmdRegistrarPersona));
 bot.command(CMD_PAGO_VIEJO, catchAll(CmdPagoViejo));
 bot.command(CMD_CP, catchAll(CmdConsultarPersona));
@@ -1613,6 +1617,9 @@ async function OnMessage(
             );
         }
     }
+    // In a group — the WhatsApp inbox — admins talk among themselves and
+    // reply to the forwarded messages. None of that is for the bot.
+    if (ctx.chat.type === "group" || ctx.chat.type === "supergroup") return;
     return ctx.reply(`Unexpected message: ${ctx.msg.text}`);
 }
 
