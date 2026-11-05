@@ -67,7 +67,7 @@ In **WhatsApp > Configuration > Webhook**, set:
 Meta immediately sends a `GET` with `hub.challenge`; the function echoes it back. Then
 subscribe to the **`messages`** field — without that subscription no inbound messages arrive.
 
-`config.toml` sets `verify_jwt = false` because Meta does not send a Supabase JWT. The
+`supabase/config.toml` sets `verify_jwt = false` (`[functions.whatsapp-webhook]`) because Meta does not send a Supabase JWT. The
 `X-Hub-Signature-256` HMAC check is what authenticates requests, so `WHATSAPP_APP_SECRET`
 must be set — the function returns 500 rather than accepting unsigned traffic without it.
 
@@ -191,7 +191,7 @@ por día. Los recordatorios entran de sobra.
 
    Sin `project_url`, el job corre y no llama a nadie.
 
-3. `supabase db push` (tabla y cron) y `supabase functions deploy debt-reminders --no-verify-jwt`.
+3. `supabase db push` (tabla y cron) y `supabase functions deploy debt-reminders`. `verify_jwt = false` sale de `supabase/config.toml`: el cron no manda JWT, y con `verify_jwt` en true el gateway lo rechaza antes de llegar a la función.
 
 4. Antes del primer jueves, revisar a quién le escribiría sin mandar nada:
 

@@ -306,3 +306,16 @@ s3_region = "env(S3_REGION)"
 s3_access_key = "env(S3_ACCESS_KEY)"
 # Configures AWS_SECRET_ACCESS_KEY for S3 bucket
 s3_secret_key = "env(S3_SECRET_KEY)"
+
+# None of these is called with a Supabase JWT: Meta signs its webhooks,
+# Telegram sends its secret header, and the cron sends x-reminders-secret.
+# Each function checks its own caller. The CLI reads this section on deploy;
+# a config.toml inside the function's folder is not read.
+[functions.whatsapp-webhook]
+verify_jwt = false
+
+[functions.telegram-webhook]
+verify_jwt = false
+
+[functions.debt-reminders]
+verify_jwt = false
