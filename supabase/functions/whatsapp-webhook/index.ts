@@ -35,6 +35,7 @@ import {
     startsNewConversation,
 } from "./inbox.ts";
 import { ensureTopic, findTopic, inboxConfig, postToTopic } from "./topics.ts";
+import { applyStatus } from "./marks.ts";
 import { renderReminder } from "../_shared/reminderTemplate.ts";
 import { CustomerWindowMs } from "../_shared/whatsapp.ts";
 
@@ -215,9 +216,15 @@ async function processPayload(payload: any) {
             // Delivery/read receipts and errors arrive on the same webhook. We only
             // care about inbound messages here.
             if (value.statuses) {
+                const cfg = inboxConfig();
                 for (const status of value.statuses) {
                     if (status?.errors?.length) {
                         console.error("Message status error:", JSON.stringify(status.errors));
+                    }
+                    // What the club sent from a topic gets its tick there.
+                    if (cfg) {
+                        await applyStatus(supabaseAdmin, cfg.token, status)
+                            .catch((e) => console.error("Status mark failed:", e));
                     }
                 }
             }

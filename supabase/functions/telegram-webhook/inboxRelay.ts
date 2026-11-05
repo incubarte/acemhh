@@ -3,17 +3,34 @@
 // club, unsigned. The decisions live in whatsapp-webhook/inbox.ts.
 
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import { relayDecision, relayRefusal } from "../whatsapp-webhook/inbox.ts";
+import { relayDecision, relayRefusal, StatusReaction } from "../whatsapp-webhook/inbox.ts";
+import { telegramCall } from "../_shared/telegram.ts";
 import { CustomerWindowMs, OutsideWindowCode, sendWhatsappText } from "../_shared/whatsapp.ts";
 
 /** The part of a Telegram message the relay looks at. */
 export type TopicMessage = {
     chatId: number;
     threadId: number;
+    messageId: number;
     fromBot: boolean;
     text: string | null;
     hasMedia: boolean;
 };
+
+/**
+ * Whether a person wrote the message. An anonymous admin writes through
+ * Telegram's GroupAnonymousBot, signed by the group itself: that is a person,
+ * writing as the club. Any other bot is not, and neither is a channel posting
+ * into the group.
+ */
+export function writtenByPerson(
+    from: { is_bot?: boolean } | undefined,
+    senderChat: { id: number } | undefined,
+    chatId: number,
+): boolean {
+    if (senderChat) return senderChat.id === chatId;
+    return !from?.is_bot;
+}
 
 export function inboxChatId(): string | null {
     return Deno.env.get("WHATSAPP_INBOX_TELEGRAM_CHAT_ID") ?? null;
@@ -53,6 +70,27 @@ export async function relayFromTopic(s: SupabaseClient, m: TopicMessage): Promis
         return outcome.code === OutsideWindowCode
             ? relayRefusal("window")
             : relayRefusal("failed", outcome.error.slice(0, 300));
+    }
+
+    // The first tick, and the link Meta's later statuses use to move it.
+    if (outcome.wamid) {
+        const marked = await s.from("whatsapp_relay_marks").insert({
+            wamid: outcome.wamid,
+            chat_id: String(m.chatId),
+            thread_id: m.threadId,
+            message_id: m.messageId,
+            status: "sent",
+        });
+        if (marked.error) console.error("Relay mark insert failed:", marked.error);
+    }
+    const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
+    if (token) {
+        const reacted = await telegramCall(token, "setMessageReaction", {
+            chat_id: m.chatId,
+            message_id: m.messageId,
+            reaction: [{ type: "emoji", emoji: StatusReaction.sent }],
+        });
+        if (!reacted.ok) console.error("Relay reaction failed:", reacted.description);
     }
 
     const touched = await s.from("whatsapp_inbox_topics")

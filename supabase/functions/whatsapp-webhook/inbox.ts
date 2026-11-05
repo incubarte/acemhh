@@ -175,3 +175,25 @@ export function relayDecision(m: {
     }
     return "send";
 }
+
+export type DeliveryStatus = "sent" | "delivered" | "read" | "failed";
+
+/** Meta's ticks, as reactions on the club's message in the topic. Telegram
+ * only lets a bot react with its standard set, which has no check mark. */
+export const StatusReaction: Record<Exclude<DeliveryStatus, "failed">, string> = {
+    sent: "🕊",
+    delivered: "👌",
+    read: "👀",
+};
+
+const StatusRank: Record<DeliveryStatus, number> = { sent: 1, delivered: 2, read: 3, failed: 4 };
+
+/**
+ * Whether a status Meta reports moves the mark forward. Statuses can arrive
+ * out of order or twice; a later one never takes the mark back. A failure
+ * after the fact overrides everything: that message did not get there.
+ */
+export function advancesStatus(current: DeliveryStatus, incoming: string): incoming is DeliveryStatus {
+    if (!(incoming in StatusRank)) return false;
+    return StatusRank[incoming as DeliveryStatus] > StatusRank[current];
+}

@@ -21,7 +21,7 @@ import type {
     ParseMode,
 } from "https://deno.land/x/grammy@v1.40.0/types.ts";
 import { sortBy, sum } from "https://deno.land/x/lodash@4.17.15-es/lodash.js";
-import { inboxChatId, relayFromTopic } from "./inboxRelay.ts";
+import { inboxChatId, relayFromTopic, writtenByPerson } from "./inboxRelay.ts";
 
 console.log("Hello from telegram-webhook!");
 
@@ -1533,7 +1533,8 @@ async function OnMessage(
         const refusal = await relayFromTopic(supabaseAdmin, {
             chatId: ctx.chat.id,
             threadId: msg.message_thread_id,
-            fromBot: Boolean(ctx.from?.is_bot),
+            messageId: msg.message_id,
+            fromBot: !writtenByPerson(ctx.from, msg.sender_chat, ctx.chat.id),
             // A caption alone would go out without its photo: media is refused whole.
             text: msg.text ?? null,
             hasMedia: Boolean(msg.photo || msg.voice || msg.audio || msg.video || msg.video_note ||

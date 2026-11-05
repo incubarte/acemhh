@@ -239,6 +239,24 @@ mensaje del club, sin firma. Excepciones:
   de la persona. Un recordatorio **no** abre esa ventana. Pasadas las 24h, el bot
   avisa en el topic que no le llegó, y hay que esperar a que vuelva a escribir.
 
+**Cada mensaje del club que sale lleva una reacción**, como los checks de
+WhatsApp. Telegram no deja que un bot reaccione con ✓, así que se usan tres de
+las reacciones estándar, y cada una reemplaza a la anterior:
+
+- 🕊 enviado: Meta lo aceptó;
+- 👌 entregado: llegó al teléfono;
+- 👀 leído: solo si la persona tiene activadas las confirmaciones de lectura.
+
+Si Meta lo rechaza después de aceptarlo, la reacción se saca y el bot contesta ⚠️
+con el motivo. Un mensaje sin reacción y sin aviso no salió: por ejemplo, porque
+empezaba con `//`. El vínculo entre cada mensaje de WhatsApp y su mensaje en
+Telegram está en `whatsapp_relay_marks`. Los avisos llegan por el mismo webhook de
+Meta, en el campo `messages`, que ya está suscripto.
+
+**Los admins anónimos** ("Permanecer anónimo" en sus permisos) escriben con el
+nombre del grupo. Para Telegram los manda un bot (GroupAnonymousBot) firmado por
+el grupo, y el relay los trata como una persona del club: se reenvían igual.
+
 **La respuesta automática** (el registro de pagos) no sale mientras el club haya
 escrito en el topic en las últimas 24h: alguien le está contestando. Fuera de eso,
 a cada mensaje le sigue respondiendo como siempre, más "Le pasamos tu mensaje al
