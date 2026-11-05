@@ -39,6 +39,7 @@ Deno.test("reminderPost: el recordatorio tal como le llegó al teléfono", () =>
     assertEquals(
         reminderPost("2026-11-12", text),
         "📤 Recordatorio que le mandó el club el 12/11:\n\n" +
+            "Recordatorio del club\n" +
             "Hola! Te escribimos del club porque la cuenta de Elias tiene un saldo pendiente de " +
             "$70.000 de meses anteriores. Hoy hay entrenamiento y se puede regularizar ahí. " +
             "Si ya está pago, respondé este mensaje y lo revisamos.",

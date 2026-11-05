@@ -157,6 +157,8 @@ template aprobado, y Meta cobra cada uno. Se crea en **WhatsApp Manager >
 Message templates**:
 
 - Nombre: `recordatorio_deuda`, categoría **Utility**, idioma **Spanish (ARG)** (`es_AR`)
+- Header, de tipo texto y sin variables: `Recordatorio del club`. Meta lo pide, y
+  como es fijo, el envío no le pasa nada.
 - Cuerpo:
 
   ```
@@ -165,7 +167,7 @@ Message templates**:
 
 - Ejemplos para la revisión: `{{1}}` = `tu cuenta`, `{{2}}` = `$30.000 de meses anteriores y $35.000 de noviembre`
 
-`{{1}}` es `tu cuenta` para el jugador y `la cuenta de <nombre>` para el tutor. Si
+Sin footer y sin botones. `{{1}}` es `tu cuenta` para el jugador y `la cuenta de <nombre>` para el tutor. Si
 el template se aprueba con otro nombre o idioma, se cambia con
 `WHATSAPP_REMINDER_TEMPLATE` / `WHATSAPP_REMINDER_LANGUAGE`. Hasta que esté
 aprobado, cada envío falla y queda `failed` con el error de Meta.
