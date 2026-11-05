@@ -34,5 +34,6 @@ Deno.test("advancesStatus: enviado, entregado, leído, sin volver atrás", () =>
 });
 
 Deno.test("StatusReaction: cada estado con su reacción", () => {
-    assertEquals(StatusReaction, { sent: "🕊", delivered: "👌", read: "👀", failed: "💔" });
+    // A failure has none: nothing in Telegram's set reads as "not delivered".
+    assertEquals(StatusReaction, { sent: "🕊", delivered: "👌", read: "👀" });
 });

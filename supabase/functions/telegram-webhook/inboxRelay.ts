@@ -32,19 +32,6 @@ export function writtenByPerson(
     return !from?.is_bot;
 }
 
-/** The club's message did not go out: it gets the failure mark, next to
- * the bot's reply saying why. */
-export async function markUndelivered(chatId: number, messageId: number) {
-    const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
-    if (!token) return;
-    const res = await telegramCall(token, "setMessageReaction", {
-        chat_id: chatId,
-        message_id: messageId,
-        reaction: [{ type: "emoji", emoji: StatusReaction.failed }],
-    });
-    if (!res.ok) console.error("Relay reaction failed:", res.description);
-}
-
 export function inboxChatId(): string | null {
     return Deno.env.get("WHATSAPP_INBOX_TELEGRAM_CHAT_ID") ?? null;
 }

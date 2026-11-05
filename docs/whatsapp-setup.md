@@ -247,10 +247,11 @@ las reacciones estándar, y cada una reemplaza a la anterior:
 - 👌 entregado: llegó al teléfono;
 - 👀 leído: solo si la persona tiene activadas las confirmaciones de lectura.
 
-Lo que no sale queda con 💔 (Telegram tampoco permite ⚠️), y el bot contesta ⚠️
-con el motivo: pasaron más de 24h, era una foto o un archivo, o WhatsApp lo
-rechazó, en el momento o después de haberlo aceptado. Un mensaje sin reacción y sin aviso no salió: por ejemplo, porque
-empezaba con `//`. El vínculo entre cada mensaje de WhatsApp y su mensaje en
+Lo que no sale queda sin reacción, y el bot contesta ⚠️ con el motivo: pasaron
+más de 24h, era una foto o un archivo, o WhatsApp lo rechazó, en el momento o
+después de haberlo aceptado. En ese último caso se saca el 🕊 que ya tenía.
+Ninguna de las reacciones que Telegram permite a un bot se lee como "no llegó". Un mensaje sin reacción y sin aviso no se intentó mandar: por ejemplo,
+porque empezaba con `//`. El vínculo entre cada mensaje de WhatsApp y su mensaje en
 Telegram está en `whatsapp_relay_marks`. Los avisos llegan por el mismo webhook de
 Meta, en el campo `messages`, que ya está suscripto.
 

@@ -21,7 +21,7 @@ import type {
     ParseMode,
 } from "https://deno.land/x/grammy@v1.40.0/types.ts";
 import { sortBy, sum } from "https://deno.land/x/lodash@4.17.15-es/lodash.js";
-import { inboxChatId, markUndelivered, relayFromTopic, writtenByPerson } from "./inboxRelay.ts";
+import { inboxChatId, relayFromTopic, writtenByPerson } from "./inboxRelay.ts";
 
 console.log("Hello from telegram-webhook!");
 
@@ -1541,7 +1541,6 @@ async function OnMessage(
                 msg.document || msg.sticker || msg.animation),
         });
         if (refusal) {
-            await markUndelivered(ctx.chat.id, msg.message_id);
             return bot.api.sendMessage(ctx.chat.id, refusal, {
                 message_thread_id: msg.message_thread_id,
                 reply_parameters: { message_id: msg.message_id },
