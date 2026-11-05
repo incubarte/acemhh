@@ -15,6 +15,13 @@ const TopicNameLimit = 128;
 /** What the club writes in a topic starting with this stays in the group. */
 export const InternalPrefix = "//";
 
+/** A message to the WhatsApp number starting with the same prefix stays out
+ * of the group: one rule both ways — `//` does not leave where it was
+ * written. It is how an admin asks for their login link without a topic. */
+export function keepsOutOfInbox(text: string | null): boolean {
+    return text !== null && text.trimStart().startsWith(InternalPrefix);
+}
+
 /** WhatsApp message types we cannot show as text, in words. */
 const KIND_WORDS: Record<string, string> = {
     audio: "un audio",

@@ -8,6 +8,7 @@ import {
     clubIsAnswering,
     conversationSeparator,
     inboundPost,
+    keepsOutOfInbox,
     relayDecision,
     reminderPost,
     reminderSummary,
@@ -106,4 +107,13 @@ Deno.test("reminderSummary: enviados y fallidos, para el General", () => {
             "  400 template not found",
         ],
     );
+});
+
+Deno.test("keepsOutOfInbox: lo que empieza con // no llega al grupo", () => {
+    assertEquals(keepsOutOfInbox("//login"), true);
+    assertEquals(keepsOutOfInbox("  // dame el link"), true);
+    assertEquals(keepsOutOfInbox("hola"), false);
+    assertEquals(keepsOutOfInbox("mirá https://x.com"), false);
+    // An audio has no text: it goes to the group as a notice.
+    assertEquals(keepsOutOfInbox(null), false);
 });

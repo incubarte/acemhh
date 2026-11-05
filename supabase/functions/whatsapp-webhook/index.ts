@@ -30,6 +30,7 @@ import {
     conversationSeparator,
     inboundPost,
     type InboxSender,
+    keepsOutOfInbox,
     reminderPost,
     startsNewConversation,
 } from "./inbox.ts";
@@ -374,7 +375,11 @@ async function handleIncoming(incoming: Incoming) {
     ]);
     const self = players.find((p) => p.relation === "self") ?? null;
 
-    const { forwarded, clubAnswering } = await forwardToInbox(incoming, players, admin !== null);
+    // "//" keeps the message out of the group — an admin asking for their
+    // login link, say. It gets the usual reply, whatever the topic is doing.
+    const { forwarded, clubAnswering } = keepsOutOfInbox(incoming.text)
+        ? { forwarded: false, clubAnswering: false }
+        : await forwardToInbox(incoming, players);
     const forwardedLine = "Le pasamos tu mensaje al club.";
 
     // Somebody from the club is talking to them in the topic: the automatic
@@ -467,7 +472,6 @@ type InboxOutcome = {
 async function forwardToInbox(
     incoming: Incoming,
     players: PlayerLink[],
-    isAdmin: boolean,
 ): Promise<InboxOutcome> {
     const cfg = inboxConfig();
     if (!cfg) {
@@ -491,13 +495,6 @@ async function forwardToInbox(
             .order("id");
         if (error) console.error("Inbox reminder lookup failed:", error);
         const reminders = pending ?? [];
-
-        // Admins write to get their login link, which is not news for the
-        // group — unless they play too and are answering their reminder, or
-        // the club is already talking to them.
-        if (isAdmin && reminders.length === 0 && !clubAnswering) {
-            return { forwarded: false, clubAnswering };
-        }
 
         const self = players.find((p) => p.relation === "self");
         const sender: InboxSender = self

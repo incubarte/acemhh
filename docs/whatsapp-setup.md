@@ -240,9 +240,13 @@ mensaje del club, sin firma. Excepciones:
 **La respuesta automática** (el registro de pagos) no sale mientras el club haya
 escrito en el topic en las últimas 24h: alguien le está contestando. Fuera de eso,
 a cada mensaje le sigue respondiendo como siempre, más "Le pasamos tu mensaje al
-club.". Los mensajes de los admins, que escriben para pedir el link de login, no
-van al grupo, salvo que estén contestando un recordatorio o que el club ya esté
-hablando con ellos.
+club.".
+
+**Lo que empieza con `//` tampoco sale de WhatsApp.** Es la misma regla que en los
+topics: `//` no sale del lugar donde se escribió. Así un admin pide su link de
+login (`//login`, o `//` y cualquier cosa) sin abrir un topic, y recibe la
+respuesta de siempre. Sin el prefijo, el mensaje de un admin llega al grupo como
+el de cualquiera.
 
 ### Puesta en marcha
 
