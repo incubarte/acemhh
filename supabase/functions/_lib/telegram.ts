@@ -1,6 +1,8 @@
 // A bare Telegram Bot API call, for the functions that post into the WhatsApp
-// inbox group without being the Telegram bot themselves. Imports nothing, like
-// the rest of _shared.
+// inbox group without being the Telegram bot themselves.
+//
+// _lib is for the edge functions only. The dashboard compiles _shared, so
+// anything that touches Deno or the network lives here instead.
 
 /** Flat rather than a union: the functions compile with strict off, where
  * `ok` would not narrow it. `result` is set when ok, `description` when not. */

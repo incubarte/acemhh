@@ -1,5 +1,8 @@
 // Sending through the WhatsApp Cloud API, for the functions that are not the
-// webhook. Imports nothing, like the rest of _shared.
+// webhook. It reads its credentials from Deno.env.
+//
+// _lib is for the edge functions only. The dashboard compiles _shared, so
+// anything that touches Deno or the network lives here instead.
 
 export type WhatsappOutcome =
     | { ok: true; wamid: string | null }

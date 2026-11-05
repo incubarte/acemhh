@@ -37,8 +37,8 @@ import {
 } from "../whatsapp-webhook/status.ts";
 import { isReminderDay, type Reminder, remindersFor, templatePayload, todayBA } from "./reminders.ts";
 import { reminderSummary, type SummaryRow } from "../whatsapp-webhook/inbox.ts";
-import { telegramCall, telegramTruncate } from "../_shared/telegram.ts";
-import { sendWhatsapp } from "../_shared/whatsapp.ts";
+import { telegramCall, telegramTruncate } from "../_lib/telegram.ts";
+import { sendWhatsapp } from "../_lib/whatsapp.ts";
 
 const PageSize = 1000;
 

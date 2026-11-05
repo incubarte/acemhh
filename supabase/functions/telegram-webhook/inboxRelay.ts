@@ -4,8 +4,8 @@
 
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { relayDecision, relayRefusal, StatusReaction } from "../whatsapp-webhook/inbox.ts";
-import { telegramCall } from "../_shared/telegram.ts";
-import { CustomerWindowMs, OutsideWindowCode, sendWhatsappText } from "../_shared/whatsapp.ts";
+import { telegramCall } from "../_lib/telegram.ts";
+import { CustomerWindowMs, OutsideWindowCode, sendWhatsappText } from "../_lib/whatsapp.ts";
 
 /** The part of a Telegram message the relay looks at. */
 export type TopicMessage = {

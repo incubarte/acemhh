@@ -3,7 +3,7 @@
 // delivered to read, and a late failure gets a warning in the topic.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { telegramCall } from "../_shared/telegram.ts";
+import { telegramCall } from "../_lib/telegram.ts";
 import { advancesStatus, type DeliveryStatus, relayRefusal, StatusReaction } from "./inbox.ts";
 
 // deno-lint-ignore no-explicit-any

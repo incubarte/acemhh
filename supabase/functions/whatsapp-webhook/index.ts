@@ -37,7 +37,7 @@ import {
 import { ensureTopic, findTopic, inboxConfig, postToTopic } from "./topics.ts";
 import { applyStatus } from "./marks.ts";
 import { renderReminder } from "../_shared/reminderTemplate.ts";
-import { CustomerWindowMs } from "../_shared/whatsapp.ts";
+import { CustomerWindowMs } from "../_lib/whatsapp.ts";
 
 const GraphVersionDefault = "v23.0";
 

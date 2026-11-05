@@ -2,7 +2,7 @@
 // and reopening them, and posting into them. The wording lives in inbox.ts.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isMissingThread, telegramCall, telegramTruncate } from "../_shared/telegram.ts";
+import { isMissingThread, telegramCall, telegramTruncate } from "../_lib/telegram.ts";
 import { type InboxSender, topicIntro, topicName } from "./inbox.ts";
 
 export type InboxConfig = { token: string; chatId: string };
