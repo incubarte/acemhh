@@ -361,7 +361,7 @@ const A23 = att(23, ["cat-c"]);
 
 Deno.test("al arquero sólo se le cobra el slot de arqueros", () => {
     const billable = billableAttendances([A21, A22, A23], who({ goalkeeper: true, categories: ["youth"] }));
-    assertEquals(billable, [{ slot: slotKey(4, 21) }]);
+    assertEquals(billable.map((b) => b.slot), [slotKey(4, 21)]);
 });
 
 Deno.test("el youth tiene una sesión adicional bonificada el mismo día", () => {
@@ -391,7 +391,7 @@ Deno.test("un jugador común paga todas las sesiones que asiste, incluso el mism
 
 Deno.test("las categorías no deciden qué se cobra: el que se cuelga en otro horario paga", () => {
     const billable = billableAttendances([A23], who());
-    assertEquals(billable, [{ slot: slotKey(4, 23) }]);
+    assertEquals(billable.map((b) => b.slot), [slotKey(4, 23)]);
 });
 
 Deno.test("la bonificación discrecional del admin gana sobre todo", () => {
@@ -399,7 +399,7 @@ Deno.test("la bonificación discrecional del admin gana sobre todo", () => {
         [{ ...A22, bonified: true }, A23],
         who(),
     );
-    assertEquals(billable, [{ slot: slotKey(4, 23) }]);
+    assertEquals(billable.map((b) => b.slot), [slotKey(4, 23)]);
 });
 
 // ////////////////////////////////////
@@ -575,7 +575,7 @@ Deno.test("el bonus de youth libera la sesión EXTRA, no la de youth", () => {
     const youth = att(21, ["youth"], true);
     const catC = att(23, ["cat-c"]);
     const billable = billableAttendances([catC, youth], who({ goalkeeper: false, categories: ["youth", "cat-c"] }));
-    assertEquals(billable, [{ slot: slotKey(4, 21) }]);
+    assertEquals(billable.map((b) => b.slot), [slotKey(4, 21)]);
 });
 
 Deno.test("con el mes de las 21hs pago, el youth que dobla no debe nada", () => {
@@ -624,7 +624,7 @@ Deno.test("yendo a las 21 sin pagar nada, la deuda es sólo por las 21", () => {
         who({ categories: ["youth", "cat-c"] }),
         false,
     );
-    assertEquals(billable, [{ slot: slotKey(4, 21) }]);
+    assertEquals(billable.map((b) => b.slot), [slotKey(4, 21)]);
 
     const r = ledgerMonth(
         EMPTY_STATE,

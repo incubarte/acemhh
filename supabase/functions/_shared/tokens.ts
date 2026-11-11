@@ -123,7 +123,7 @@ export type MonthInput = {
   /** Attendances the club actually charges for — goalkeepers outside their
    * slot, youth second sessions and discretionary bonifications are already
    * filtered out by billableAttendances(). */
-  attendances: { slot: SlotKey }[];
+  attendances: { slot: SlotKey; date?: string }[];
   payments: MonthPayment[];
   /** How many sessions each slot really held this month. */
   sessionsPerSlot: Map<SlotKey, number>;
@@ -154,6 +154,13 @@ export type MonthResult = {
   /** Per slot, how much of the opening balance went into its monthly
    * payment instead of waiting for an attendance. */
   monthlyCredit: Map<SlotKey, number>;
+  /** The attendances no token covered, and how much of a session each one
+   * still owes (fractions pay their part). Together, at the individual rate,
+   * they are the attendance half of `pending`. Order is the input's. */
+  uncovered: { slot: SlotKey; date?: string; owed: number }[];
+  /** Monthly payments that did not reach the month's price: the other half
+   * of `pending`. `forgivable` says whether closing the month forgives it. */
+  shortfalls: { slot: SlotKey; paid: number; full: number; short: number; forgivable: boolean }[];
 };
 
 /** The rates a player actually pays. A goalkeeper has one price that serves as
@@ -287,6 +294,7 @@ export function ledgerMonth(
   );
   let uncovered = 0;
   let used = 0;
+  const uncoveredRows: MonthResult["uncovered"] = [];
 
   for (const a of input.attendances) {
     // Cheapest to lose first, and fractions pay their part: half a token
@@ -307,6 +315,7 @@ export function ledgerMonth(
     need -= fromIndividual;
 
     uncovered += need;
+    if (need > 0) uncoveredRows.push({ slot: a.slot, date: a.date, owed: need });
     used += 1;
   }
 
@@ -324,6 +333,7 @@ export function ledgerMonth(
     attendancesBySlot.set(a.slot, (attendancesBySlot.get(a.slot) ?? 0) + 1);
   }
   let forgivable = 0;
+  const shortfalls: MonthResult["shortfalls"] = [];
   for (const [slot, e] of promoBySlot) {
     // Only a full month can fall short: a half month bought exactly what it
     // paid for, so it owes nothing and has nothing to forgive.
@@ -337,7 +347,9 @@ export function ledgerMonth(
     // barely used the month: what they paid has to cover the sessions they
     // did attend at the individual rate.
     const attended = attendancesBySlot.get(slot) ?? 0;
-    if (e.monthlyPaid >= Math.round(attended * individual)) forgivable += short;
+    const forgiven = e.monthlyPaid >= Math.round(attended * individual);
+    if (forgiven) forgivable += short;
+    shortfalls.push({ slot, paid: e.monthlyPaid, full, short, forgivable: forgiven });
   }
 
   // --- Debt settlements pay down what closed months left.
@@ -368,6 +380,8 @@ export function ledgerMonth(
     used,
     carryoverOut,
     monthlyCredit,
+    uncovered: uncoveredRows,
+    shortfalls,
   };
 }
 
@@ -418,14 +432,14 @@ export function billableAttendances(
   player: PlayerBilling,
   /** Whether the youth slot's month is paid: that is what buys the bonus. */
   bonusPaid = false,
-): { slot: SlotKey }[] {
+): { slot: SlotKey; date: string }[] {
   // The admin's call wins over everything.
   let kept = rows.filter((r) => !r.bonified);
 
   // A goalkeeper pays for their own slot and nothing else: showing up at 22hs
   // or 23hs costs them nothing.
   if (player.goalkeeper) {
-    return kept.filter((r) => r.goalies).map((r) => ({ slot: r.slot }));
+    return kept.filter((r) => r.goalies).map((r) => ({ slot: r.slot, date: r.date }));
   }
 
   if (player.categories.includes(BonusCategory)) {
@@ -455,7 +469,7 @@ export function billableAttendances(
     kept = kept.filter((r) => !free.has(r));
   }
 
-  return kept.map((r) => ({ slot: r.slot }));
+  return kept.map((r) => ({ slot: r.slot, date: r.date }));
 }
 
 // ////////////////////////////////////

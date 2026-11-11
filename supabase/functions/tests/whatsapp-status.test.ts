@@ -151,7 +151,7 @@ function ledgerOf(...statuses: MonthStatus[]) {
 // ////////////////////////////////////
 
 Deno.test("formatMonthLine: wording per payment shape and voice", () => {
-    const ok = { boughtMonth: false, charge: 0, carryoverIn: 0, carryoverOut: 0, debtAfter: 0, closedDebt: 0, pending: 0 };
+    const ok = { boughtMonth: false, charge: 0, carryoverIn: 0, carryoverOut: 0, debtAfter: 0, closedDebt: 0, pending: 0, debtMonths: [], monthDebt: null };
     const debt = { ...ok, debtAfter: 1 };
 
     assertEquals(
@@ -196,6 +196,8 @@ Deno.test("formatMonthLine: full scholarship reports attendance only", () => {
         debtAfter: 0,
         closedDebt: 0,
         pending: 0,
+        debtMonths: [],
+        monthDebt: null,
     };
 
     assertEquals(
@@ -233,6 +235,8 @@ Deno.test("formatMonthLine: a free month reports attendance only", () => {
         debtAfter: 0,
         closedDebt: 0,
         pending: 0,
+        debtMonths: [],
+        monthDebt: null,
     };
 
     assertEquals(

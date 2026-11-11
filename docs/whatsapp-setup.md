@@ -167,7 +167,19 @@ Message templates**:
 
 - Ejemplos para la revisión: `{{1}}` = `tu cuenta`, `{{2}}` = `$30.000 de meses anteriores y $35.000 de noviembre`
 
-Sin footer y sin botones. `{{1}}` es `tu cuenta` para el jugador y `la cuenta de <nombre>` para el tutor. Si
+Sin footer y sin botones. `{{2}}` es la deuda mes por mes, de la más vieja a la más nueva, con su origen:
+los entrenamientos sin pagar con sus fechas, o lo que falta de un mes pagado en
+parte. Por ejemplo: `$40.000 de septiembre (saldo de: entrenamientos del 3/9 y
+10/9 sin pagar), $60.000 de octubre (resto del mes de las 22hs: se pagaron $40.000
+de $100.000) y $30.000 de noviembre (entrenamiento del 12/11 sin pagar)`. Los
+montos son los del dashboard: un pago de deuda salda primero el mes más viejo
+("saldo de:" indica que ese mes ya se pagó en parte), y un mes pagado en parte que
+se condonó al cerrar no aparece. El del mes en curso se muestra entero, aunque
+después se condone. Una variable de template no admite saltos de línea, así que
+va todo en una línea. Si pasa de 600 caracteres, queda solo el monto de cada mes.
+Cambiar este texto no requiere volver a aprobar el template.
+
+`{{1}}` es `tu cuenta` para el jugador y `la cuenta de <nombre>` para el tutor. Si
 el template se aprueba con otro nombre o idioma, se cambia con
 `WHATSAPP_REMINDER_TEMPLATE` / `WHATSAPP_REMINDER_LANGUAGE`. Hasta que esté
 aprobado, cada envío falla y queda `failed` con el error de Meta.

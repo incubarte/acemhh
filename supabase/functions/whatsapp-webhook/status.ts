@@ -10,6 +10,7 @@ import {
     type LedgerPrice,
     type LedgerState,
     ledgerMonth,
+    type MonthResult,
     type MonthInput,
     type MonthPayment,
     periodMonths,
@@ -326,7 +327,68 @@ export type LedgerMonth = MonthStatus & {
      * the month runs, even if closing may forgive part of it. The
      * dashboard's "saldo del mes". */
     pending: number;
+    /** What each closed month still owes and why, oldest first, net of the
+     * debt payments registered through this month. Adds up to closedDebt. */
+    debtMonths: MonthDebt[];
+    /** This month's pending, and why. Null when nothing is pending. */
+    monthDebt: MonthDebt | null;
 };
+
+/** Where a month's debt comes from. */
+export type DebtSource =
+    | {
+        kind: "sessions";
+        /** The attendances no token covered: "YYYY-MM-DD", hour. */
+        sessions: { date: string; hour: number }[];
+        amount: number;
+    }
+    | {
+        kind: "monthly";
+        /** The slot's hour: every training is on Thursdays. */
+        hour: number;
+        /** What was paid toward the month, and what the month costs. */
+        paid: number;
+        full: number;
+        amount: number;
+    };
+
+export type MonthDebt = {
+    month: string; // YYYY-MM
+    /** What is still owed. */
+    amount: number;
+    /** What the month owed before any debt payment reached it. */
+    charged: number;
+    sources: DebtSource[];
+};
+
+/** "4-22" → 22. */
+function slotHour(slot: string): number {
+    return Number(slot.split("-")[1]);
+}
+
+/**
+ * The month's debt, by source: attendances no token covered, at the month's
+ * individual rate, and monthly payments short of the month. A closed month
+ * drops the shortfalls its close forgave; the running month keeps them all,
+ * because pending is shown as firm debt.
+ */
+function sourcesOf(r: MonthResult, sessionPrice: number, closed: boolean): DebtSource[] {
+    const sources: DebtSource[] = [];
+    if (r.uncovered.length > 0) {
+        const owed = r.uncovered.reduce((sum, u) => sum + u.owed, 0);
+        sources.push({
+            kind: "sessions",
+            sessions: r.uncovered.map((u) => ({ date: u.date ?? "", hour: slotHour(u.slot) })),
+            // Rounded once for the month, as pending is.
+            amount: Math.round(owed * sessionPrice),
+        });
+    }
+    for (const f of r.shortfalls) {
+        if (closed && f.forgivable) continue;
+        sources.push({ kind: "monthly", hour: slotHour(f.slot), paid: f.paid, full: f.full, amount: f.short });
+    }
+    return sources;
+}
 
 /**
  * Runs the shared token ledger over a player's months, keeping the per-month
@@ -339,14 +401,54 @@ export function computeLedger(
     player: PlayerBilling,
 ): LedgerMonth[] {
     let state: LedgerState = EMPTY_STATE;
+    // Closed months' debt, oldest first. A debt payment is not tied to a
+    // month: it settles the oldest debt standing when it was made, as the
+    // dashboard reads it (rosterLedger.ts).
+    const closed: MonthDebt[] = [];
 
-    return statuses.map((s) => {
+    return statuses.map((s, i) => {
+        let settled = s.input.payments
+            .filter((p) => p.concept === "debt settlement")
+            .reduce((sum, p) => sum + p.amount, 0);
+        for (const d of closed) {
+            const take = Math.min(d.amount, settled);
+            d.amount -= take;
+            settled -= take;
+        }
+
         const r = ledgerMonth(
             state,
             s.input,
             priceFor(prices, s.month),
             player,
         );
+        const isLast = i === statuses.length - 1;
+        const monthDebt: MonthDebt | null = r.pending > 0
+            ? {
+                month: s.month,
+                amount: r.pending,
+                charged: r.pending,
+                sources: sourcesOf(r, s.sessionPrice, false),
+            }
+            : null;
+        const debtMonths = closed.filter((d) => d.amount > 0).map((d) => ({ ...d }));
+
+        // What this month leaves owing once it closes: its pending, less what
+        // the close forgives.
+        if (!isLast) {
+            const added = r.pending - r.shortfalls
+                .filter((f) => f.forgivable)
+                .reduce((sum, f) => sum + f.short, 0);
+            if (added > 0) {
+                closed.push({
+                    month: s.month,
+                    amount: added,
+                    charged: added,
+                    sources: sourcesOf(r, s.sessionPrice, true),
+                });
+            }
+        }
+
         const row = {
             ...s,
             boughtMonth: r.pending === 0 &&
@@ -358,6 +460,8 @@ export function computeLedger(
                 .filter((p) => p.concept === "debt settlement")
                 .reduce((sum, p) => sum + p.amount, 0)),
             pending: r.pending,
+            debtMonths,
+            monthDebt,
         };
         state = r.next;
         return row;
