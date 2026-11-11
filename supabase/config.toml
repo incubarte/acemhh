@@ -319,3 +319,7 @@ verify_jwt = false
 
 [functions.debt-reminders]
 verify_jwt = false
+
+# Called by the payments trigger, with the same x-reminders-secret.
+[functions.payment-receipts]
+verify_jwt = false

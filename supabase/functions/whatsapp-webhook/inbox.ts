@@ -77,6 +77,11 @@ export function reminderPost(sentOn: string, text: string): string {
     return `📤 Recordatorio que le mandó el club el ${shortDate(sentOn)}:\n\n${text}`;
 }
 
+/** A payment receipt the club sent, shown the same way. */
+export function receiptPost(sentOn: string, text: string): string {
+    return `📤 Aviso de pago que le mandó el club el ${shortDate(sentOn)}:\n\n${text}`;
+}
+
 /** What the person wrote. */
 export function inboundPost(kind: string, text: string | null): string {
     return `📩 ${

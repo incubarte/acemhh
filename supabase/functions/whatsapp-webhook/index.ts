@@ -31,12 +31,14 @@ import {
     inboundPost,
     type InboxSender,
     keepsOutOfInbox,
+    receiptPost,
     reminderPost,
     startsNewConversation,
 } from "./inbox.ts";
 import { ensureTopic, findTopic, inboxConfig, postToTopic } from "./topics.ts";
 import { applyStatus } from "./marks.ts";
 import { renderReminder } from "../_shared/reminderTemplate.ts";
+import { renderReceipt } from "../_shared/receiptTemplate.ts";
 import { CustomerWindowMs } from "../_lib/whatsapp.ts";
 
 const GraphVersionDefault = "v23.0";
@@ -472,7 +474,7 @@ type InboxOutcome = {
 
 /**
  * Hands the message to the number's topic in the club's Telegram group,
- * opening, reopening or reusing it. Reminders the person got and the topic has
+ * opening, reopening or reusing it. Reminders and receipts the person got and the topic has
  * not shown yet go first, so the reply reads in context. Never throws: the
  * sender still gets their reply when the group is unreachable.
  */
@@ -492,16 +494,24 @@ async function forwardToInbox(
         const known = await findTopic(supabaseAdmin, incoming.waId);
         clubAnswering = clubIsAnswering(known?.last_club_at ?? null, now, CustomerWindowMs);
 
-        const { data: pending, error } = await supabaseAdmin
-            .from("whatsapp_reminders")
-            .select("id,sent_on,params")
-            .eq("wa_id", incoming.waId)
-            .eq("status", "sent")
-            .is("shown_in_topic_at", null)
-            .order("sent_on")
-            .order("id");
-        if (error) console.error("Inbox reminder lookup failed:", error);
-        const reminders = pending ?? [];
+        // What the club sent this number and the topic has not shown yet —
+        // reminders and payment receipts — oldest first.
+        const unshown = (table: "whatsapp_reminders" | "whatsapp_receipts") =>
+            supabaseAdmin.from(table)
+                .select("id,created_at,params")
+                .eq("wa_id", incoming.waId)
+                .eq("status", "sent")
+                .is("shown_in_topic_at", null);
+        const [reminderRows, receiptRows] = await Promise.all([
+            unshown("whatsapp_reminders"),
+            unshown("whatsapp_receipts"),
+        ]);
+        if (reminderRows.error) console.error("Inbox reminder lookup failed:", reminderRows.error);
+        if (receiptRows.error) console.error("Inbox receipt lookup failed:", receiptRows.error);
+        const sentByClub = [
+            ...(reminderRows.data ?? []).map((r) => ({ ...r, table: "whatsapp_reminders" as const })),
+            ...(receiptRows.data ?? []).map((r) => ({ ...r, table: "whatsapp_receipts" as const })),
+        ].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
 
         const self = players.find((p) => p.relation === "self");
         const sender: InboxSender = self
@@ -518,13 +528,18 @@ async function forwardToInbox(
         if (known && startsNewConversation(known.last_inbound_at, known.last_club_at, now, CustomerWindowMs)) {
             await post(conversationSeparator(todayInBA(now)));
         }
-        for (const r of reminders) {
+        for (const r of sentByClub) {
             const params = Array.isArray(r.params) ? r.params.map(String) : [];
-            await post(reminderPost(String(r.sent_on), renderReminder(params)));
-            const marked = await supabaseAdmin.from("whatsapp_reminders")
+            const day = todayInBA(new Date(String(r.created_at)));
+            await post(
+                r.table === "whatsapp_reminders"
+                    ? reminderPost(day, renderReminder(params))
+                    : receiptPost(day, renderReceipt(params)),
+            );
+            const marked = await supabaseAdmin.from(r.table)
                 .update({ shown_in_topic_at: now.toISOString() })
                 .eq("id", r.id);
-            if (marked.error) console.error("Reminder mark failed:", marked.error);
+            if (marked.error) console.error("Inbox mark failed:", marked.error);
         }
         await post(inboundPost(incoming.kind, incoming.text));
 

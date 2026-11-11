@@ -221,6 +221,66 @@ Para ver qué salió: `select * from whatsapp_reminders order by created_at desc
 Las corridas del cron: `select * from cron.job_run_details order by start_time desc;`
 Las respuestas de la función: `select * from net._http_response order by created desc;`
 
+## Aviso de pago registrado
+
+Cada pago que se registra, desde el dashboard o desde el bot, le manda un
+WhatsApp al jugador y a su tutor (una vez por teléfono) con lo que se registró y
+lo que queda debiendo de entrenamientos. Avisan todos los conceptos:
+entrenamiento, mes, medio mes, pago de deuda, matrícula y torneo. Las becas
+completas también lo reciben (pagan matrícula y torneos), con saldo `$0`.
+
+Lo dispara un trigger en `payments` (`payments_whatsapp_receipt`), que llama a la
+función `payment-receipts` por `pg_net` con el id del pago. El pedido sale recién
+cuando el insert hace commit. Usa la misma URL y el mismo secreto del vault que el
+cron de los recordatorios (`project_url`, `debt_reminders_secret`); sin ellos no
+llama a nadie. Un insert de más de 5 pagos juntos no avisa: eso es una carga o
+una migración, no alguien cobrando. El trigger nunca hace fallar el insert.
+
+`whatsapp_receipts` guarda una fila por (pago, teléfono): qué se le dijo y si Meta
+lo aceptó. Llamar dos veces por el mismo pago no escribe dos veces, y un envío
+fallido se reintenta. Un pago borrado antes de que llegue la llamada no avisa;
+uno borrado después ya avisó.
+
+### El template
+
+En **WhatsApp Manager > Message templates**:
+
+- Nombre: `pago_registrado`, categoría **Utility**, idioma **Spanish (ARG)** (`es_AR`)
+- Header, de tipo texto y sin variables: `Pago registrado`
+- Cuerpo:
+
+  ```
+  Hola! Te escribimos del club para avisarte que registramos en {{1}} un pago de {{2}}. Saldo pendiente de entrenamientos: {{3}}. Si algo no coincide, respondé este mensaje y lo revisamos.
+  ```
+
+- Ejemplos para la revisión: `{{1}}` = `tu cuenta`, `{{2}}` = `$35.000 (entrenamiento del 12/11)`, `{{3}}` = `$0`
+
+Sin footer y sin botones. `{{1}}` es `tu cuenta` o `la cuenta de <nombre>`. `{{2}}`
+es el monto y el concepto: `entrenamiento del 12/11`, `mes de noviembre de las
+22hs`, `medio mes de noviembre de las 22hs`, `pago de deuda`, `matrícula`,
+`torneo Clausura 2026` (`… completo` si es el pago anticipado). `{{3}}` es la
+deuda de entrenamientos después del pago, mes por mes como en el recordatorio, o
+`$0`. El texto está copiado en `supabase/functions/_shared/receiptTemplate.ts`
+para el topic: si cambia en Meta, cambia ahí. Otro nombre o idioma:
+`WHATSAPP_RECEIPT_TEMPLATE` / `WHATSAPP_RECEIPT_LANGUAGE`. Hasta que esté
+aprobado, cada envío falla y queda `failed`.
+
+### Puesta en producción
+
+1. Crear el template y esperar que esté **Active**. El trigger ya está andando
+   desde el `db push`: mientras tanto los avisos fallan y quedan `failed` (no se
+   reintentan solos).
+2. `supabase db push` y `supabase functions deploy payment-receipts whatsapp-webhook`.
+3. Probar con un pago existente, sin mandar nada:
+
+   ```
+   curl -s -X POST 'https://<ref>.supabase.co/functions/v1/payment-receipts' \
+     -H "x-reminders-secret: $SECRET" -H 'content-type: application/json' \
+     -d '{"payment_id": "<uuid>", "dry": true}'
+   ```
+
+Para ver qué salió: `select * from whatsapp_receipts order by created_at desc;`
+
 ## Las conversaciones, en un grupo de Telegram con topics
 
 El número vive en la Cloud API y no se puede abrir desde la app. Las
@@ -233,8 +293,8 @@ lo reabre. Si alguien lo borró, crea otro. Después publica, en este orden:
 
 1. un separador `━━━━  12/11  ━━━━`, si en el topic no hubo movimiento en las
    últimas 24h: marca dónde empieza una conversación nueva;
-2. los recordatorios que esa persona recibió y el topic todavía no mostró, con el
-   texto exacto que le llegó;
+2. los recordatorios y avisos de pago que esa persona recibió y el topic todavía
+   no mostró, con el texto exacto que le llegó;
 3. su mensaje. De un audio o una imagen solo llega el aviso.
 
 **Un recordatorio no abre topic.** Se muestra la primera vez que la persona
