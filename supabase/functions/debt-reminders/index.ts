@@ -146,13 +146,20 @@ async function run(s: SupabaseClient, date: string, dry: boolean) {
         ));
     }
 
-    if (dry) return { date, dry, count: reminders.length, reminders };
+    const names = new Map(players.map((p) => [p.id, `${p.name} ${p.last_name}`.trim()]));
+    if (dry) {
+        return {
+            date,
+            dry,
+            count: reminders.length,
+            reminders: reminders.map((r) => ({ player: names.get(r.playerId) ?? null, ...r })),
+        };
+    }
 
     const template = {
         name: Deno.env.get("WHATSAPP_REMINDER_TEMPLATE") ?? "recordatorio_deuda",
         language: Deno.env.get("WHATSAPP_REMINDER_LANGUAGE") ?? "es_AR",
     };
-    const names = new Map(players.map((p) => [p.id, `${p.name} ${p.last_name}`.trim()]));
     const summary: SummaryRow[] = [];
     let sent = 0, failed = 0, skipped = 0;
     for (const r of reminders) {
