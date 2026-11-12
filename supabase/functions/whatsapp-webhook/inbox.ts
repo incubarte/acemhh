@@ -82,13 +82,10 @@ export function receiptPost(sentOn: string, text: string): string {
     return `📤 Aviso de pago que le mandó el club el ${shortDate(sentOn)}:\n\n${text}`;
 }
 
-/** What the person wrote. */
-export function inboundPost(kind: string, text: string | null): string {
-    return `📩 ${
-        text
-            ? text
-            : `(mandó ${KIND_WORDS[kind] ?? `un mensaje de tipo ${kind}`}, que no se puede reenviar)`
-    }`;
+/** What the person wrote; for what is not text, what it was and why it is
+ * not here. */
+export function inboundPost(kind: string, text: string | null, why = "no se puede reenviar"): string {
+    return `📩 ${text ? text : `(mandó ${KIND_WORDS[kind] ?? `un mensaje de tipo ${kind}`}, que ${why})`}`;
 }
 
 /** What the bot says in the topic when the club's message did not go out. */

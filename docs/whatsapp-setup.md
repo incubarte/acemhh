@@ -295,7 +295,20 @@ lo reabre. Si alguien lo borró, crea otro. Después publica, en este orden:
    últimas 24h: marca dónde empieza una conversación nueva;
 2. los recordatorios y avisos de pago que esa persona recibió y el topic todavía
    no mostró, con el texto exacto que le llegó;
-3. su mensaje. De un audio o una imagen solo llega el aviso.
+3. su mensaje. Las fotos, audios, videos, documentos y stickers se descargan de
+   Meta y se suben al topic, así que se ven y se escuchan ahí. Llevan `📩` y el
+   texto que traían. Lo que Telegram no muestra en su formato (un audio `.amr`,
+   un video `.3gp`, un sticker animado) se sube como documento. Si pesa más de
+   50 MB, el límite de Telegram, o no se pudo descargar, llega solo el aviso. Una
+   ubicación llega como link a Google Maps, y un contacto con su nombre y teléfono.
+
+**Las reacciones** llegan como respuesta al mensaje del topic al que reaccionó,
+sea suyo o del club: `📩 reaccionó 👍`, o `📩 sacó su reacción`. Si reaccionó a un
+recordatorio o a un aviso de pago, lo dice ("al recordatorio del 12/11"), y si
+fue a una respuesta automática del bot, "a un mensaje automático del club". Una
+reacción no recibe la respuesta automática, y no cuenta para la ventana de 24h.
+`whatsapp_inbox_posts` guarda en qué mensaje del topic quedó cada mensaje
+entrante, para poder responderlo.
 
 **Un recordatorio no abre topic.** Se muestra la primera vez que la persona
 escribe después de recibirlo. Si nunca contesta, el único rastro en Telegram es

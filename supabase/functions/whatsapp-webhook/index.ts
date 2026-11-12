@@ -35,11 +35,25 @@ import {
     reminderPost,
     startsNewConversation,
 } from "./inbox.ts";
-import { ensureTopic, findTopic, inboxConfig, postToTopic } from "./topics.ts";
+import { deliverToTopic, ensureTopic, findTopic, type InboxConfig, inboxConfig, postToTopic } from "./topics.ts";
+import {
+    type InboundMedia,
+    type InboundReaction,
+    mediaCaption,
+    mediaOf,
+    reactionOf,
+    reactionPost,
+    type ReactionTarget,
+    sharedText,
+    TelegramUploadLimit,
+    uploadFor,
+    uploadName,
+} from "./media.ts";
+import { telegramUpload } from "../_lib/telegram.ts";
 import { applyStatus } from "./marks.ts";
 import { renderReminder } from "../_shared/reminderTemplate.ts";
 import { renderReceipt } from "../_shared/receiptTemplate.ts";
-import { CustomerWindowMs } from "../_lib/whatsapp.ts";
+import { CustomerWindowMs, downloadWhatsappMedia } from "../_lib/whatsapp.ts";
 
 const GraphVersionDefault = "v23.0";
 
@@ -66,6 +80,12 @@ type Incoming = {
     replyId: string | null;
     /** WhatsApp message type: "text", "audio", "image", "button", … */
     kind: string;
+    /** The file of an image, audio, video, document or sticker. */
+    media: InboundMedia | null;
+    /** A reaction: which message, and the emoji. */
+    reaction: InboundReaction | null;
+    /** A shared location or contact card, as text. */
+    shared: string | null;
 };
 
 /** A dashboard admin, resolved from the sender's phone. id is the users.id uuid. */
@@ -277,7 +297,17 @@ function toIncoming(message: any, contacts: any[]): Incoming | null {
         text = message.button?.text ?? null;
     }
 
-    return { waId, messageId, profileName, text, replyId, kind: String(message.type ?? "unknown") };
+    return {
+        waId,
+        messageId,
+        profileName,
+        text,
+        replyId,
+        kind: String(message.type ?? "unknown"),
+        media: mediaOf(message),
+        reaction: reactionOf(message),
+        shared: sharedText(message),
+    };
 }
 
 /** Returns false if this message id was already handled. */
@@ -383,6 +413,12 @@ async function handleIncoming(incoming: Incoming) {
         lookupPlayers(incoming.waId),
     ]);
     const self = players.find((p) => p.relation === "self") ?? null;
+
+    // A reaction is not a question: it goes to the topic, and gets no reply.
+    if (incoming.reaction) {
+        await forwardToInbox(incoming, players);
+        return;
+    }
 
     // "//" keeps the message out of the group — an admin asking for their
     // login link, say. It gets the usual reply, whatever the topic is doing.
@@ -521,8 +557,10 @@ async function forwardToInbox(
             : { kind: "unknown" };
 
         let thread = await ensureTopic(supabaseAdmin, cfg, incoming.waId, sender, known);
-        const post = async (text: string) => {
-            thread = await postToTopic(supabaseAdmin, cfg, incoming.waId, sender, thread, text);
+        const post = async (text: string, replyTo: number | null = null) => {
+            const posted = await postToTopic(supabaseAdmin, cfg, incoming.waId, sender, thread, text, replyTo);
+            thread = posted.thread;
+            return posted.messageId;
         };
 
         if (known && startsNewConversation(known.last_inbound_at, known.last_club_at, now, CustomerWindowMs)) {
@@ -541,7 +579,34 @@ async function forwardToInbox(
                 .eq("id", r.id);
             if (marked.error) console.error("Inbox mark failed:", marked.error);
         }
-        await post(inboundPost(incoming.kind, incoming.text));
+        if (incoming.reaction) {
+            const target = await reactionTarget(cfg, incoming.reaction.messageId, thread);
+            await post(
+                reactionPost(incoming.reaction, target.kind === "reply" ? { kind: "topic" } : target),
+                target.kind === "reply" ? target.messageId : null,
+            );
+            // Not touching last_inbound_at: whether a reaction opens Meta's
+            // 24h window is not documented, and a refused reply is worse.
+            return { forwarded: true, clubAnswering };
+        }
+
+        let messageId: number | null;
+        if (incoming.media) {
+            const posted = await postMedia(cfg, incoming.waId, sender, thread, incoming.media);
+            thread = posted.thread;
+            messageId = posted.messageId;
+        } else {
+            messageId = await post(incoming.shared ? `📩 ${incoming.shared}` : inboundPost(incoming.kind, incoming.text));
+        }
+        if (messageId !== null) {
+            const recorded = await supabaseAdmin.from("whatsapp_inbox_posts").upsert({
+                wamid: incoming.messageId,
+                chat_id: cfg.chatId,
+                thread_id: thread,
+                message_id: messageId,
+            });
+            if (recorded.error) console.error("Inbox post record failed:", recorded.error);
+        }
 
         const touched = await supabaseAdmin.from("whatsapp_inbox_topics")
             .update({ last_inbound_at: now.toISOString() })
@@ -552,6 +617,69 @@ async function forwardToInbox(
         console.error("Inbox forward failed:", e);
         return { forwarded: false, clubAnswering };
     }
+}
+
+/**
+ * The file they sent, re-uploaded to the topic so it plays or shows there.
+ * What Telegram refuses in its own kind goes again as a document; what cannot
+ * be downloaded or is past Telegram's limit becomes a line saying so.
+ */
+async function postMedia(
+    cfg: InboxConfig,
+    waId: string,
+    sender: InboxSender,
+    thread: number,
+    media: InboundMedia,
+): Promise<{ thread: number; messageId: number | null }> {
+    const file = await downloadWhatsappMedia(media.id, TelegramUploadLimit);
+    if (!file.ok) {
+        console.error(`Media ${media.id} not forwarded:`, file.error);
+        const why = file.tooLarge ? "es demasiado grande para reenviar" : "no se pudo reenviar";
+        const caption = media.caption ? `\n${media.caption}` : "";
+        return postToTopic(supabaseAdmin, cfg, waId, sender, thread, `${inboundPost(media.kind, null, why)}${caption}`);
+    }
+
+    const name = uploadName(media);
+    const upload = (method: string, field: string) => (t: number) =>
+        telegramUpload<{ message_id: number }>(cfg.token, method, {
+            chat_id: cfg.chatId,
+            message_thread_id: t,
+            caption: field === "sticker" ? null : mediaCaption(media),
+        }, { field, blob: file.blob!, name });
+
+    const { method, field } = uploadFor(media);
+    try {
+        return await deliverToTopic(supabaseAdmin, cfg, waId, sender, thread, upload(method, field));
+    } catch (e) {
+        if (method === "sendDocument") throw e;
+        console.error(`${method} refused, sending as a document:`, e);
+        return await deliverToTopic(supabaseAdmin, cfg, waId, sender, thread, upload("sendDocument", "document"));
+    }
+}
+
+/** Where a reaction goes: as a reply to its message when that is in the
+ * topic, otherwise naming what it was on. */
+async function reactionTarget(
+    cfg: InboxConfig,
+    wamid: string,
+    thread: number,
+): Promise<{ kind: "reply"; messageId: number } | Exclude<ReactionTarget, { kind: "topic" }>> {
+    for (const table of ["whatsapp_inbox_posts", "whatsapp_relay_marks"] as const) {
+        const { data } = await supabaseAdmin.from(table)
+            .select("chat_id,thread_id,message_id")
+            .eq("wamid", wamid)
+            .maybeSingle();
+        if (data && data.chat_id === cfg.chatId && Number(data.thread_id) === thread) {
+            return { kind: "reply", messageId: Number(data.message_id) };
+        }
+    }
+    const [reminder, receipt] = await Promise.all([
+        supabaseAdmin.from("whatsapp_reminders").select("sent_on").eq("wamid", wamid).maybeSingle(),
+        supabaseAdmin.from("whatsapp_receipts").select("created_at").eq("wamid", wamid).maybeSingle(),
+    ]);
+    if (reminder.data) return { kind: "reminder", sentOn: String(reminder.data.sent_on) };
+    if (receipt.data) return { kind: "receipt", sentOn: todayInBA(new Date(String(receipt.data.created_at))) };
+    return { kind: "other" };
 }
 
 function todayInBA(now: Date): string {

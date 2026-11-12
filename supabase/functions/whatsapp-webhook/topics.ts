@@ -2,7 +2,7 @@
 // and reopening them, and posting into them. The wording lives in inbox.ts.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isMissingThread, telegramCall, telegramTruncate } from "../_lib/telegram.ts";
+import { isMissingThread, telegramCall, type TelegramResult, telegramTruncate } from "../_lib/telegram.ts";
 import { type InboxSender, topicIntro, topicName } from "./inbox.ts";
 
 export type InboxConfig = { token: string; chatId: string };
@@ -91,33 +91,54 @@ export async function ensureTopic(
     return openTopic(s, cfg, waId, sender);
 }
 
+export type Posted = { thread: number; messageId: number | null };
+
+/** One attempt at a post, into the given thread. */
+export type TopicSend = (thread: number) => Promise<TelegramResult<{ message_id: number }>>;
+
 /**
  * Posts into the number's topic. If somebody deleted the topic, a new one is
- * opened and the post goes there. Returns the thread it landed in.
+ * opened and the post goes there. Returns the thread it landed in, and the
+ * message, so a reaction to it later can answer it.
  */
-export async function postToTopic(
+export async function deliverToTopic(
+    s: SupabaseClient,
+    cfg: InboxConfig,
+    waId: string,
+    sender: InboxSender,
+    threadId: number,
+    send: TopicSend,
+): Promise<Posted> {
+    const first = await send(threadId);
+    if (first.ok) return { thread: threadId, messageId: first.result?.message_id ?? null };
+    if (!isMissingThread(first.description)) throw new Error("telegram: " + first.description);
+
+    await s.from("whatsapp_inbox_topics").delete().eq("wa_id", waId).eq("thread_id", threadId);
+    const fresh = await openTopic(s, cfg, waId, sender);
+    const second = await send(fresh);
+    if (!second.ok) throw new Error("telegram: " + second.description);
+    return { thread: fresh, messageId: second.result?.message_id ?? null };
+}
+
+/** A text post: see deliverToTopic. `replyTo` answers a message in the
+ * thread, and is dropped if the thread had to be opened again. */
+export function postToTopic(
     s: SupabaseClient,
     cfg: InboxConfig,
     waId: string,
     sender: InboxSender,
     threadId: number,
     text: string,
-): Promise<number> {
-    const send = (thread: number) =>
-        telegramCall(cfg.token, "sendMessage", {
+    replyTo: number | null = null,
+): Promise<Posted> {
+    return deliverToTopic(s, cfg, waId, sender, threadId, (thread) =>
+        telegramCall<{ message_id: number }>(cfg.token, "sendMessage", {
             chat_id: cfg.chatId,
             message_thread_id: thread,
             text: telegramTruncate(text),
             link_preview_options: { is_disabled: true },
-        });
-
-    const first = await send(threadId);
-    if (first.ok) return threadId;
-    if (!isMissingThread(first.description)) throw new Error("sendMessage: " + first.description);
-
-    await s.from("whatsapp_inbox_topics").delete().eq("wa_id", waId).eq("thread_id", threadId);
-    const fresh = await openTopic(s, cfg, waId, sender);
-    const second = await send(fresh);
-    if (!second.ok) throw new Error("sendMessage: " + second.description);
-    return fresh;
+            ...(replyTo !== null && thread === threadId
+                ? { reply_parameters: { message_id: replyTo, allow_sending_without_reply: true } }
+                : {}),
+        }));
 }
