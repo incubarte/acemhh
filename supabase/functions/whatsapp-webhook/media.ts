@@ -144,11 +144,15 @@ export function reactionOf(message: any): InboundReaction | null {
     return { messageId: String(r.message_id), emoji: typeof r.emoji === "string" ? r.emoji : "" };
 }
 
-/** What the reaction was on, when it was not on a message in the topic. */
+/** What the reaction was on, when it is not a message of this topic to
+ * answer. Reminders and receipts are, once the topic showed them; until
+ * then — or in a topic that was deleted — the text names them. */
 export type ReactionTarget =
     | { kind: "topic" }
     | { kind: "reminder"; sentOn: string }
     | { kind: "receipt"; sentOn: string }
+    /** A message of a topic that no longer exists. */
+    | { kind: "earlier" }
     | { kind: "other" };
 
 /** YYYY-MM-DD → DD/MM. */
@@ -169,6 +173,8 @@ export function reactionPost(reaction: InboundReaction, target: ReactionTarget):
             return `${what} al recordatorio del ${shortDate(target.sentOn)}`;
         case "receipt":
             return `${what} al aviso de pago del ${shortDate(target.sentOn)}`;
+        case "earlier":
+            return `${what} a un mensaje anterior de la conversación`;
         case "other":
             return `${what} a un mensaje automático del club`;
     }

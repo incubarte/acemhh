@@ -65,6 +65,7 @@ Deno.test("reactionPost: la reacción, y a qué fue", () => {
     assertEquals(reactionPost(r, { kind: "topic" }), "📩 reaccionó 👍");
     assertEquals(reactionPost(r, { kind: "reminder", sentOn: "2026-11-12" }), "📩 reaccionó 👍 al recordatorio del 12/11");
     assertEquals(reactionPost(r, { kind: "receipt", sentOn: "2026-11-13" }), "📩 reaccionó 👍 al aviso de pago del 13/11");
+    assertEquals(reactionPost(r, { kind: "earlier" }), "📩 reaccionó 👍 a un mensaje anterior de la conversación");
     assertEquals(reactionPost(r, { kind: "other" }), "📩 reaccionó 👍 a un mensaje automático del club");
     const removed = reactionOf({ type: "reaction", reaction: { message_id: "wamid.1" } })!;
     assertEquals(reactionPost(removed, { kind: "topic" }), "📩 sacó su reacción");

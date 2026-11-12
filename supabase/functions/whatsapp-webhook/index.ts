@@ -534,7 +534,7 @@ async function forwardToInbox(
         // reminders and payment receipts — oldest first.
         const unshown = (table: "whatsapp_reminders" | "whatsapp_receipts") =>
             supabaseAdmin.from(table)
-                .select("id,created_at,params")
+                .select("id,created_at,params,wamid")
                 .eq("wa_id", incoming.waId)
                 .eq("status", "sent")
                 .is("shown_in_topic_at", null);
@@ -569,11 +569,13 @@ async function forwardToInbox(
         for (const r of sentByClub) {
             const params = Array.isArray(r.params) ? r.params.map(String) : [];
             const day = todayInBA(new Date(String(r.created_at)));
-            await post(
+            const shownAs = await post(
                 r.table === "whatsapp_reminders"
                     ? reminderPost(day, renderReminder(params))
                     : receiptPost(day, renderReceipt(params)),
             );
+            // A reaction to it on the phone answers it here.
+            if (r.wamid) await recordPost(cfg, String(r.wamid), thread, shownAs);
             const marked = await supabaseAdmin.from(r.table)
                 .update({ shown_in_topic_at: now.toISOString() })
                 .eq("id", r.id);
@@ -598,15 +600,7 @@ async function forwardToInbox(
         } else {
             messageId = await post(incoming.shared ? `📩 ${incoming.shared}` : inboundPost(incoming.kind, incoming.text));
         }
-        if (messageId !== null) {
-            const recorded = await supabaseAdmin.from("whatsapp_inbox_posts").upsert({
-                wamid: incoming.messageId,
-                chat_id: cfg.chatId,
-                thread_id: thread,
-                message_id: messageId,
-            });
-            if (recorded.error) console.error("Inbox post record failed:", recorded.error);
-        }
+        await recordPost(cfg, incoming.messageId, thread, messageId);
 
         const touched = await supabaseAdmin.from("whatsapp_inbox_topics")
             .update({ last_inbound_at: now.toISOString() })
@@ -657,6 +651,18 @@ async function postMedia(
     }
 }
 
+/** Remembers which topic message shows a WhatsApp message, for reactions. */
+async function recordPost(cfg: InboxConfig, wamid: string, thread: number, messageId: number | null) {
+    if (messageId === null) return;
+    const recorded = await supabaseAdmin.from("whatsapp_inbox_posts").upsert({
+        wamid,
+        chat_id: cfg.chatId,
+        thread_id: thread,
+        message_id: messageId,
+    });
+    if (recorded.error) console.error("Inbox post record failed:", recorded.error);
+}
+
 /** Where a reaction goes: as a reply to its message when that is in the
  * topic, otherwise naming what it was on. */
 async function reactionTarget(
@@ -664,6 +670,7 @@ async function reactionTarget(
     wamid: string,
     thread: number,
 ): Promise<{ kind: "reply"; messageId: number } | Exclude<ReactionTarget, { kind: "topic" }>> {
+    let shownBefore = false;
     for (const table of ["whatsapp_inbox_posts", "whatsapp_relay_marks"] as const) {
         const { data } = await supabaseAdmin.from(table)
             .select("chat_id,thread_id,message_id")
@@ -672,6 +679,8 @@ async function reactionTarget(
         if (data && data.chat_id === cfg.chatId && Number(data.thread_id) === thread) {
             return { kind: "reply", messageId: Number(data.message_id) };
         }
+        // In a topic that is gone: somebody deleted it, or the inbox moved.
+        if (data) shownBefore = true;
     }
     const [reminder, receipt] = await Promise.all([
         supabaseAdmin.from("whatsapp_reminders").select("sent_on").eq("wamid", wamid).maybeSingle(),
@@ -679,7 +688,7 @@ async function reactionTarget(
     ]);
     if (reminder.data) return { kind: "reminder", sentOn: String(reminder.data.sent_on) };
     if (receipt.data) return { kind: "receipt", sentOn: todayInBA(new Date(String(receipt.data.created_at))) };
-    return { kind: "other" };
+    return { kind: shownBefore ? "earlier" : "other" };
 }
 
 function todayInBA(now: Date): string {

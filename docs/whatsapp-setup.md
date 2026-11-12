@@ -302,13 +302,15 @@ lo reabre. Si alguien lo borró, crea otro. Después publica, en este orden:
    50 MB, el límite de Telegram, o no se pudo descargar, llega solo el aviso. Una
    ubicación llega como link a Google Maps, y un contacto con su nombre y teléfono.
 
-**Las reacciones** llegan como respuesta al mensaje del topic al que reaccionó,
-sea suyo o del club: `📩 reaccionó 👍`, o `📩 sacó su reacción`. Si reaccionó a un
-recordatorio o a un aviso de pago, lo dice ("al recordatorio del 12/11"), y si
-fue a una respuesta automática del bot, "a un mensaje automático del club". Una
-reacción no recibe la respuesta automática, y no cuenta para la ventana de 24h.
-`whatsapp_inbox_posts` guarda en qué mensaje del topic quedó cada mensaje
-entrante, para poder responderlo.
+**Las reacciones** llegan como respuesta al mensaje del topic al que reaccionó:
+`📩 reaccionó 👍`, o `📩 sacó su reacción`. Sirve para lo que mandó la persona, lo
+que el club le escribió desde el topic, y los recordatorios y avisos de pago (si
+el topic todavía no los mostraba, los muestra antes de la reacción). Las
+respuestas automáticas del bot no están en el topic, así que esas reacciones
+dicen "a un mensaje automático del club"; las de un topic que se borró, "a un
+mensaje anterior de la conversación". Una reacción no recibe la respuesta
+automática, y no cuenta para la ventana de 24h. `whatsapp_inbox_posts` guarda en
+qué mensaje del topic quedó cada uno, para poder responderlo.
 
 **Un recordatorio no abre topic.** Se muestra la primera vez que la persona
 escribe después de recibirlo. Si nunca contesta, el único rastro en Telegram es
