@@ -87,7 +87,7 @@ Deno.test("startsNewConversation: después de 24h sin movimiento va el separador
     assertEquals(startsNewConversation(ago(HOUR), null, NOW, DAY), false);
     // A topic with nothing on record has nothing to separate from.
     assertEquals(startsNewConversation(null, null, NOW, DAY), false);
-    assertEquals(conversationSeparator("2026-11-12"), "━━━━━━━━  12/11  ━━━━━━━━");
+    assertEquals(conversationSeparator("2026-11-12"), "━━━━━  12/11  ━━━━━");
 });
 
 Deno.test("reminderSummary: enviados y fallidos, para el General", () => {

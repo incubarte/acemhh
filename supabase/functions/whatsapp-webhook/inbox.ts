@@ -134,7 +134,7 @@ export function reminderSummary(date: string, rows: SummaryRow[]): string {
 /** Marks where a new conversation starts in a topic that already had one.
  * Telegram has no rule element; a line of box-drawing characters reads as one. */
 export function conversationSeparator(date: string): string {
-    return `━━━━━━━━  ${shortDate(date)}  ━━━━━━━━`;
+    return `━━━━━  ${shortDate(date)}  ━━━━━`;
 }
 
 /** A topic's last conversation is over once nothing moved in it for the
