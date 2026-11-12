@@ -22,8 +22,6 @@ export const POST = withPermission('api', '/api/torneos/pago', 'POST', async (se
       amount?: number;
       concept?: TournamentConcept;
       notes?: string | null;
-      /** Paid by transfer to the club's account: it enters no caja. */
-      transfer?: boolean;
       confirm_duplicate?: boolean;
     };
     if (!body?.player_id || body?.amount === undefined) {
@@ -114,9 +112,8 @@ export const POST = withPermission('api', '/api/torneos/pago', 'POST', async (se
       // se cobró. La columna es obligatoria para todos los conceptos.
       month: today,
       amount,
-      // En efectivo, salvo que diga transferencia: suma a la caja de quien lo
-      // registra.
-      is_cash: body.transfer !== true,
+      // En efectivo, como todo lo que no es matrícula: suma a la caja de quien
+      // lo registra.
       notes: cleanNotes(body.notes),
     }]);
     if (error) {

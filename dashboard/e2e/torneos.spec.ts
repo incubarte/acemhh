@@ -300,29 +300,6 @@ test("el torneo anticipado deja todo en verde", async ({ page }) => {
   });
 });
 
-test("una cuota por transferencia queda al banco, no en la caja", async ({ page }) => {
-  await page.goto(`/torneos/equipos/${teams.get(TEAM_NEW)}`);
-  await page.locator(`[data-player-row="${players.get("Nada")}"]`).click();
-  await page.getByTestId("register-payment").click();
-  const modal = page.getByTestId("payment-modal");
-  await modal.getByTestId("custom-toggle").click();
-  await modal.getByTestId("custom-amount").fill("20");
-  await modal.getByTestId("custom-ok").click();
-  // Folded away like the note, and it can be undone before confirming.
-  await expect(modal.getByTestId("transfer-on")).toHaveCount(0);
-  await modal.getByTestId("transfer-toggle").click();
-  await modal.getByTestId("transfer-off").click();
-  await modal.getByTestId("transfer-toggle").click();
-  await expect(modal.getByTestId("transfer-on")).toBeVisible();
-  await modal.getByTestId("confirm-payment").click();
-  await expect(page.getByTestId("payment-toast")).toBeVisible();
-
-  // Nada already paid $45k in cash in an earlier test: only this one is a transfer.
-  const { data } = await admin().from("payments").select("amount,is_cash")
-    .eq("player_id", players.get("Nada")!).eq("is_cash", false);
-  expect(data!.map((p) => Number(p.amount))).toEqual([20000]);
-});
-
 test("tocar afuera cierra el popup y deja el drawer; otro toque afuera cierra el drawer", async ({ page }) => {
   await page.goto(`/torneos/equipos/${teams.get(TEAM_NEW)}`);
   await page.locator(`[data-player-row="${players.get("Nada")}"] [role="button"]`).click();

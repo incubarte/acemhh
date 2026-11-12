@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * Marks a payment as paid by transfer to the club's account, folded away
- * behind "+ transferencia" like the note: almost every payment is cash. A
+ * Marks a payment as paid by transfer to ACEMHH's bank account, folded away
+ * behind "+ transf banco ACEMHH" like the note: almost every payment is cash. A
  * transfer is listed in the caja as "(banco)" and adds to nobody's caja.
  */
 export default function TransferField({ value, onChange }: {
@@ -27,14 +27,14 @@ export default function TransferField({ value, onChange }: {
         onClick={() => onChange(true)}
         style={{ ...subtle, opacity: 0.7 }}
       >
-        + transferencia
+        + transf banco ACEMHH
       </button>
     );
   }
 
   return (
     <span data-testid="transfer-on" style={{ fontSize: "0.85rem", display: "flex", gap: 8, alignItems: "center" }}>
-      🏦 Por transferencia: no suma a tu caja
+      🏦 transf banco ACEMHH: no suma a tu caja
       <button
         type="button"
         data-testid="transfer-off"

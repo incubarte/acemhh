@@ -85,10 +85,8 @@ plata y no puede vivir sólo en el botón.
 | `notes` | Opcional: lo que quien cobra quiera recordar en el arqueo. |
 
 La cuota se cobra en efectivo: suma a la caja de quien la registra, y la caja
-la lista como "torneo". La matrícula va siempre al banco. Cualquier otro pago
-también puede ir al banco si al cobrarlo se toca "+ transferencia": queda con
-`is_cash = false`, la caja lo lista como "(banco)" y no suma a la caja de nadie.
-Un pago que no lo dice toma lo que dice su concepto.
+la lista como "torneo". Siempre: el cobro de torneo no ofrece "+ transf banco
+ACEMHH" como el de entrenamiento.
 
 Todo lo que lee `payments` filtra por lista de conceptos, así que los pagos de
 torneo no entran al ledger de entrenamientos, al análisis ni a la credencial.
@@ -139,7 +137,7 @@ admite `cat-d` además de `cat-c`.
   45.000, como en la pantalla de entrenamientos. Sin botones de cancelar ni de
   volver: tocar afuera cierra el popup, y un pago registrado cierra todo, para
   seguir con el siguiente jugador.
-- La cuota se cobra en efectivo, salvo "+ transferencia". En Caja entra a la caja de quien la registró,
+- La cuota se cobra en efectivo. En Caja entra a la caja de quien la registró,
   y el filtro por tipo la separa de los cobros de entrenamiento y de las
   matrículas anuales.
 
