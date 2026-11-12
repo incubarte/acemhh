@@ -493,3 +493,36 @@ test("la nota de un cobro se lee al abrir su grupo en la caja", async ({ page })
   await line.click();
   await expect(page.getByTestId("caja-breakdown-note").filter({ hasText: note })).toBeVisible();
 });
+
+test("un cobro por transferencia se lista como banco y no mueve la caja de nadie", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  const me = await (await page.request.get("/api/me")).json() as { id: string };
+  const s = admin();
+  const { data: player } = await s.from("players")
+    .insert({ name: "__test-transfer", last_name: RECEIVER_NAME, dni: "99001106", categories: ["cat-b"], player_type: "player", trains: false, invitee: false })
+    .select("id").single();
+  const before = await (await page.request.get(`/api/caja?user=${me.id}`)).json();
+
+  const { error } = await s.from("payments").insert({
+    id: crypto.randomUUID(), player_id: player!.id, registered_by: "__test",
+    registered_by_user_id: me.id, concept: "session", slot_weekday: 4, slot_hour: 22,
+    session: "2026-08-13 22hs", month: "2026-08", amount: 15000, is_cash: false,
+    created_at: "2026-08-14T01:00:00Z",
+  });
+  if (error) throw new Error(JSON.stringify(error));
+
+  const after = await (await page.request.get(`/api/caja?user=${me.id}&kind=training`)).json();
+  const entry = after.history.find((h: { items?: { player: string }[] }) =>
+    h.items?.some((i) => i.player === `${RECEIVER_NAME}, __test-transfer`));
+  expect(entry).toMatchObject({ is_cash: false, delta: 0, amount: 15000 });
+  const balanceOf = (c: { users: { id: string; balance: number }[] }) => c.users.find((u) => u.id === me.id)!.balance;
+  expect(balanceOf(after)).toBe(balanceOf(before));
+
+  // Without saying, a training payment is still cash.
+  const { data: plain } = await s.from("payments").insert({
+    id: crypto.randomUUID(), player_id: player!.id, registered_by: "__test",
+    registered_by_user_id: me.id, concept: "session", slot_weekday: 4, slot_hour: 22,
+    session: "2026-08-20 22hs", month: "2026-08", amount: 15000,
+  }).select("is_cash").single();
+  expect(plain!.is_cash).toBe(true);
+});

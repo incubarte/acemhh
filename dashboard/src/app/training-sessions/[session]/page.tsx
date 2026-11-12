@@ -10,6 +10,7 @@ import { usePageTitle } from "../../components/PageTitleContext";
 import { paymentThresholdOverride } from "@/lib/thresholds";
 import DebtBreakdown from "../../components/DebtBreakdown";
 import NoteField from "../../components/NoteField";
+import TransferField from "../../components/TransferField";
 import { postMoney } from "@/lib/postMoney";
 import type { PaymentConcept } from "@shared/tokens";
 
@@ -83,6 +84,7 @@ function TrainingSessionDetailContent() {
   const [customAmountMode, setCustomAmountMode] = useState<string | null>(null);
   const [customAmount, setCustomAmount] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
+  const [paymentTransfer, setPaymentTransfer] = useState(false);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [addInviteeStep, setAddInviteeStep] = useState<'choose' | 'selectCategory' | 'selectPlayer' | null>(null);
@@ -191,6 +193,7 @@ function TrainingSessionDetailContent() {
         amount,
         concept,
         notes: paymentNote.trim() || null,
+        transfer: paymentTransfer,
       });
 
       // Not sent: it was the same payment registered twice.
@@ -233,6 +236,7 @@ function TrainingSessionDetailContent() {
       setPaymentSuccess(true);
 
       setPaymentNote("");
+      setPaymentTransfer(false);
       setTimeout(() => {
         setPaymentSuccess(false);
         setPendingPayment(null);
@@ -249,6 +253,7 @@ function TrainingSessionDetailContent() {
     setExpandedPlayerId(null);
     setPendingPayment(null);
     setPaymentNote("");
+      setPaymentTransfer(false);
     setCustomAmountMode(null);
     setCustomAmount("");
     setPaymentProcessing(false);
@@ -546,6 +551,7 @@ function TrainingSessionDetailContent() {
                     <span style={{ fontSize: "0.9rem", display: "flex", flexDirection: "column", gap: 4 }}>
                       Registrar pago de ${formatArs(pendingPayment.amount)}?
                       <NoteField value={paymentNote} onChange={setPaymentNote} />
+                      <TransferField value={paymentTransfer} onChange={setPaymentTransfer} />
                     </span>
                     <div style={{ display: "flex", gap: 6 }}>
                       <button

@@ -307,3 +307,21 @@ test("el cobro guarda su nota, y el mismo cobro dos veces seguidas pide confirma
   // An empty note is no note.
   expect(rows!.map((r) => r.notes).sort()).toEqual(["me lo transfirieron", null]);
 });
+
+test("un cobro por transferencia queda al banco; sin decirlo, es efectivo", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  const url = `/api/training-sessions/${fx.session}/payment`;
+
+  const transfer = await page.request.post(url, {
+    data: { player_id: playerId, amount: 30000, concept: "session", transfer: true },
+  });
+  expect(transfer.status(), await transfer.text()).toBe(200);
+  const { data: first } = await admin().from("payments").select("is_cash").eq("player_id", playerId).single();
+  expect(first!.is_cash).toBe(false);
+
+  await clearPayments();
+  const cash = await pay(page, "session", 30000);
+  expect(cash.status(), await cash.text()).toBe(200);
+  const { data: second } = await admin().from("payments").select("is_cash").eq("player_id", playerId).single();
+  expect(second!.is_cash).toBe(true);
+});

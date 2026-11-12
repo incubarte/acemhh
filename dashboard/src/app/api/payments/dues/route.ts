@@ -63,8 +63,8 @@ export const POST = withPermission('api', '/api/payments/dues', 'POST', async (s
       concept: "membership dues",
       month,
       amount,
-      // Paid straight to the bank account: the concept alone keeps it out of
-      // the registering admin's caja.
+      // Paid straight to the bank account: never in the registering admin's caja.
+      is_cash: false,
       notes: cleanNotes(body.notes),
     },
   ]);

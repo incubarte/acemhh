@@ -347,12 +347,18 @@ test("el modal de cobro ofrece sesión, mes y otro, y confirma con el detalle", 
   await modal.getByText(/Sesión individual/).click();
   await expect(modal.getByText(/Sesión del/)).toBeVisible();
   await expect(modal.getByText(`$${k(PRICE)}`)).toBeVisible();
+  // Paid by transfer: it goes to the bank, not to the collector's caja.
+  await modal.getByTestId("transfer-toggle").click();
+  await expect(modal.getByTestId("transfer-on")).toBeVisible();
 
   await modal.getByRole("button", { name: "Confirmar" }).click();
   await expect(modal).toHaveCount(0);
 
   // The payment shows next to the name, and settles them.
   await expect(row.getByText(`(${k(PRICE)})`)).toBeVisible();
+  const { data: paid } = await admin().from("payments").select("is_cash")
+    .eq("player_id", ids.get("Fantasma") as string);
+  expect((paid ?? []).map((p) => p.is_cash)).toEqual([false]);
 });
 
 test("el pago aparece entre paréntesis sin esperar el refresh", async ({ page }) => {

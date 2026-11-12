@@ -11,6 +11,7 @@ import type { PaymentConcept } from "@shared/tokens";
 import { categoryLabel } from "@/lib/categories";
 import DebtBreakdown from "../../components/DebtBreakdown";
 import NoteField from "../../components/NoteField";
+import TransferField from "../../components/TransferField";
 import { postMoney } from "@/lib/postMoney";
 
 // Redesigned attendance & payments screen. Presence is expressed by the
@@ -619,11 +620,12 @@ function PaymentModal({
   sessionLabel: string;
   monthLabel: string;
   onClose: () => void;
-  onConfirm: (amount: number, concept: PaymentConcept, notes: string) => void;
+  onConfirm: (amount: number, concept: PaymentConcept, notes: string, transfer: boolean) => void;
   busy: boolean;
 }) {
   const [chosen, setChosen] = useState<{ amount: number; concept: PaymentConcept } | null>(null);
   const [notes, setNotes] = useState("");
+  const [transfer, setTransfer] = useState(false);
   const [custom, setCustom] = useState("");
   // "Otro..." has to say WHAT it is: the amount no longer decides.
   const [customConcept, setCustomConcept] = useState<PaymentConcept>("session");
@@ -793,6 +795,7 @@ function PaymentModal({
               </p>
               <div style={{ display: "flex", flexDirection: "column", marginTop: 10 }}>
                 <NoteField value={notes} onChange={setNotes} />
+                <TransferField value={transfer} onChange={setTransfer} />
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
                 <button
@@ -806,7 +809,7 @@ function PaymentModal({
                   className="btnPrimary"
                   style={{ flex: 1 }}
                   disabled={busy}
-                  onClick={() => onConfirm(chosen.amount, chosen.concept, notes)}
+                  onClick={() => onConfirm(chosen.amount, chosen.concept, notes, transfer)}
                 >
                   Confirmar
                 </button>
@@ -1185,6 +1188,7 @@ function TrainingSessionBetaContent() {
     amount: number,
     concept: PaymentConcept,
     notes: string,
+    transfer: boolean,
   ) => {
     setBusy(true);
     const res = await postMoney(`/api/training-sessions/${session}/payment`, {
@@ -1192,6 +1196,7 @@ function TrainingSessionBetaContent() {
       amount,
       concept,
       notes: notes.trim() || null,
+      transfer,
     });
     setBusy(false);
     // Not sent: it was the same payment registered twice.
@@ -1369,8 +1374,8 @@ function TrainingSessionBetaContent() {
           monthLabel={monthLabel}
           busy={busy}
           onClose={() => setPayModalPlayer(null)}
-          onConfirm={(amount, concept, notes) =>
-            registerPayment(payModalPlayer.id, amount, concept, notes)}
+          onConfirm={(amount, concept, notes, transfer) =>
+            registerPayment(payModalPlayer.id, amount, concept, notes, transfer)}
         />
       )}
 

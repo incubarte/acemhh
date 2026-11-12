@@ -35,6 +35,8 @@ export type IncomePayment = {
   /** What was paid for: decides the kind of income, whether it is cash and,
    * for money outside training, what the entry is called. */
   concept?: string;
+  /** Whether it was collected in hand. Missing, the concept's usual answer. */
+  is_cash?: boolean | null;
   /** For the group's breakdown: which payment, whose, and what the collector
    * wrote on it. */
   id?: string;
@@ -42,10 +44,15 @@ export type IncomePayment = {
   notes?: string | null;
 };
 
-/** Membership dues are paid straight to the bank account; everything else is
- * collected in hand and enters the caja of whoever registered it. */
+/** The usual answer: membership dues are paid straight to the bank account;
+ * everything else is collected in hand and enters the caja of whoever
+ * registered it. A payment by transfer says otherwise in its own is_cash. */
 export function isCashConcept(concept: string | undefined): boolean {
   return concept !== "membership dues";
+}
+
+export function isCashPayment(p: { concept?: string; is_cash?: boolean | null }): boolean {
+  return p.is_cash ?? isCashConcept(p.concept);
 }
 
 /** The kinds of money that come in: training (sessions, months, debt), the
@@ -104,7 +111,7 @@ export function groupIncomeByDay(payments: IncomePayment[]): IncomeGroup[] {
   for (const p of [...payments].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
     const day = collectionDay(p.created_at);
     const kind = incomeKind(p.concept);
-    const isCash = isCashConcept(p.concept);
+    const isCash = isCashPayment(p);
     const slot = kind === "tournament"
       ? TournamentLabel
       : kind === "dues"

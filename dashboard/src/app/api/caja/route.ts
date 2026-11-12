@@ -6,7 +6,7 @@ import {
   type IncomeItem,
   IncomeKinds,
   type IncomeKind,
-  isCashConcept,
+  isCashPayment,
 } from "@/lib/cashflow";
 
 export type CajaUser = {
@@ -83,10 +83,10 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
 
   const [usersRes, paymentsRes, incomesRes, expensesRes, handoffsRes, playersRes] = await Promise.all([
     s.from("users").select("id,first_name,last_name,groups"),
-    // Bank payments (the dues) come along too: they are listed, and they
+    // Bank payments (dues, transfers) come along too: they are listed, and they
     // just never enter a caja.
     s.from("payments")
-      .select("id,player_id,registered_by_user_id,amount,created_at,slot_weekday,slot_hour,concept,notes")
+      .select("id,player_id,registered_by_user_id,amount,created_at,slot_weekday,slot_hour,concept,is_cash,notes")
       .not("registered_by_user_id", "is", null),
     s.from("incomes").select("received_by,amount,concept,notes,created_at"),
     s.from("expenses").select("paid_by,amount,concept,notes,is_cash,created_at"),
@@ -117,7 +117,7 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
   ]));
 
   for (const p of paymentsRes.data ?? []) {
-    if (isCashConcept(p.concept)) add(p.registered_by_user_id, Number(p.amount));
+    if (isCashPayment(p)) add(p.registered_by_user_id, Number(p.amount));
   }
   for (const i of incomesRes.data ?? []) {
     add(i.received_by, Number(i.amount));
@@ -171,6 +171,7 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
     slot_weekday: p.slot_weekday,
     slot_hour: p.slot_hour,
     concept: p.concept,
+    is_cash: p.is_cash,
     id: p.id,
     player: playerName.get(p.player_id) ?? "?",
     notes: p.notes,

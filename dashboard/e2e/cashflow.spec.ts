@@ -144,3 +144,15 @@ test("la matrícula es banco y el resto efectivo, lo dice el concepto", () => {
   ]);
   expect(groups.map((g) => [g.kind, g.is_cash])).toEqual([["dues", false], ["training", true]]);
 });
+
+test("un cobro por transferencia va al banco y no se mezcla con el efectivo del mismo slot", () => {
+  const groups = groupIncomeByDay([
+    { ...pay(A, "2026-08-14T00:00:00Z", 30000), concept: "session" },
+    { ...pay(A, "2026-08-14T00:05:00Z", 30000), concept: "session", is_cash: false },
+    { ...pay(A, "2026-08-14T00:10:00Z", 15000), concept: "session", is_cash: true },
+  ]);
+  expect(groups.map((g) => [g.kind, g.is_cash, g.amount])).toEqual([
+    ["training", true, 45000],
+    ["training", false, 30000],
+  ]);
+});

@@ -33,6 +33,8 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
       amount: number;
       concept?: PaymentConcept;
       notes?: string | null;
+      /** Paid by transfer to the club's account: it enters no caja. */
+      transfer?: boolean;
       confirm_duplicate?: boolean;
     };
 
@@ -152,6 +154,7 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
         // sessions it bought.
         session: paidSession,
         amount,
+        is_cash: body.transfer !== true,
         notes: cleanNotes(body.notes),
       }]);
 

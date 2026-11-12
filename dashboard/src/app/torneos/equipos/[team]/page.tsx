@@ -6,6 +6,7 @@ import ProtectedPage from "../../../components/ProtectedPage";
 import Overlay from "../../../components/Overlay";
 import { usePageTitle } from "../../../components/PageTitleContext";
 import NoteField from "../../../components/NoteField";
+import TransferField from "../../../components/TransferField";
 import { postMoney } from "@/lib/postMoney";
 import {
   formatArs,
@@ -378,7 +379,7 @@ function PlayerSheet({ p, onPay }: { p: TeamPlayer; onPay: () => void }) {
 
 // ---- El pago ----
 
-type Choice = { amount: number; concept: TournamentConcept; notes?: string };
+type Choice = { amount: number; concept: TournamentConcept; notes?: string; transfer?: boolean };
 
 // Sin botones de cancelar ni de volver: tocar afuera cierra el popup. La
 // pantalla se usa cobrando en fila, y cada toque de más cuesta.
@@ -394,6 +395,7 @@ function PaymentModal({ p, upfrontPrice, substitutePrice, onClose, onConfirm, bu
   const s = p.standing;
   const [chosen, setChosen] = useState<Choice | null>(null);
   const [notes, setNotes] = useState("");
+  const [transfer, setTransfer] = useState(false);
   // "Otro monto..." es un botón hasta que se lo toca: recién ahí aparece el
   // campo, corto, con su OK al lado.
   const [customOpen, setCustomOpen] = useState(false);
@@ -554,6 +556,7 @@ function PaymentModal({ p, upfrontPrice, substitutePrice, onClose, onConfirm, bu
               </p>
               <div style={{ display: "flex", flexDirection: "column", marginTop: 10 }}>
                 <NoteField value={notes} onChange={setNotes} />
+                <TransferField value={transfer} onChange={setTransfer} />
               </div>
               {error && <p style={{ color: "crimson", fontSize: "0.85rem" }}>{error}</p>}
               <div style={{ marginTop: 16 }}>
@@ -562,7 +565,7 @@ function PaymentModal({ p, upfrontPrice, substitutePrice, onClose, onConfirm, bu
                   className="btnPrimary"
                   style={{ width: "100%" }}
                   disabled={busy}
-                  onClick={() => onConfirm({ ...chosen, notes })}
+                  onClick={() => onConfirm({ ...chosen, notes, transfer })}
                 >
                   Confirmar
                 </button>
@@ -637,13 +640,14 @@ function TeamContent() {
     setBusy(true);
     setPayError(null);
     try {
-      // La cuota del torneo se cobra en efectivo: suma a la caja de quien la
-      // registra, y la caja la lista como "torneo".
+      // La cuota del torneo se cobra en efectivo, salvo que diga transferencia:
+      // suma a la caja de quien la registra, y la caja la lista como "torneo".
       const res = await postMoney(`/api/torneos/equipos/${teamId}/pago`, {
         player_id: paying.id,
         amount: choice.amount,
         concept: choice.concept,
         notes: choice.notes?.trim() || null,
+        transfer: choice.transfer === true,
       });
       // No se mandó: era el mismo pago registrado dos veces.
       if (!res) return;
