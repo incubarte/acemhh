@@ -168,12 +168,11 @@ Deno.test("un pago fraccionario cubre su parte y debe el resto", () => {
 // ////////////////////////////////////
 
 Deno.test("se quema primero el saldo de apertura, que es lo que antes muere", () => {
-    // Entra con 2 heredados, compra el mes de 4, y asiste 2 veces. Lo heredado
-    // se gasta y los promocionales quedan intactos.
-    const r = run({ debt: 0, carryover: 2 }, month({ held: 4, attended: 2, monthly: 100000 }));
+    // Entra con 2 heredados, compra 1 suelta, y asiste 2 veces. Lo heredado
+    // se gasta y la suelta queda intacta, para el mes siguiente.
+    const r = run({ debt: 0, carryover: 2 }, month({ held: 4, attended: 2, session: 30000 }));
     assertEquals(r.pending, 0);
-    // Los promocionales sobrantes no vuelven: el club dio las 4 sesiones.
-    assertEquals(r.carryoverOut, 0);
+    assertEquals(r.carryoverOut, 1);
 });
 
 Deno.test("después del saldo de apertura va lo promocional, y lo individual queda para el final", () => {
@@ -242,10 +241,35 @@ Deno.test("el crédito que pagó el mes no cubre además una sesión en otro slo
     assertEquals(r.pending, PRICE.session_price);
 });
 
-Deno.test("quien paga el mes entero teniendo crédito lo usa en las asistencias, como antes", () => {
+Deno.test("quien paga el mes entero teniendo crédito igual lo descuenta: lo pagado de más pasa", () => {
+    // 1 a favor y el mes de 3 pagado entero: el mes costaba 2, pagó 3.
     const r = run({ debt: 0, carryover: 1 }, month({ held: 3, attended: 3, monthly: 75000 }));
     assertEquals(r.pending, 0);
-    assertEquals(r.monthlyCredit.size, 0);
+    assertEquals(r.monthlyCredit.get(S22), 1);
+    assertEquals(r.carryoverOut, 1);
+});
+
+Deno.test("el caso de Milo: 1 a favor, paga 4 de un mes de 3 y pasan 2", () => {
+    // Septiembre de 3 entrenamientos, el 1 a favor de agosto, pagó 4 y fue a 2.
+    const r = run({ debt: 0, carryover: 1 }, month({ held: 3, attended: 2, monthly: 100000 }));
+    assertEquals(r.pending, 0);
+    assertEquals(r.carryoverOut, 2);
+    // Octubre: va 2 veces sin pagar nada, y las 2 a favor las cubren.
+    const oct = run(r.next, month({ held: 3, attended: 2 }));
+    assertEquals(oct.pending, 0);
+    assertEquals(oct.carryoverOut, 0);
+});
+
+Deno.test("lo pagado de más sólo pasa si no se usó: quien va a todo no se lleva nada", () => {
+    // 1 a favor, mes de 3 pagado como 4, y fue a 3 entrenamientos y a 2 extra
+    // del mismo slot (recuperaciones): los 5 tokens se gastaron.
+    const r = run({ debt: 0, carryover: 1 }, month({ held: 3, attended: 5, monthly: 100000 }));
+    assertEquals(r.pending, 0);
+    assertEquals(r.carryoverOut, 0);
+});
+
+Deno.test("el crédito no pasa dos veces: si no hay mes pago y no fue, muere", () => {
+    const r = run({ debt: 0, carryover: 2 }, month({ held: 3, attended: 0 }));
     assertEquals(r.carryoverOut, 0);
 });
 

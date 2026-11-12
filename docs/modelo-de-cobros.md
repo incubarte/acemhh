@@ -110,7 +110,8 @@ El mes **abre** con los tokens que dejó el mes anterior (ver
 [Carryover](#carryover)) y durante el mes se compran más. Cuando una asistencia
 consume un token, se queman en este orden:
 
-1. **El saldo de apertura** — lo heredado del mes anterior
+1. **El saldo de apertura** — lo heredado del mes anterior que no se usó para
+   pagar el mes (ver [Lo que trae a favor paga el mes](#lo-que-trae-a-favor-paga-el-mes))
 2. **Promocionales del slot asistido** — mueren salvo que el club haya fallado
 3. **Individuales** — pasan libremente al mes siguiente
 
@@ -173,14 +174,15 @@ empieza. El resultado es el saldo de apertura del mes siguiente.
 Las sesiones sin usar vienen de dos lados:
 
 - Sesiones individuales prepagas que no se usaron
-- Un pago mensual por `n` sesiones en un mes que tuvo `n−1`: se cobró una sesión
-  que, por culpa del club, no se pudo dar
+- Un pago mensual por más sesiones de las que el mes le costaba: un mes de `n`
+  sesiones que tuvo `n−1` (se cobró una sesión que, por culpa del club, no se
+  pudo dar), o un mes que el saldo a favor ya pagaba en parte y se pagó entero
 
 De ahí sale la tabla:
 
 | Origen del token | Cuánto pasa |
 |---|---|
-| Mensual (promocional) | `min(tokens sin usar, n(S,M) − sesiones que realmente se dieron)` |
+| Mensual (promocional) | `min(tokens sin usar, tokens pagados + saldo a favor aplicado al mes − sesiones que realmente se dieron)` |
 | Medio mes | Igual, pero medido contra **las sesiones que le vendieron**, no contra el mes entero |
 | Individual | Todos los que sobraron |
 | Carryover del mes anterior | **Nada.** No hay segundo salto. |
@@ -191,6 +193,24 @@ cobró. El individual vuelve siempre. Se pagan 5.000 de más por esa flexibilida
 
 Los tokens heredados que no se usan **mueren ahí**. Sin esta regla, un token sin
 usar se trasladaría indefinidamente.
+
+### Lo que trae a favor paga el mes
+
+Si el jugador compra el mes de un slot, el saldo de apertura **descuenta el
+mes primero**, siempre: un mes de 3 sesiones con 1 a favor cuesta 2. Lo que
+pague por encima de eso es una sesión pagada de más y pasa al mes siguiente,
+con la misma regla que cualquier promocional: sólo si no se usó.
+
+Si ese mes no compra el mes, el saldo a favor cubre sus asistencias; si
+tampoco va, muere.
+
+> Agosto: paga 5 sesiones de un mes de 4 → pasa 1.
+> Septiembre (3 sesiones): con 1 a favor el mes cuesta 2, pero paga 4 → pasan 2.
+> Octubre: no compra el mes y va 2 veces → las 2 a favor las cubren, no debe nada.
+
+Hasta noviembre de 2026 el saldo a favor sólo descontaba del mes cuando el pago
+no alcanzaba a cubrirlo; si el jugador pagaba el mes entero igual, el saldo
+se iba en una asistencia que el mes ya cubría, y se perdía.
 
 ### La unidad es la sesión, nunca el dinero
 

@@ -254,28 +254,28 @@ export function ledgerMonth(
 
   // --- The opening balance pays for the month first.
   //
-  // A session the club still owes the player (a training it charged and did
-  // not give) is part of what buys this month: whoever comes in with one pays
-  // the month one session cheaper. It only fills the gap between what the
-  // monthly paid and what the month holds — a month paid in full anyway leaves
-  // it for the attendances, as before — and once spent there it is gone from
-  // the opening balance, so it cannot also cover a session elsewhere.
+  // Sessions in favour are part of what buys this month: whoever comes in with
+  // one pays the month one session cheaper. They always discount the month,
+  // whatever the monthly paid: whoever pays the whole month anyway paid that
+  // session twice, and the surplus carries as any overpaid session does (see
+  // carryoverOut). Once spent here they are gone from the opening balance, so
+  // they cannot also cover a session elsewhere.
   let creditLeft = state.carryover;
   const monthlyCredit = new Map<SlotKey, number>();
   for (const [slot, e] of promoBySlot) {
     if (e.monthlyPaid === 0) continue;
-    const gap = Math.max(0, e.monthlyHeld - tokensOf(e.monthlyPaid));
-    const credit = Math.min(creditLeft, gap);
+    const credit = Math.min(creditLeft, e.monthlyHeld);
     if (credit <= 0) continue;
     monthlyCredit.set(slot, credit);
     creditLeft -= credit;
   }
 
-  for (const [, e] of promoBySlot) {
+  for (const [slot, e] of promoBySlot) {
     // A full month is an ANTICIPO: it grants the whole month whatever was
-    // paid. A half month is a plain purchase: it grants what it bought.
+    // paid, and more if the payment plus the credit bought more. A half month
+    // is a plain purchase: it grants what it bought.
     const fromMonthly = e.monthlyPaid > 0
-      ? Math.max(e.monthlyHeld, tokensOf(e.monthlyPaid))
+      ? Math.max(e.monthlyHeld, tokensOf(e.monthlyPaid) + (monthlyCredit.get(slot) ?? 0))
       : 0;
     e.granted = fromMonthly + tokensOf(e.halfPaid);
   }
@@ -360,16 +360,19 @@ export function ledgerMonth(
 
   // --- What the next month opens with.
   //
-  // Promotional tokens only come back to the extent the club did not hold the
-  // sessions it charged for; individual ones come back whatever the reason.
-  // The opening balance itself never hops twice.
+  // Promotional tokens only come back to the extent they paid for more
+  // sessions than the month held — the club charged a training it did not
+  // give, or the sessions in favour already paid part of the month; individual
+  // ones come back whatever the reason. The opening balance itself never hops
+  // twice: unspent, it dies here.
   let carryoverOut = individualLeft;
   for (const [slot, e] of promoBySlot) {
     // Each promotional purchase is measured against what it was sold for: the
-    // whole month, or the sessions that were still to come.
-    const clubShortfall = Math.max(0, tokensOf(e.monthlyPaid) - e.monthlyHeld) +
+    // whole month, less what the credit paid of it, or the sessions that were
+    // still to come.
+    const overpaid = Math.max(0, tokensOf(e.monthlyPaid) + (monthlyCredit.get(slot) ?? 0) - e.monthlyHeld) +
       Math.max(0, tokensOf(e.halfPaid) - e.halfHeld);
-    carryoverOut += Math.min(promoLeft.get(slot) ?? 0, clubShortfall);
+    carryoverOut += Math.min(promoLeft.get(slot) ?? 0, overpaid);
   }
 
   return {
