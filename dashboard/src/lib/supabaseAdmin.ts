@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { activityHeaders } from "@/lib/requestContext";
 
 export function supabaseAdmin() {
   const url = process.env.SUPABASE_URL;
@@ -8,5 +9,7 @@ export function supabaseAdmin() {
   }
   return createClient(url, key, {
     auth: { persistSession: false },
+    // Who is writing and for which submit, for the activity log's triggers.
+    global: { headers: activityHeaders() },
   });
 }

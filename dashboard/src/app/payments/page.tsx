@@ -7,6 +7,7 @@ import ProtectedPage from "../components/ProtectedPage";
 import { usePageTitle } from "../components/PageTitleContext";
 import NoteField from "../components/NoteField";
 import { postMoney } from "@/lib/postMoney";
+import { setActivityFocus } from "@/lib/activity";
 
 type Player = {
   id: string;
@@ -46,6 +47,11 @@ function PaymentsPageContent() {
   usePageTitle("Registrar Pago");
   const sp = useSearchParams();
   const [step, setStep] = useState<Step>({ kind: "search" });
+
+  // Taps after choosing a player say which player they were for.
+  useEffect(() => {
+    setActivityFocus("player" in step && step.player ? { player_id: step.player.id } : null);
+  }, [step]);
   const [q, setQ] = useState("");
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(false);
@@ -190,6 +196,7 @@ function PaymentsPageContent() {
             {players.map((p, idx) => (
               <button
                 key={p.id}
+                data-activity-player={p.id}
                 onClick={() => setStep({ kind: "concept", player: p })}
                 style={{ 
                   textAlign: "left",

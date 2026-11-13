@@ -13,6 +13,7 @@ import DebtBreakdown from "../../components/DebtBreakdown";
 import NoteField from "../../components/NoteField";
 import TransferField from "../../components/TransferField";
 import { postMoney } from "@/lib/postMoney";
+import { setActivityFocus } from "@/lib/activity";
 
 // Redesigned attendance & payments screen. Presence is expressed by the
 // section a player sits in, and toggled with a horizontal thumb-wheel on the
@@ -302,6 +303,7 @@ const PlayerRow = React.memo(function PlayerRow({
 
   return (
     <div
+      data-activity-player={player.id}
       data-player-row={p.id}
       onPointerDown={inert ? undefined : (e) => gesture.down(e, p)}
       onPointerMove={inert ? undefined : gesture.move}
@@ -844,6 +846,12 @@ function TrainingSessionBetaContent() {
   /** Marking this player present is waiting on the admin's confirmation. */
   const [confirmPlayer, setConfirmPlayer] = useState<RosterPlayer | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Taps in a player's panel say which player they were for.
+  useEffect(() => {
+    const p = payModalPlayer ?? debtModalPlayer ?? confirmPlayer;
+    setActivityFocus(p ? { player_id: p.id } : null);
+  }, [payModalPlayer, debtModalPlayer, confirmPlayer]);
 
   // Search popup
   // Each section searches its own kind: "Buscar jugador" never turns up a

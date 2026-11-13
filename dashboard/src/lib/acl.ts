@@ -35,12 +35,16 @@ const wheelPermissions: Permission[] = [
   { type: 'api', resource: '/api/torneos/pago', method: 'POST' },
   { type: 'page', resource: '/torneos' },
   { type: 'page', resource: '/torneos/*' },
+  // Everyone's actions are logged; only ROOT reads the log.
+  { type: 'api', resource: '/api/activity', method: 'POST' },
 ];
 
 const rootPermissions: Permission[] = [
   ...wheelPermissions,
   { type: 'api', resource: '/api/payments/dues', method: 'POST' },
   { type: 'page', resource: '/payments' },
+  { type: 'api', resource: '/api/activity', method: 'GET' },
+  { type: 'page', resource: '/actividad' },
 ] as const;
 
 export const GROUPS: Record<string, Group> = {

@@ -13,6 +13,7 @@ const BUTTONS = [
   { href: "/caja", label: "💰 Caja" },
   { href: "/analisis", label: "📈 Análisis" },
   { href: "/credencial", label: "🪪 Credencial de Socio" },
+  { href: "/actividad", label: "🕵️ Actividad" },
 ];
 
 // Rendered as a child of ProtectedPage so these checks only fire once the session

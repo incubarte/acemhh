@@ -17,6 +17,7 @@ import {
   type TournamentConcept,
 } from "@/lib/tournamentFees";
 import type { TeamDetail, TeamPlayer } from "../../../api/torneos/equipos/[team]/route";
+import { setActivityFocus } from "@/lib/activity";
 
 // Un equipo: sus jugadores y cómo viene cada uno con la cuota del torneo. Un
 // punto por mes dice de un vistazo qué pagó y qué falta; el + de la fila cobra
@@ -136,6 +137,7 @@ function PlayerRow({ p, onOpen, onPay }: {
     <div
       data-testid="player-row"
       data-player-row={p.id}
+      data-activity-player={p.id}
       style={{
         display: "flex",
         alignItems: "center",
@@ -618,6 +620,11 @@ function TeamContent() {
   };
   const closeDrawer = () => setDrawerOpen(false);
   const drawerClosed = useCallback(() => setSelectedId(null), []);
+
+  // Taps in the drawer say which player they were for.
+  useEffect(() => {
+    setActivityFocus(drawerOpen && selectedId ? { player_id: selectedId } : null);
+  }, [drawerOpen, selectedId]);
 
   if (error) return <p style={{ color: "crimson" }}>{error}</p>;
   if (!detail) return <p>Cargando…</p>;

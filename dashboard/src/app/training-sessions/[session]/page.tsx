@@ -12,6 +12,7 @@ import DebtBreakdown from "../../components/DebtBreakdown";
 import NoteField from "../../components/NoteField";
 import TransferField from "../../components/TransferField";
 import { postMoney } from "@/lib/postMoney";
+import { setActivityFocus } from "@/lib/activity";
 import type { PaymentConcept } from "@shared/tokens";
 
 type Player = {
@@ -97,6 +98,12 @@ function TrainingSessionDetailContent() {
   /** The date the club is working on, to flag browsing a different session. */
   const [currentDate, setCurrentDate] = useState<string | null>(null);
   const [debtModalPlayer, setDebtModalPlayer] = useState<PlayerWithAttendance | null>(null);
+
+  // Taps in a player's panel say which player they were for.
+  useEffect(() => {
+    const id = pendingPayment?.playerId ?? expandedPlayerId ?? debtModalPlayer?.id ?? null;
+    setActivityFocus(id ? { player_id: id } : null);
+  }, [pendingPayment, expandedPlayerId, debtModalPlayer]);
 
   // Parse session string
   const [dateStr, hourStr] = session.split('-').length === 4
@@ -418,7 +425,9 @@ function TrainingSessionDetailContent() {
       ? "rgba(220, 38, 38, 0.45)"
       : bgColor;
     return (
-      <React.Fragment key={player.id}>
+      // display: contents keeps the cells in the grid; the wrapper only
+      // tells the activity log which player a tap was for.
+      <div key={player.id} data-activity-player={player.id} style={{ display: "contents" }}>
         {/* Name */}
         <div
           onClick={hasDebt ? () => setDebtModalPlayer(player) : undefined}
@@ -725,7 +734,7 @@ function TrainingSessionDetailContent() {
         )}
         </>
         )}
-      </React.Fragment>
+      </div>
     );
   };
 
