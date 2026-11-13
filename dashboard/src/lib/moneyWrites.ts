@@ -48,3 +48,16 @@ export function duplicateResponse(what: string): NextResponse {
       "¿Es otro y hay que registrarlo de nuevo?",
   }, { status: 409 });
 }
+
+/**
+ * The answer to ROOT registering a payment for a session that is already
+ * closed: the screen asks, and on "yes" sends it again with `confirm_closed`.
+ */
+export function closedSessionResponse(isoDate: string, hour: string): NextResponse {
+  const [y, m, d] = isoDate.split("-");
+  return NextResponse.json({
+    closed: true,
+    message: `La sesión del ${d}/${m}/${y} ${Number(hour)}hs ya está cerrada. ` +
+      "¿Registrar el cobro igual?",
+  }, { status: 409 });
+}

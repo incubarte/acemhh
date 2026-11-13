@@ -116,6 +116,7 @@ function describe(o: Record<string, unknown>, names: Names, ids: string[]): stri
   if (o.transfer === true || o.is_cash === false) out.push("transferencia");
   if (o.notes) out.push(`nota:${quote(o.notes)}`);
   if (o.confirm_duplicate) out.push("(confirmó duplicado)");
+  if (o.confirm_closed) out.push("(confirmó sesión cerrada)");
   if (o.to_user && typeof o.to_user === "string") out.push(`a:${first(names.users[o.to_user]) || o.to_user.slice(0, 8)}`);
   if (o.registered_by && typeof o.registered_by === "string") out.push(`por:${quote(String(o.registered_by).replace(/ \[id=.*\]$/, ""))}`);
   if (typeof o.name === "string" || typeof o.last_name === "string") {

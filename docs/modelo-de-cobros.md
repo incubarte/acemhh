@@ -374,7 +374,12 @@ dos slots distintos. Ya funciona: no hay restricción de unicidad en `payments`.
 Se puede escribir en la **semana en curso y la anterior** (lunes a domingo, hora
 de Buenos Aires). Aplica a **cobros y asistencias**.
 
-Reescribir más atrás requiere acceso directo a la base.
+Más atrás, un usuario del grupo **ROOT** puede igual registrar un **cobro de
+entrenamiento**: el servicio pregunta "La sesión del DD/MM/AAAA HHhs ya está
+cerrada. ¿Registrar el cobro igual?" y lo registra si acepta
+(`confirm_closed`). La pregunta y la respuesta quedan en
+[Actividad](actividad.md). Para el resto de los usuarios, y para las
+asistencias, sigue cerrada; reescribir eso requiere acceso directo a la base.
 
 La agenda se modifica sólo por SQL.
 

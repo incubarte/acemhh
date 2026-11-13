@@ -1,32 +1,43 @@
 // The client side of lib/moneyWrites.ts: POST a movement and, if the service
-// says an identical one was just registered, ask before sending it again.
+// refuses with something the admin can overrule, ask before sending it again.
+
+/** What a refusal the admin can overrule asks, and the flag that overrules it. */
+const Overrulable = [
+  { key: "duplicate", flag: "confirm_duplicate", fallback: "Ya se registró uno igual. ¿Registrarlo de nuevo?" },
+  { key: "closed", flag: "confirm_closed", fallback: "La sesión ya está cerrada. ¿Registrar el cobro igual?" },
+] as const;
 
 /**
- * Sends `body` to `url`. When the service answers that the same movement was
- * registered moments ago, asks the admin; on "yes" it is sent again with
- * `confirm_duplicate`, on "no" nothing is registered and this returns null.
+ * Sends `body` to `url`. When the service refuses with something the admin
+ * can overrule — the same movement registered moments ago, or (ROOT) a
+ * session already closed — asks; on "yes" it is sent again with the flag
+ * that says so, on "no" nothing is registered and this returns null. Both
+ * can come up for one payment, one after the other.
  * Any other answer comes back as is, for the caller to handle.
  */
 export async function postMoney(url: string, body: object): Promise<Response | null> {
-  const send = (extra: object) => fetch(url, {
+  const extra: Record<string, boolean> = {};
+  const send = () => fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ...body, ...extra }),
   });
 
-  const res = await send({});
-  if (res.status !== 409) return res;
+  for (;;) {
+    const res = await send();
+    if (res.status !== 409) return res;
 
-  let refusal: { duplicate?: boolean; message?: string } | null = null;
-  try {
-    refusal = await res.clone().json();
-  } catch {
-    // A plain-text 409 is some other rule: the caller shows it.
-  }
-  if (!refusal?.duplicate) return res;
+    let refusal: Record<string, unknown> | null = null;
+    try {
+      refusal = await res.clone().json();
+    } catch {
+      // A plain-text 409 is some other rule: the caller shows it.
+    }
+    const rule = Overrulable.find((r) => refusal?.[r.key] === true && !extra[r.flag]);
+    if (!rule) return res;
 
-  if (!window.confirm(refusal.message ?? "Ya se registró uno igual. ¿Registrarlo de nuevo?")) {
-    return null;
+    const message = typeof refusal?.message === "string" ? refusal.message : rule.fallback;
+    if (!window.confirm(message)) return null;
+    extra[rule.flag] = true;
   }
-  return send({ confirm_duplicate: true });
 }

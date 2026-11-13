@@ -10,7 +10,7 @@ import {
 } from "@shared/tokens";
 import { ledgerExtrasFor } from "@/lib/rosterLedger";
 import { todayBA } from "@/lib/trainingDay";
-import { cleanNotes, duplicateResponse, recentDuplicate } from "@/lib/moneyWrites";
+import { cleanNotes, closedSessionResponse, duplicateResponse, recentDuplicate } from "@/lib/moneyWrites";
 
 export const POST = withPermission('api', '/api/training-sessions/payment', 'POST', async (sess, req) => {
   try {
@@ -36,6 +36,8 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
       /** Paid by transfer to the club's account: it enters no caja. */
       transfer?: boolean;
       confirm_duplicate?: boolean;
+      /** ROOT only: register it although the session is already closed. */
+      confirm_closed?: boolean;
     };
 
     if (!body?.player_id || !body?.amount) {
@@ -55,10 +57,17 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
     // Rewriting a settled week takes direct access to the database, not a
     // stale tab.
     if (!withinWriteWindow(isoDate, todayBA())) {
-      return new NextResponse(
-        "Esa sesión ya está cerrada: se puede cobrar en la semana actual y la anterior",
-        { status: 409 },
-      );
+      // ROOT may still register it, once they confirm they mean that closed
+      // session: a payment that was taken and never loaded has to go in.
+      if (!sess.groups.includes("ROOT")) {
+        return new NextResponse(
+          "Esa sesión ya está cerrada: se puede cobrar en la semana actual y la anterior",
+          { status: 409 },
+        );
+      }
+      if (body.confirm_closed !== true) {
+        return closedSessionResponse(isoDate, hour);
+      }
     }
 
     const paymentId = crypto.randomUUID();

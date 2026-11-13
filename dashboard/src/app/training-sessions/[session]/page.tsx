@@ -213,7 +213,8 @@ function TrainingSessionDetailContent() {
         if (errorText.includes("duplicate") || errorText.includes("23505")) {
           alert("Pago ya registrado");
         } else {
-          alert("Error al registrar pago");
+          // A refusal says why (a closed session, a blocked concept): show it.
+          alert(res.status === 409 && errorText ? errorText : "Error al registrar pago");
         }
         setPaymentProcessing(false);
         setPendingPayment(null);

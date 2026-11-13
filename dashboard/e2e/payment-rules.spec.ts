@@ -182,6 +182,10 @@ test("no se cobra ni se marca presente en una sesión ya cerrada", async ({ page
   const payment = await pay(page, "session", 30000, oldSession);
   expect(payment.status()).toBe(409);
   expect(await payment.text()).toContain("cerrada");
+  // Nothing was registered: ROOT is asked, not let through.
+  const { data: none } = await admin().from("payments").select("id").eq("player_id", playerId)
+    .eq("session", `${oldSession.slice(0, 10)} 22hs`);
+  expect(none ?? []).toHaveLength(0);
 
   const attendance = await page.request.post(
     `/api/training-sessions/${oldSession}/attendance`,
@@ -189,6 +193,79 @@ test("no se cobra ni se marca presente en una sesión ya cerrada", async ({ page
   );
   expect(attendance.status()).toBe(409);
   expect(await attendance.text()).toContain("cerrada");
+});
+
+/** A session three weeks back: outside the write window whatever today is. */
+function closedSession(): string {
+  const old = new Date(`${fx.date}T12:00:00Z`);
+  old.setUTCDate(old.getUTCDate() - 21);
+  return `${old.toISOString().slice(0, 10)}-22`;
+}
+
+test("ROOT cobra una sesión cerrada si confirma", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  const oldSession = closedSession();
+
+  const asked = await pay(page, "session", 30000, oldSession);
+  expect(asked.status()).toBe(409);
+  const refusal = await asked.json();
+  expect(refusal.closed).toBe(true);
+  expect(refusal.message).toMatch(/ya está cerrada.*¿Registrar el cobro igual\?/);
+
+  const confirmed = await page.request.post(`/api/training-sessions/${oldSession}/payment`, {
+    data: { player_id: playerId, amount: 30000, concept: "session", confirm_closed: true },
+  });
+  expect(confirmed.status()).toBe(200);
+  const { data } = await admin().from("payments").select("concept,amount")
+    .eq("player_id", playerId).eq("session", `${oldSession.slice(0, 10)} 22hs`);
+  expect(data).toHaveLength(1);
+  await admin().from("payments").delete().eq("player_id", playerId);
+});
+
+test("quien no es ROOT no puede cobrar una sesión cerrada, ni confirmando", async ({ page }) => {
+  const s = admin();
+  // The dev login's user, whoever DEV_AUTH_ID points at on the server.
+  await page.request.post("/api/auth/dev");
+  const me = await (await page.request.get("/api/me")).json();
+  const { data: dev } = await s.from("users").select("id,groups").eq("id", me.id).single();
+  await s.from("users").update({ groups: ["WHEEL"] }).eq("id", dev!.id);
+  try {
+    await page.request.post("/api/auth/dev");
+    const res = await page.request.post(`/api/training-sessions/${closedSession()}/payment`, {
+      data: { player_id: playerId, amount: 30000, concept: "session", confirm_closed: true },
+    });
+    expect(res.status()).toBe(409);
+    expect(await res.text()).toContain("se puede cobrar en la semana actual y la anterior");
+  } finally {
+    await s.from("users").update({ groups: dev!.groups }).eq("id", dev!.id);
+  }
+});
+
+test("en pantalla, ROOT ve la pregunta y el cobro entra al aceptar", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  const oldSession = closedSession();
+  await page.goto(`/training-sessions-beta/${oldSession}`);
+  await expect(page.getByTestId("section-presentes")).toBeVisible();
+  const more = page.getByRole("button", { name: /Más jugadores/ });
+  if (await more.isVisible().catch(() => false)) await more.click();
+
+  const questions: string[] = [];
+  page.on("dialog", (d) => {
+    questions.push(d.message());
+    void d.accept();
+  });
+  await page.locator(`[data-player-row="${playerId}"]`).last().getByRole("button", { name: "+" }).click();
+  const modal = page.getByTestId("payment-modal");
+  await modal.getByTestId("pay-session").click();
+  await modal.getByRole("button", { name: "Confirmar" }).click();
+  await expect(modal).toHaveCount(0);
+
+  expect(questions).toHaveLength(1);
+  expect(questions[0]).toContain("ya está cerrada");
+  const { data } = await admin().from("payments").select("id")
+    .eq("player_id", playerId).eq("session", `${oldSession.slice(0, 10)} 22hs`);
+  expect(data).toHaveLength(1);
+  await admin().from("payments").delete().eq("player_id", playerId);
 });
 
 test("medio mes cobra lo que queda, y sólo como primer pago del período", async ({ page }) => {
