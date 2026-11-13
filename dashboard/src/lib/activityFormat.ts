@@ -75,6 +75,7 @@ export function screenLabel(path: string | null): string {
   if (p === "/players/new") return "nuevo jugador";
   if (p === "/analisis") return "análisis";
   if (p === "/actividad") return "actividad";
+  if (p === "/avisos") return "avisos de pago";
   return p;
 }
 
@@ -89,6 +90,7 @@ export function apiLabel(path: string): string {
   if (path === "/api/handoffs") return "entrega de caja";
   if (path === "/api/handoffs/accept") return "acepta entrega";
   if (path === "/api/players") return "jugador";
+  if (path === "/api/receipts-pause") return "pausa de avisos";
   return path;
 }
 

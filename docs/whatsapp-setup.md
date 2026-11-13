@@ -241,6 +241,16 @@ lo aceptó. Llamar dos veces por el mismo pago no escribe dos veces, y un envío
 fallido se reintenta. Un pago borrado antes de que llegue la llamada no avisa;
 uno borrado después ya avisó.
 
+### Pausar los avisos
+
+Para probar algo con cobros de verdad sin escribirle a nadie: **🔕 Avisos de
+pago** en el dashboard (solo ROOT) los pausa 15 min, 30 min, 1 h o 2 h, y se
+reanudan solos al vencer, o antes con "Reanudar ya". La pausa es una fila de
+`app_settings` (`payment_receipts_pause`, `{"until": …}`) que el trigger lee
+antes de llamar a nadie. Los cobros registrados durante la pausa no avisan
+nunca: eran la prueba. Quién pausó y reanudó queda en [Actividad](actividad.md).
+No afecta los recordatorios de los jueves.
+
 ### El template
 
 En **WhatsApp Manager > Message templates**:

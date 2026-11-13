@@ -45,6 +45,9 @@ const rootPermissions: Permission[] = [
   { type: 'page', resource: '/payments' },
   { type: 'api', resource: '/api/activity', method: 'GET' },
   { type: 'page', resource: '/actividad' },
+  { type: 'api', resource: '/api/receipts-pause', method: 'GET' },
+  { type: 'api', resource: '/api/receipts-pause', method: 'POST' },
+  { type: 'page', resource: '/avisos' },
 ] as const;
 
 export const GROUPS: Record<string, Group> = {
