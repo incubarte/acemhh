@@ -9,3 +9,10 @@ CREATE INDEX expenses_team_id_idx ON expenses(team_id);
 -- cualquier fila que se edite, ya la cumplen desde ahora.
 ALTER TABLE expenses ADD CONSTRAINT expenses_team_by_concept
   CHECK ((concept = 'partidos') = (team_id IS NOT NULL)) NOT VALID;
+
+-- Y el día en que se jugó: es lo que distingue dos partidos del mismo equipo,
+-- y lo que junta la mesa y la pista de un partido pagadas por separado.
+ALTER TABLE expenses ADD COLUMN match_date DATE;
+
+ALTER TABLE expenses ADD CONSTRAINT expenses_match_date_by_concept
+  CHECK ((concept = 'partidos') = (match_date IS NOT NULL)) NOT VALID;

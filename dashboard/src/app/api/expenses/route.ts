@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
 import { EXPENSE_CONCEPTS } from "@/lib/expenses";
+import { todayBA } from "@/lib/trainingDay";
 import { cleanNotes, duplicateResponse, recentDuplicate } from "@/lib/moneyWrites";
 
 export const POST = withPermission('api', '/api/expenses', 'POST', async (sess, req) => {
@@ -11,6 +12,7 @@ export const POST = withPermission('api', '/api/expenses', 'POST', async (sess, 
     notes?: string | null;
     is_cash?: boolean;
     team_id?: string | null;
+    match_date?: string | null;
     confirm_duplicate?: boolean;
   };
 
@@ -48,6 +50,19 @@ export const POST = withPermission('api', '/api/expenses', 'POST', async (sess, 
     return new NextResponse("Sólo un partido lleva equipo", { status: 400 });
   }
 
+  // Y el día en que se jugó, que no puede ser uno que todavía no llegó.
+  const matchDate = concept === "partidos" ? (body?.match_date ?? "").trim() : null;
+  if (concept === "partidos") {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(matchDate!) || Number.isNaN(Date.parse(matchDate!))) {
+      return new NextResponse("Elegí qué día se jugó el partido", { status: 400 });
+    }
+    if (matchDate! > todayBA()) {
+      return new NextResponse("El partido no puede ser de un día que todavía no llegó", { status: 400 });
+    }
+  } else if (body?.match_date) {
+    return new NextResponse("Sólo un partido lleva día", { status: 400 });
+  }
+
   if (!body.confirm_duplicate && await recentDuplicate(s, "expenses", {
     paid_by: sess.id,
     concept,
@@ -55,6 +70,7 @@ export const POST = withPermission('api', '/api/expenses', 'POST', async (sess, 
     // Dos equipos del club que juegan entre sí pagan lo mismo a la vez, y no
     // es un duplicado.
     team_id: teamId,
+    match_date: matchDate,
   })) {
     return duplicateResponse("un egreso");
   }
@@ -66,6 +82,7 @@ export const POST = withPermission('api', '/api/expenses', 'POST', async (sess, 
       concept,
       notes,
       team_id: teamId,
+      match_date: matchDate,
       paid_by: sess.id,
       is_cash: body?.is_cash ?? true,
     }])

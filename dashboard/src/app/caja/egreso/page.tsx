@@ -6,6 +6,7 @@ import ProtectedPage from "../../components/ProtectedPage";
 import { usePageTitle } from "../../components/PageTitleContext";
 import { EXPENSE_CONCEPTS, MATCH_AMOUNTS } from "@/lib/expenses";
 import type { TournamentSummary } from "@/app/api/torneos/route";
+import { todayBA } from "@/lib/trainingDay";
 import { postMoney } from "@/lib/postMoney";
 import { Card, LowAmountDialog, formatArs } from "../ui";
 
@@ -18,6 +19,7 @@ function EgresoContent() {
   const [notes, setNotes] = useState("");
   const [isCash, setIsCash] = useState(true);
   const [teamId, setTeamId] = useState("");
+  const [matchDate, setMatchDate] = useState("");
   const [tournaments, setTournaments] = useState<TournamentSummary[] | null>(null);
   const [confirmingLow, setConfirmingLow] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -46,6 +48,7 @@ function EgresoContent() {
       notes: notes.trim() || null,
       is_cash: isCash,
       team_id: isMatch ? teamId : null,
+      match_date: isMatch ? matchDate : null,
     });
     setLoading(false);
     // Not sent: it was the same expense registered twice.
@@ -68,6 +71,10 @@ function EgresoContent() {
     }
     if (isMatch && !teamId) {
       setErr("Elegí qué equipo jugó el partido");
+      return;
+    }
+    if (isMatch && !matchDate) {
+      setErr("Elegí qué día se jugó el partido");
       return;
     }
     // Un egreso por partido: otro monto suele ser varios partidos sumados.
@@ -125,10 +132,25 @@ function EgresoContent() {
                   </optgroup>
                 ))}
               </select>
-              <span style={{ fontSize: "0.8rem", opacity: 0.7 }}>
-                Uno por partido. Si jugaron dos equipos del club entre sí, uno por cada equipo.
-              </span>
             </label>
+          )}
+
+          {isMatch && (
+            <label>
+              Día del partido
+              <input
+                type="date"
+                value={matchDate}
+                max={todayBA()}
+                onChange={(e) => setMatchDate(e.target.value)}
+              />
+            </label>
+          )}
+
+          {isMatch && (
+            <p style={{ fontSize: "0.8rem", opacity: 0.7, margin: 0 }}>
+              Uno por partido. Si jugaron dos equipos del club entre sí, uno por cada equipo.
+            </p>
           )}
 
           <label>

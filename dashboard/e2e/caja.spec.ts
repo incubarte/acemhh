@@ -154,33 +154,46 @@ test("un partido nombra al equipo; dos equipos del club entre sí son dos egreso
   await expect(page.getByText("Elegí qué equipo jugó el partido")).toBeVisible();
 
   await page.getByLabel("Equipo").selectOption({ label: "ACEMHH C1" });
+  // Ni sin el día.
+  await page.getByRole("button", { name: "Guardar" }).click();
+  await expect(page.getByText("Elegí qué día se jugó el partido")).toBeVisible();
+
+  await page.getByLabel("Día del partido").fill("2026-09-20");
   await page.getByRole("button", { name: "Guardar" }).click();
   await page.waitForURL("**/caja");
-  await expect(page.getByText(`pagó partidos de ACEMHH C1 — ${EXPENSE_NOTES}`)).toBeVisible();
+  await expect(page.getByText(`pagó partidos de ACEMHH C1 del 20/9 — ${EXPENSE_NOTES}`)).toBeVisible();
 
   // El rival, mismo monto y al rato: no es un duplicado.
   const res = await page.request.post("/api/expenses", {
-    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES, team_id: "ce14d510-b81c-4b4a-b841-8e3453e55177" },
+    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES, team_id: "ce14d510-b81c-4b4a-b841-8e3453e55177", match_date: "2026-09-20" },
   });
   expect(res.status()).toBe(200);
 
   // El mismo equipo dos veces seguidas sí lo es.
   const again = await page.request.post("/api/expenses", {
-    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES, team_id: "ce14d510-b81c-4b4a-b841-8e3453e55177" },
+    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES, team_id: "ce14d510-b81c-4b4a-b841-8e3453e55177", match_date: "2026-09-20" },
   });
   expect(again.status()).toBe(409);
 
+  // Un partido sin día, o de un día que no llegó, tampoco.
+  expect((await page.request.post("/api/expenses", {
+    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES, team_id: "ce14d510-b81c-4b4a-b841-8e3453e55177" },
+  })).status()).toBe(400);
+  expect((await page.request.post("/api/expenses", {
+    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES, team_id: "ce14d510-b81c-4b4a-b841-8e3453e55177", match_date: "2099-01-01" },
+  })).status()).toBe(400);
+
   // Sin equipo, o con equipo en otro concepto, la API lo rechaza.
   expect((await page.request.post("/api/expenses", {
-    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES },
+    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES, match_date: "2026-09-20" },
   })).status()).toBe(400);
   expect((await page.request.post("/api/expenses", {
     data: { amount: 5000, concept: "seguro", notes: EXPENSE_NOTES, team_id: "ce14d510-b81c-4b4a-b841-8e3453e55177" },
   })).status()).toBe(400);
 
-  const { data } = await admin().from("expenses").select("teams(name)").eq("notes", EXPENSE_NOTES);
-  expect((data ?? []).map((e) => (e.teams as unknown as { name: string }).name).sort())
-    .toEqual(["ACEMHH C1", "ACEMHH C2"]);
+  const { data } = await admin().from("expenses").select("match_date,teams(name)").eq("notes", EXPENSE_NOTES);
+  expect((data ?? []).map((e) => `${(e.teams as unknown as { name: string }).name} ${e.match_date}`).sort())
+    .toEqual(["ACEMHH C1 2026-09-20", "ACEMHH C2 2026-09-20"]);
 });
 
 test("un egreso de partidos por un monto que no es un partido pregunta antes", async ({ page }) => {
@@ -190,6 +203,7 @@ test("un egreso de partidos por un monto que no es un partido pregunta antes", a
   await page.getByLabel("Monto").fill("520000");
   await page.getByLabel("Concepto").selectOption("partidos");
   await page.getByLabel("Equipo").selectOption({ label: "ACEMHH A" });
+  await page.getByLabel("Día del partido").fill("2026-11-06");
   await page.getByLabel(/Notas/).fill(EXPENSE_NOTES);
 
   let asked = "";
