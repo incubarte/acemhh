@@ -42,7 +42,7 @@ type FlowKind =
   /** Money with no player behind it (a colecta): one entry each, never
    * grouped, always cash. */
   | { kind: "other income"; name: string; amount: number; concept: string; notes: string | null }
-  | { kind: "expense"; name: string; amount: number; concept: string; notes: string | null; is_cash: boolean }
+  | { kind: "expense"; name: string; amount: number; concept: string; notes: string | null; is_cash: boolean; team: string | null }
   | { kind: "handoff"; from_name: string; to_name: string; amount: number };
 
 /** A movement before the running balance is known. */
@@ -89,7 +89,7 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
       .select("id,player_id,registered_by_user_id,amount,created_at,slot_weekday,slot_hour,concept,is_cash,notes")
       .not("registered_by_user_id", "is", null),
     s.from("incomes").select("received_by,amount,concept,notes,created_at"),
-    s.from("expenses").select("paid_by,amount,concept,notes,is_cash,created_at"),
+    s.from("expenses").select("paid_by,amount,concept,notes,is_cash,created_at,teams(name)"),
     s.from("cash_handoffs").select("id,amount,from_user,to_user,created_at,accepted_at"),
     // Only for the names in each group's breakdown.
     s.from("players").select("id,name,last_name"),
@@ -217,6 +217,7 @@ export const GET = withPermission('api', '/api/caja', 'GET', async (sess, req) =
       concept: e.concept,
       notes: e.notes,
       is_cash: e.is_cash,
+      team: (e.teams as { name?: string } | null)?.name ?? null,
     });
   }
 

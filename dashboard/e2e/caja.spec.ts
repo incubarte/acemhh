@@ -142,6 +142,63 @@ test("el egreso con concepto 'otros' exige notas", async ({ page }) => {
   await expect(page.getByText(/contá en las notas/)).toBeVisible();
 });
 
+test("un partido nombra al equipo; dos equipos del club entre sí son dos egresos", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  await page.goto("/caja/egreso");
+
+  await page.getByLabel("Monto").fill("260000");
+  await page.getByLabel("Concepto").selectOption("partidos");
+  await page.getByLabel(/Notas/).fill(EXPENSE_NOTES);
+  // Sin equipo no se guarda.
+  await page.getByRole("button", { name: "Guardar" }).click();
+  await expect(page.getByText("Elegí qué equipo jugó el partido")).toBeVisible();
+
+  await page.getByLabel("Equipo").selectOption({ label: "ACEMHH C1" });
+  await page.getByRole("button", { name: "Guardar" }).click();
+  await page.waitForURL("**/caja");
+  await expect(page.getByText(`pagó partidos de ACEMHH C1 — ${EXPENSE_NOTES}`)).toBeVisible();
+
+  // El rival, mismo monto y al rato: no es un duplicado.
+  const res = await page.request.post("/api/expenses", {
+    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES, team_id: "ce14d510-b81c-4b4a-b841-8e3453e55177" },
+  });
+  expect(res.status()).toBe(200);
+
+  // El mismo equipo dos veces seguidas sí lo es.
+  const again = await page.request.post("/api/expenses", {
+    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES, team_id: "ce14d510-b81c-4b4a-b841-8e3453e55177" },
+  });
+  expect(again.status()).toBe(409);
+
+  // Sin equipo, o con equipo en otro concepto, la API lo rechaza.
+  expect((await page.request.post("/api/expenses", {
+    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES },
+  })).status()).toBe(400);
+  expect((await page.request.post("/api/expenses", {
+    data: { amount: 5000, concept: "seguro", notes: EXPENSE_NOTES, team_id: "ce14d510-b81c-4b4a-b841-8e3453e55177" },
+  })).status()).toBe(400);
+
+  const { data } = await admin().from("expenses").select("teams(name)").eq("notes", EXPENSE_NOTES);
+  expect((data ?? []).map((e) => (e.teams as unknown as { name: string }).name).sort())
+    .toEqual(["ACEMHH C1", "ACEMHH C2"]);
+});
+
+test("un egreso de partidos por un monto que no es un partido pregunta antes", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  await page.goto("/caja/egreso");
+
+  await page.getByLabel("Monto").fill("520000");
+  await page.getByLabel("Concepto").selectOption("partidos");
+  await page.getByLabel("Equipo").selectOption({ label: "ACEMHH A" });
+  await page.getByLabel(/Notas/).fill(EXPENSE_NOTES);
+
+  let asked = "";
+  page.once("dialog", (d) => { asked = d.message(); d.dismiss(); });
+  await page.getByRole("button", { name: "Guardar" }).click();
+  await expect.poll(() => asked).toContain("registrá uno por partido");
+  await expect(page).toHaveURL(/\/caja\/egreso$/);
+});
+
 test("los movimientos arrancan en agosto, pero el saldo cuenta todo", async ({ page }) => {
   const receiverId = await createReceiver();
   const s = admin();

@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import ProtectedPage from "../../components/ProtectedPage";
 import { usePageTitle } from "../../components/PageTitleContext";
-import { EXPENSE_CONCEPTS } from "@/lib/expenses";
+import { EXPENSE_CONCEPTS, MATCH_AMOUNTS } from "@/lib/expenses";
+import type { TournamentSummary } from "@/app/api/torneos/route";
 import { postMoney } from "@/lib/postMoney";
-import { Card, LowAmountDialog } from "../ui";
+import { Card, LowAmountDialog, formatArs } from "../ui";
 
 function EgresoContent() {
   usePageTitle("Registrar egreso");
@@ -16,11 +17,23 @@ function EgresoContent() {
   const [concept, setConcept] = useState<string>(EXPENSE_CONCEPTS[0]);
   const [notes, setNotes] = useState("");
   const [isCash, setIsCash] = useState(true);
+  const [teamId, setTeamId] = useState("");
+  const [tournaments, setTournaments] = useState<TournamentSummary[] | null>(null);
   const [confirmingLow, setConfirmingLow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const notesRequired = concept === "otros";
+  const isMatch = concept === "partidos";
+
+  // Los equipos sólo hacen falta para un partido; se traen la primera vez.
+  useEffect(() => {
+    if (!isMatch || tournaments) return;
+    fetch("/api/torneos")
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)))
+      .then((d) => setTournaments(d.tournaments ?? []))
+      .catch(() => setErr("No se pudieron traer los equipos"));
+  }, [isMatch, tournaments]);
   const parsedAmount = Number(amount);
 
   const save = async () => {
@@ -32,6 +45,7 @@ function EgresoContent() {
       concept,
       notes: notes.trim() || null,
       is_cash: isCash,
+      team_id: isMatch ? teamId : null,
     });
     setLoading(false);
     // Not sent: it was the same expense registered twice.
@@ -50,6 +64,21 @@ function EgresoContent() {
     }
     if (notesRequired && !notes.trim()) {
       setErr("Para el concepto 'otros', contá en las notas qué se pagó");
+      return;
+    }
+    if (isMatch && !teamId) {
+      setErr("Elegí qué equipo jugó el partido");
+      return;
+    }
+    // Un egreso por partido: otro monto suele ser varios partidos sumados.
+    if (
+      isMatch &&
+      !(MATCH_AMOUNTS as readonly number[]).includes(parsedAmount) &&
+      !window.confirm(
+        `Un partido sale ${MATCH_AMOUNTS.map(formatArs).join(", ")}. ` +
+          `Si ${formatArs(parsedAmount)} son varios partidos, registrá uno por partido. ¿Guardarlo igual?`,
+      )
+    ) {
       return;
     }
     setErr(null);
@@ -82,6 +111,25 @@ function EgresoContent() {
               ))}
             </select>
           </label>
+
+          {isMatch && (
+            <label>
+              Equipo
+              <select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+                <option value="">{tournaments ? "¿Qué equipo jugó?" : "Cargando…"}</option>
+                {(tournaments ?? []).flatMap((t) => t.categories).map((c) => (
+                  <optgroup key={c.id} label={c.name}>
+                    {c.teams.map((team) => (
+                      <option key={team.id} value={team.id}>{team.name}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <span style={{ fontSize: "0.8rem", opacity: 0.7 }}>
+                Uno por partido. Si jugaron dos equipos del club entre sí, uno por cada equipo.
+              </span>
+            </label>
+          )}
 
           <label>
             Notas{notesRequired ? " (obligatorio)" : " (opcional)"}

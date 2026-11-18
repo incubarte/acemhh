@@ -136,6 +136,7 @@ function FlowLine({ entry }: { entry: FlowEntry }) {
       "📤",
       <>
         {entry.name} pagó {entry.concept}
+        {entry.team ? ` de ${entry.team}` : ""}
         {entry.notes ? ` — ${entry.notes}` : ""}
         {entry.is_cash ? "" : " (banco)"}
       </>,
