@@ -121,3 +121,42 @@ test("una categoría sin cuotas no debe nada", () => {
   expect(s.nextSuggested).toBeNull();
   expect(s.upfrontAvailable).toBe(false);
 });
+
+// Senior del Clausura 2026, el caso de Daniel Digangi: 80 + 75 + 70 + 30.
+const C: Installment[] = [
+  { month: "2026-09", amount: 80000 },
+  { month: "2026-10", amount: 75000 },
+  { month: "2026-11", amount: 70000 },
+  { month: "2026-12", amount: 30000 },
+];
+
+test("septiembre bonificado entero: lo pagado va a octubre y noviembre, y queda al día", () => {
+  const s = feeStanding(C, null, [cuota(75000), cuota(70000)], "2026-11", [{ month: "2026-09", amount: 80000 }]);
+  expect(statuses(s)).toEqual(["waived", "paid", "paid", "upcoming"]);
+  expect(s.installments[0]).toMatchObject({ amount: 0, waived: 80000, paid: 0 });
+  expect(s.total).toBe(175000);
+  expect(s.dueSoFar).toBe(145000);
+  expect(s.outstandingNow).toBe(0);
+  expect(s.nextSuggested).toBe(30000);
+});
+
+test("una bonificación parcial baja la cuota de su mes", () => {
+  const s = feeStanding(C, null, [cuota(40000)], "2026-09", [{ month: "2026-09", amount: 40000 }]);
+  expect(statuses(s)).toEqual(["paid", "upcoming", "upcoming", "upcoming"]);
+  expect(s.installments[0]).toMatchObject({ amount: 40000, waived: 40000, paid: 40000 });
+  expect(s.outstandingNow).toBe(0);
+});
+
+test("una bonificación mayor que la cuota la deja en cero, no resta de las otras", () => {
+  const s = feeStanding(C, null, [], "2026-10", [{ month: "2026-09", amount: 100000 }]);
+  expect(statuses(s)).toEqual(["waived", "due", "upcoming", "upcoming"]);
+  expect(s.total).toBe(175000);
+  expect(s.outstandingNow).toBe(75000);
+});
+
+test("quien pagó el anticipado no lleva bonificación", () => {
+  const s = feeStanding(A, UPFRONT_A, [{ amount: UPFRONT_A, concept: "tournament upfront" }], "2026-09",
+    [{ month: "2026-09", amount: 60000 }]);
+  expect(s.total).toBe(UPFRONT_A);
+  expect(statuses(s)).toEqual(["paid", "paid", "paid", "paid"]);
+});

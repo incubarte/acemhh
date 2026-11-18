@@ -13,13 +13,20 @@ export type Installment = { month: string; amount: number };
 
 export type FeePayment = { amount: number; concept: TournamentConcept };
 
+/** Lo que el club le perdona a un jugador de la cuota de un mes: entera o una
+ * parte. Baja la cuota y el total; no es plata que entró. */
+export type FeeWaiver = { month: string; amount: number };
+
 /**
  * paid: cubierta entera. partial: algo, no todo. due: nada, y el mes ya
- * llegó. upcoming: nada, pero todavía no hace falta.
+ * llegó. upcoming: nada, pero todavía no hace falta. waived: el club la
+ * bonificó entera, no hay nada que pagar.
  */
-export type InstallmentStatus = "paid" | "partial" | "due" | "upcoming";
+export type InstallmentStatus = "paid" | "partial" | "due" | "upcoming" | "waived";
 
 export type InstallmentStanding = Installment & {
+  /** Lo bonificado de la cuota; `amount` ya viene descontado. */
+  waived: number;
   paid: number;
   status: InstallmentStatus;
 };
@@ -65,10 +72,24 @@ export function feeStanding(
   upfrontPrice: number | null,
   payments: FeePayment[],
   todayMonth: string,
+  waivers: FeeWaiver[] = [],
 ): FeeStanding {
-  const ordered = [...nominal].sort((a, b) => a.month.localeCompare(b.month));
   const paid = payments.reduce((acc, p) => acc + p.amount, 0);
   const upfrontTaken = payments.some((p) => p.concept === "tournament upfront");
+  // La bonificación baja la cuota de su mes, nunca por debajo de cero. Quien
+  // pagó el anticipado ya tiene su precio cerrado: no se le descuenta nada.
+  const waivedIn = new Map<string, number>();
+  if (!upfrontTaken) {
+    for (const w of waivers) waivedIn.set(w.month, (waivedIn.get(w.month) ?? 0) + w.amount);
+  }
+  const waivedOf = new Map<string, number>();
+  const ordered = [...nominal]
+    .sort((a, b) => a.month.localeCompare(b.month))
+    .map((i) => {
+      const waived = Math.min(i.amount, waivedIn.get(i.month) ?? 0);
+      waivedOf.set(i.month, waived);
+      return { month: i.month, amount: i.amount - waived };
+    });
   const nominalTotal = ordered.reduce((acc, i) => acc + i.amount, 0);
   const total = upfrontTaken && upfrontPrice !== null ? upfrontPrice : nominalTotal;
   // El anticipado pagó todo: las cuotas se muestran con su valor nominal y
@@ -83,14 +104,17 @@ export function feeStanding(
     left -= applied;
     const isDue = i.month <= todayMonth;
     if (isDue) dueSoFar += i.amount;
-    const status: InstallmentStatus = applied >= i.amount
+    const waived = waivedOf.get(i.month) ?? 0;
+    const status: InstallmentStatus = i.amount === 0 && waived > 0
+      ? "waived"
+      : applied >= i.amount
       ? "paid"
       : applied > 0
       ? "partial"
       : isDue
       ? "due"
       : "upcoming";
-    return { ...i, paid: applied, status };
+    return { ...i, waived, paid: applied, status };
   });
 
   // Quien tomó el anticipado debía todo de una: así el "cobrado X de Y" del

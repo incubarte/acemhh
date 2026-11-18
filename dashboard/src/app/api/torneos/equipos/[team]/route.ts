@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
 import { todayBA } from "@/lib/trainingDay";
 import { feeStanding, type FeeStanding, type Installment } from "@/lib/tournamentFees";
-import { feeKindOf, loadTeam, memberKey, paymentsByMember, paymentsForTeams, type FeeKind, type TeamPaymentRow } from "@/lib/tournaments";
+import { feeKindOf, loadTeam, memberKey, paymentsByMember, paymentsForTeams, waiversByMember, type FeeKind, type TeamPaymentRow } from "@/lib/tournaments";
 
 export type TeamPlayer = {
   id: string;
@@ -43,11 +43,12 @@ export const GET = withPermission('api', '/api/torneos/equipos', 'GET', async (_
     const head = await loadTeam(s, teamId);
     if (!head) return new NextResponse("Equipo inexistente", { status: 404 });
 
-    const [membersRes, payments] = await Promise.all([
+    const [membersRes, payments, waivers] = await Promise.all([
       s.from("team_players")
         .select("player_id,role,players(id,name,last_name,player_type)")
         .eq("team_id", teamId),
       paymentsForTeams(s, [teamId]),
+      waiversByMember(s, [teamId]),
     ]);
     if (membersRes.error) return new NextResponse(membersRes.error.message, { status: 500 });
 
@@ -72,7 +73,10 @@ export const GET = withPermission('api', '/api/torneos/equipos', 'GET', async (_
           role: (m.role === "substitute" ? "substitute" : "starter") as TeamPlayer["role"],
           fee,
           standing: fee === "installments"
-            ? feeStanding(head.category.installments, head.category.upfront_price, mine, today)
+            ? feeStanding(
+              head.category.installments, head.category.upfront_price, mine, today,
+              waivers.get(memberKey(teamId, String(m.player_id))),
+            )
             : feeStanding([], null, mine, today),
           payments: mine.map(({ id, amount, concept, notes, created_at, registered_by }) => ({
             id, amount, concept, notes, created_at, registered_by,

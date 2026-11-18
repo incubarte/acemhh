@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
 import { todayBA } from "@/lib/trainingDay";
 import { feeStanding, type Installment } from "@/lib/tournamentFees";
-import { feeKindOf, memberKey, paymentsByMember, paymentsForTeams, type FeeKind } from "@/lib/tournaments";
+import { feeKindOf, memberKey, paymentsByMember, paymentsForTeams, waiversByMember, type FeeKind } from "@/lib/tournaments";
 
 export type TeamSummary = {
   id: string;
@@ -66,7 +66,7 @@ export const GET = withPermission('api', '/api/torneos', 'GET', async () => {
   const catIds = cats.map((c) => String(c.id));
   const teamIds = teams.map((t) => String(t.id));
 
-  const [instRes, membersRes, payments] = await Promise.all([
+  const [instRes, membersRes, payments, waivers] = await Promise.all([
     catIds.length
       ? s.from("tournament_installments").select("category_id,month,amount").in("category_id", catIds)
       : Promise.resolve({ data: [], error: null }),
@@ -74,6 +74,7 @@ export const GET = withPermission('api', '/api/torneos', 'GET', async () => {
       ? s.from("team_players").select("team_id,player_id,role,players(player_type)").in("team_id", teamIds)
       : Promise.resolve({ data: [], error: null }),
     paymentsForTeams(s, teamIds),
+    waiversByMember(s, teamIds),
   ]);
   const secondError = instRes.error ?? membersRes.error;
   if (secondError) return new NextResponse(secondError.message, { status: 500 });
@@ -136,7 +137,9 @@ export const GET = withPermission('api', '/api/torneos', 'GET', async () => {
         summary.substitutesPaid += mine.reduce((acc, p) => acc + p.amount, 0);
         continue;
       }
-      const standing = feeStanding(installments, upfront, mine, today);
+      const standing = feeStanding(
+        installments, upfront, mine, today, waivers.get(memberKey(teamId, m.player_id)),
+      );
       if (standing.outstandingNow === 0) summary.upToDate += 1;
       summary.collected += standing.paid;
       summary.dueSoFar += standing.dueSoFar;

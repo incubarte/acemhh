@@ -3,7 +3,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AuthSession } from "@/lib/authMiddleware";
-import { TournamentConcepts, type TournamentConcept } from "@/lib/tournamentFees";
+import { TournamentConcepts, type FeeWaiver, type TournamentConcept } from "@/lib/tournamentFees";
 
 export type TeamPaymentRow = {
   id: string;
@@ -53,6 +53,27 @@ export function paymentsByMember(rows: TeamPaymentRow[]): Map<string, TeamPaymen
     const list = out.get(k);
     if (list) list.push(p);
     else out.set(k, [p]);
+  }
+  return out;
+}
+
+/** Las bonificaciones de cuota de estos equipos, por (equipo, jugador). */
+export async function waiversByMember(
+  s: SupabaseClient,
+  teamIds: string[],
+): Promise<Map<string, FeeWaiver[]>> {
+  const out = new Map<string, FeeWaiver[]>();
+  if (teamIds.length === 0) return out;
+  const { data, error } = await s
+    .from("tournament_fee_waivers")
+    .select("team_id,player_id,month,amount")
+    .in("team_id", teamIds);
+  if (error) throw new Error("tournament_fee_waivers: " + error.message);
+  for (const w of data ?? []) {
+    const k = memberKey(String(w.team_id), String(w.player_id));
+    const list = out.get(k) ?? [];
+    list.push({ month: String(w.month), amount: Number(w.amount) });
+    out.set(k, list);
   }
   return out;
 }

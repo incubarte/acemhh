@@ -28,6 +28,7 @@ const StatusColor: Record<InstallmentStatus, string> = {
   partial: "#f2c14e",
   due: "#e5484d",
   upcoming: "rgba(255,255,255,0.14)",
+  waived: "#5b8def",
 };
 
 const StatusWord: Record<InstallmentStatus, string> = {
@@ -35,6 +36,7 @@ const StatusWord: Record<InstallmentStatus, string> = {
   partial: "pagada en parte",
   due: "vencida, sin pagar",
   upcoming: "todavía no vence",
+  waived: "bonificada",
 };
 
 const rowBorder = "1px solid rgba(255,255,255,0.07)";
@@ -306,11 +308,16 @@ function PlayerSheet({ p, onPay }: { p: TeamPlayer; onPay: () => void }) {
                   {monthNameEs(i.month)}
                 </span>
                 <span style={num}>
-                  {i.status === "paid"
+                  {i.status === "waived"
+                    ? "bonificada"
+                    : i.status === "paid"
                     ? `$${formatArs(i.amount)} ✓`
                     : i.status === "upcoming"
                     ? `$${formatArs(i.amount)}`
                     : `$${formatArs(i.paid)} de $${formatArs(i.amount)}`}
+                  {i.waived > 0 && i.status !== "waived" && (
+                    <span style={{ opacity: 0.6 }}> · bonificados ${formatArs(i.waived)}</span>
+                  )}
                 </span>
               </div>
             ))}
