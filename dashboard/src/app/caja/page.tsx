@@ -138,6 +138,7 @@ function FlowLine({ entry }: { entry: FlowEntry }) {
         {entry.name} pagó {entry.concept}
         {entry.team ? ` de ${entry.team}` : ""}
         {entry.match_date ? ` del ${Number(entry.match_date.slice(8))}/${Number(entry.match_date.slice(5, 7))}` : ""}
+        {entry.match_code ? ` (${entry.match_code})` : ""}
         {entry.notes ? ` — ${entry.notes}` : ""}
         {entry.is_cash ? "" : " (banco)"}
       </>,

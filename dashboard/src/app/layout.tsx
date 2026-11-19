@@ -4,6 +4,7 @@ import Script from "next/script";
 import "./globals.css";
 import TopStack from "./components/TopStack";
 import ActivityTracker from "./components/ActivityTracker";
+import SaveFeedback from "./components/SaveFeedback";
 import { PageTitleProvider } from "./components/PageTitleContext";
 
 export const metadata = {
@@ -24,6 +25,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             </div>
           </div>
         </PageTitleProvider>
+        <SaveFeedback />
       </body>
     </html>
   );

@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import ProtectedPage from "../../components/ProtectedPage";
 import { usePageTitle } from "../../components/PageTitleContext";
 import { EXPENSE_CONCEPTS, MATCH_AMOUNTS } from "@/lib/expenses";
-import type { TournamentSummary } from "@/app/api/torneos/route";
-import { todayBA } from "@/lib/trainingDay";
+import MatchPicker, { type MatchChoice } from "./MatchPicker";
 import { postMoney } from "@/lib/postMoney";
 import { Card, LowAmountDialog, formatArs } from "../ui";
 
@@ -18,24 +17,13 @@ function EgresoContent() {
   const [concept, setConcept] = useState<string>(EXPENSE_CONCEPTS[0]);
   const [notes, setNotes] = useState("");
   const [isCash, setIsCash] = useState(true);
-  const [teamId, setTeamId] = useState("");
-  const [matchDate, setMatchDate] = useState("");
-  const [tournaments, setTournaments] = useState<TournamentSummary[] | null>(null);
+  const [match, setMatch] = useState<MatchChoice | null>(null);
   const [confirmingLow, setConfirmingLow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const notesRequired = concept === "otros";
   const isMatch = concept === "partidos";
-
-  // Los equipos sólo hacen falta para un partido; se traen la primera vez.
-  useEffect(() => {
-    if (!isMatch || tournaments) return;
-    fetch("/api/torneos")
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)))
-      .then((d) => setTournaments(d.tournaments ?? []))
-      .catch(() => setErr("No se pudieron traer los equipos"));
-  }, [isMatch, tournaments]);
   const parsedAmount = Number(amount);
 
   const save = async () => {
@@ -47,8 +35,8 @@ function EgresoContent() {
       concept,
       notes: notes.trim() || null,
       is_cash: isCash,
-      team_id: isMatch ? teamId : null,
-      match_date: isMatch ? matchDate : null,
+      match_id: isMatch ? match?.matchId : null,
+      team_id: isMatch ? match?.teamId : null,
     });
     setLoading(false);
     // Not sent: it was the same expense registered twice.
@@ -69,12 +57,8 @@ function EgresoContent() {
       setErr("Para el concepto 'otros', contá en las notas qué se pagó");
       return;
     }
-    if (isMatch && !teamId) {
-      setErr("Elegí qué equipo jugó el partido");
-      return;
-    }
-    if (isMatch && !matchDate) {
-      setErr("Elegí qué día se jugó el partido");
+    if (isMatch && !match) {
+      setErr("Elegí a qué partido va el pago");
       return;
     }
     // Un egreso por partido: otro monto suele ser varios partidos sumados.
@@ -120,31 +104,12 @@ function EgresoContent() {
           </label>
 
           {isMatch && (
-            <label>
-              Equipo
-              <select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
-                <option value="">{tournaments ? "¿Qué equipo jugó?" : "Cargando…"}</option>
-                {(tournaments ?? []).flatMap((t) => t.categories).map((c) => (
-                  <optgroup key={c.id} label={c.name}>
-                    {c.teams.map((team) => (
-                      <option key={team.id} value={team.id}>{team.name}</option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            </label>
-          )}
-
-          {isMatch && (
-            <label>
-              Día del partido
-              <input
-                type="date"
-                value={matchDate}
-                max={todayBA()}
-                onChange={(e) => setMatchDate(e.target.value)}
-              />
-            </label>
+            <div>
+              Partido
+              <div style={{ marginTop: 6 }}>
+                <MatchPicker value={match} onChange={setMatch} />
+              </div>
+            </div>
           )}
 
           {isMatch && (

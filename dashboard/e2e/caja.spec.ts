@@ -142,74 +142,143 @@ test("el egreso con concepto 'otros' exige notas", async ({ page }) => {
   await expect(page.getByText(/contá en las notas/)).toBeVisible();
 });
 
-test("un partido nombra al equipo; dos equipos del club entre sí son dos egresos", async ({ page }) => {
+// El selector arranca en el día de hoy, o en el último con partidos: con el
+// reloj fijo el 19/11, es el martes 17/11 (B24 Acemhh B-Linces, C24, D10).
+const Today = new Date("2026-11-19T15:00:00-03:00");
+const C2 = "ce14d510-b81c-4b4a-b841-8e3453e55177";
+const C1 = "877af798-ac30-499f-8912-2790eddc7a96";
+const B = "a7c56b35-6caa-4edb-ba61-0ad320c2bd70";
+const Linces = "f3be9f9f-b7e3-4a30-8246-1dbce85817cd";
+
+async function matchId(code: string): Promise<string> {
+  const { data } = await admin().from("matches").select("id").eq("code", code).single();
+  return data!.id;
+}
+
+test("un pago de partido se elige de la agenda, día por día", async ({ page }) => {
+  await page.clock.setFixedTime(Today);
   await page.request.post("/api/auth/dev");
   await page.goto("/caja/egreso");
 
   await page.getByLabel("Monto").fill("260000");
   await page.getByLabel("Concepto").selectOption("partidos");
   await page.getByLabel(/Notas/).fill(EXPENSE_NOTES);
-  // Sin equipo no se guarda.
-  await page.getByRole("button", { name: "Guardar" }).click();
-  await expect(page.getByText("Elegí qué equipo jugó el partido")).toBeVisible();
 
-  await page.getByLabel("Equipo").selectOption({ label: "ACEMHH C1" });
-  // Ni sin el día.
+  // Sin partido no se guarda.
   await page.getByRole("button", { name: "Guardar" }).click();
-  await expect(page.getByText("Elegí qué día se jugó el partido")).toBeVisible();
+  await expect(page.getByText("Elegí a qué partido va el pago")).toBeVisible();
 
-  await page.getByLabel("Día del partido").fill("2026-09-20");
+  const day = page.getByTestId("match-day");
+  const options = page.getByTestId("match-option");
+  await expect(day).toHaveText("Martes 17/11");
+  // B24 es entre dos equipos del club: una opción por cada uno que paga.
+  await expect(options).toHaveCount(4);
+  await expect(options.filter({ hasText: "Paga ACEMHH B Linces" })).toHaveCount(1);
+
+  // Las flechas saltan a los días con partidos.
+  await page.getByRole("button", { name: "Día siguiente" }).click();
+  await expect(day).toHaveText("Sábado 21/11");
+  await page.getByRole("button", { name: "Día anterior" }).click();
+  await page.getByRole("button", { name: "Día anterior" }).click();
+  await expect(day).toHaveText("Domingo 15/11");
+  await page.getByRole("button", { name: "Día siguiente" }).click();
+
+  await options.filter({ hasText: "C24" }).click();
   await page.getByRole("button", { name: "Guardar" }).click();
   await page.waitForURL("**/caja");
-  await expect(page.getByText(`pagó partidos de ACEMHH C1 del 20/9 — ${EXPENSE_NOTES}`)).toBeVisible();
+  await expect(page.getByText(`pagó partidos de ACEMHH C1 del 17/11 (C24) — ${EXPENSE_NOTES}`)).toBeVisible();
 
-  // El rival, mismo monto y al rato: no es un duplicado.
-  const res = await page.request.post("/api/expenses", {
-    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES, team_id: "ce14d510-b81c-4b4a-b841-8e3453e55177", match_date: "2026-09-20" },
+  // De vuelta en el formulario, el partido ya muestra lo registrado.
+  await page.goto("/caja/egreso");
+  await page.getByLabel("Concepto").selectOption("partidos");
+  await expect(options.filter({ hasText: "C24" })).toContainText("Ya registrado: $260.000");
+});
+
+test("la API de pagos de partido: el equipo que paga juega ese partido", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  const b24 = await matchId("B24");
+  const post = (data: object) => page.request.post("/api/expenses", {
+    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES, ...data },
   });
-  expect(res.status()).toBe(200);
 
-  // El mismo equipo dos veces seguidas sí lo es.
-  const again = await page.request.post("/api/expenses", {
-    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES, team_id: "ce14d510-b81c-4b4a-b841-8e3453e55177", match_date: "2026-09-20" },
-  });
-  expect(again.status()).toBe(409);
-
-  // Un partido sin día, o de un día que no llegó, tampoco.
+  expect((await post({ match_id: b24, team_id: B })).status()).toBe(200);
+  // Linces es el rival del club en el mismo partido, al rato: no es un duplicado.
+  expect((await post({ match_id: b24, team_id: Linces })).status()).toBe(200);
+  // El mismo equipo y partido otra vez, sí.
+  expect((await post({ match_id: b24, team_id: Linces })).status()).toBe(409);
+  // Un equipo que no juega ese partido, o sin partido, no.
+  expect((await post({ match_id: b24, team_id: C2 })).status()).toBe(400);
+  expect((await post({ team_id: B })).status()).toBe(400);
+  // Ningún otro concepto lleva partido.
   expect((await page.request.post("/api/expenses", {
-    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES, team_id: "ce14d510-b81c-4b4a-b841-8e3453e55177" },
-  })).status()).toBe(400);
-  expect((await page.request.post("/api/expenses", {
-    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES, team_id: "ce14d510-b81c-4b4a-b841-8e3453e55177", match_date: "2099-01-01" },
+    data: { amount: 5000, concept: "seguro", notes: EXPENSE_NOTES, match_id: b24, team_id: B },
   })).status()).toBe(400);
 
-  // Sin equipo, o con equipo en otro concepto, la API lo rechaza.
-  expect((await page.request.post("/api/expenses", {
-    data: { amount: 260000, concept: "partidos", notes: EXPENSE_NOTES, match_date: "2026-09-20" },
-  })).status()).toBe(400);
-  expect((await page.request.post("/api/expenses", {
-    data: { amount: 5000, concept: "seguro", notes: EXPENSE_NOTES, team_id: "ce14d510-b81c-4b4a-b841-8e3453e55177" },
-  })).status()).toBe(400);
+  const { data } = await admin().from("expenses").select("team_id,matches(code)").eq("notes", EXPENSE_NOTES);
+  expect((data ?? []).map((e) => `${(e.matches as unknown as { code: string }).code} ${e.team_id}`).sort())
+    .toEqual([`B24 ${B}`, `B24 ${Linces}`].sort());
 
-  const { data } = await admin().from("expenses").select("match_date,teams(name)").eq("notes", EXPENSE_NOTES);
-  expect((data ?? []).map((e) => `${(e.teams as unknown as { name: string }).name} ${e.match_date}`).sort())
-    .toEqual(["ACEMHH C1 2026-09-20", "ACEMHH C2 2026-09-20"]);
+  // C26 es C1-C2: los dos pueden pagar.
+  const c26 = await matchId("C26");
+  expect((await post({ match_id: c26, team_id: C1 })).status()).toBe(200);
+  expect((await post({ match_id: c26, team_id: C2 })).status()).toBe(200);
 });
 
 test("un egreso de partidos por un monto que no es un partido pregunta antes", async ({ page }) => {
+  await page.clock.setFixedTime(Today);
   await page.request.post("/api/auth/dev");
   await page.goto("/caja/egreso");
 
   await page.getByLabel("Monto").fill("520000");
   await page.getByLabel("Concepto").selectOption("partidos");
-  await page.getByLabel("Equipo").selectOption({ label: "ACEMHH A" });
-  await page.getByLabel("Día del partido").fill("2026-11-06");
+  await page.getByTestId("match-option").filter({ hasText: "D10" }).click();
   await page.getByLabel(/Notas/).fill(EXPENSE_NOTES);
 
   let asked = "";
   page.once("dialog", (d) => { asked = d.message(); d.dismiss(); });
   await page.getByRole("button", { name: "Guardar" }).click();
   await expect.poll(() => asked).toContain("registrá uno por partido");
+  await expect(page).toHaveURL(/\/caja\/egreso$/);
+});
+
+test("guardar bloquea la pantalla con el loader y termina en un tilde que se va solo", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  await page.goto("/caja/egreso");
+  // La respuesta tarda: se llega a ver el loader.
+  await page.route("**/api/expenses", async (route) => {
+    await new Promise((r) => setTimeout(r, 800));
+    await route.continue();
+  });
+
+  await page.getByLabel("Monto").fill("1500");
+  await page.getByLabel("Concepto").selectOption("otros");
+  await page.getByLabel(/Notas/).fill(EXPENSE_NOTES);
+  await page.getByRole("button", { name: "Guardar" }).click();
+
+  const overlay = page.getByTestId("save-feedback");
+  await expect(overlay).toHaveAttribute("data-phase", "saving");
+  await expect(overlay).toContainText("Guardando");
+  await expect(overlay).toHaveAttribute("data-phase", "ok");
+  await expect(overlay).toContainText("¡Guardado!");
+  await expect(overlay).toHaveCount(0, { timeout: 5000 });
+});
+
+test("si guardar falla, el loader termina en una cruz con lo que dijo el servidor", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  await page.goto("/caja/egreso");
+  await page.route("**/api/expenses", (route) => route.fulfill({ status: 500, body: "Se cayó la base" }));
+
+  await page.getByLabel("Monto").fill("1500");
+  await page.getByLabel("Concepto").selectOption("otros");
+  await page.getByLabel(/Notas/).fill(EXPENSE_NOTES);
+  await page.getByRole("button", { name: "Guardar" }).click();
+
+  const overlay = page.getByTestId("save-feedback");
+  await expect(overlay).toHaveAttribute("data-phase", "fail");
+  await expect(overlay).toContainText("No se pudo guardar");
+  await expect(overlay).toContainText("Se cayó la base");
+  await expect(overlay).toHaveCount(0, { timeout: 7000 });
+  // El formulario sigue ahí, con el error, para corregir y reintentar.
   await expect(page).toHaveURL(/\/caja\/egreso$/);
 });
 
