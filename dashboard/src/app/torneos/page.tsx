@@ -19,6 +19,9 @@ const heading: React.CSSProperties = {
   opacity: 0.55,
 };
 
+// La tarjeta va en filas, no en columnas: arriba el nombre entero y cómo
+// está el equipo, abajo los jugadores y una barra con lo cobrado. En dos
+// columnas, el nombre y los montos se pisaban en un celular de 360px.
 function TeamCard({ team }: { team: TeamSummary }) {
   // Sólo los titulares tienen cuota: los arqueros no pagan y los suplentes
   // pagan suelto, sin obligación. Ni unos ni otros son deudores.
@@ -29,52 +32,95 @@ function TeamCard({ team }: { team: TeamSummary }) {
     team.starters > 0 ? `${team.starters} ${team.starters === 1 ? "titular" : "titulares"}` : null,
     team.substitutes > 0 ? `${team.substitutes} ${team.substitutes === 1 ? "suplente" : "suplentes"}` : null,
   ].filter(Boolean).join(" · ");
+  const statusColor = allGood ? "var(--acemhh-green-3)" : owing > 0 ? "#f2c14e" : "inherit";
+  const progress = team.dueSoFar > 0 ? Math.min(1, team.collected / team.dueSoFar) : 0;
 
   return (
     <Link
       href={`/torneos/equipos/${team.id}`}
       data-testid="team-card"
       data-team={team.id}
-      style={{ textDecoration: "none", display: "block" }}
+      style={{ textDecoration: "none", display: "block", color: "inherit" }}
     >
       <div
         className="card"
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 12,
-          padding: "12px 14px",
-          lineHeight: 1.4,
+          gap: 10,
+          padding: "12px 12px 12px 14px",
+          lineHeight: 1.35,
           marginTop: 8,
         }}
       >
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {team.name}
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+            <div style={{ flex: 1, minWidth: 0, fontWeight: 600, overflowWrap: "anywhere" }}>
+              {team.name}
+            </div>
+            {payers > 0 && (
+              <div
+                data-testid="team-up-to-date"
+                style={{
+                  flexShrink: 0,
+                  fontWeight: 600,
+                  fontSize: "0.85rem",
+                  whiteSpace: "nowrap",
+                  color: statusColor,
+                }}
+              >
+                {allGood ? "todos al día" : `${owing} ${owing === 1 ? "debe" : "deben"}`}
+              </div>
+            )}
           </div>
-          <div style={{ fontSize: "0.8rem", opacity: 0.7, margin: 0 }}>
+          <div style={{ fontSize: "0.8rem", opacity: 0.7, marginTop: 2 }}>
             {team.players === 0 ? "Sin jugadores cargados" : roles}
           </div>
+          {payers > 0 && (
+            <>
+              <div
+                aria-hidden="true"
+                style={{
+                  height: 4,
+                  borderRadius: 2,
+                  background: "rgba(255,255,255,0.12)",
+                  marginTop: 10,
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    width: `${progress * 100}%`,
+                    height: "100%",
+                    borderRadius: 2,
+                    background: allGood ? "var(--acemhh-green-3)" : "#f2c14e",
+                  }}
+                />
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  justifyContent: "space-between",
+                  columnGap: 12,
+                  fontSize: "0.75rem",
+                  marginTop: 6,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                <span style={{ opacity: 0.75, whiteSpace: "nowrap" }}>
+                  ${formatArs(team.collected)} de ${formatArs(team.dueSoFar)}
+                </span>
+                {team.substitutesPaid > 0 && (
+                  <span style={{ opacity: 0.55, whiteSpace: "nowrap" }}>
+                    suplentes ${formatArs(team.substitutesPaid)}
+                  </span>
+                )}
+              </div>
+            </>
+          )}
         </div>
-        {payers > 0 && (
-          <div style={{ textAlign: "right", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
-            <div
-              data-testid="team-up-to-date"
-              style={{
-                fontWeight: 600,
-                fontSize: "0.9rem",
-                color: allGood ? "var(--acemhh-green-3)" : owing > 0 ? "#f2c14e" : undefined,
-              }}
-            >
-              {allGood ? "todos al día" : `${owing} ${owing === 1 ? "debe" : "deben"}`}
-            </div>
-            <div style={{ fontSize: "0.75rem", opacity: 0.6, margin: 0 }}>
-              ${formatArs(team.collected)} de ${formatArs(team.dueSoFar)}
-              {team.substitutesPaid > 0 && ` · suplentes $${formatArs(team.substitutesPaid)}`}
-            </div>
-          </div>
-        )}
-        <span style={{ opacity: 0.5, fontSize: "1.2rem", flexShrink: 0 }}>›</span>
+        <span aria-hidden="true" style={{ opacity: 0.5, fontSize: "1.2rem", flexShrink: 0 }}>›</span>
       </div>
     </Link>
   );
