@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
-import { isoWeekday } from "@shared/slot";
+import { isoWeekday, slotLabel } from "@shared/slot";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   checkPayment,
   type PaymentConcept,
@@ -9,6 +10,7 @@ import {
   withinWriteWindow,
 } from "@shared/tokens";
 import { ledgerExtrasFor } from "@/lib/rosterLedger";
+import { formatArs, monthNameEs } from "@/lib/tournamentFees";
 import { todayBA } from "@/lib/trainingDay";
 import { cleanNotes, closedSessionResponse, duplicateResponse, recentDuplicate } from "@/lib/moneyWrites";
 
@@ -102,12 +104,19 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
     const monthlySlots = new Set<string>();
     const individualSlots = new Set<string>();
     let monthlyPaid = 0;
+    const monthlyElsewhere = new Map<string, OtherMonthly>();
     for (const p of sameMonth ?? []) {
       if (p.slot_weekday === null || p.slot_hour === null) continue;
       const k = slotKey(Number(p.slot_weekday), Number(p.slot_hour));
       if (p.concept === "monthly" || p.concept === "half month") {
         monthlySlots.add(k);
         if (p.concept === "monthly" && k === slot) monthlyPaid += Number(p.amount);
+        if (p.concept === "monthly" && k !== slot) {
+          const other = monthlyElsewhere.get(k) ??
+            { weekday: Number(p.slot_weekday), hour: Number(p.slot_hour), paid: 0 };
+          other.paid += Number(p.amount);
+          monthlyElsewhere.set(k, other);
+        }
       } else individualSlots.add(k);
     }
 
@@ -128,7 +137,15 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
         halfMonthPrice: extras?.half_month_preset ?? 0,
       },
     );
-    if (refusal) return new NextResponse(refusal, { status: 409 });
+    if (refusal) {
+      // A small monthly payment refused here is usually the rest of a month
+      // started in another slot, taken from the wrong session: say where it
+      // belongs instead of only that it is too small.
+      const elsewhere = concept === "monthly" && monthlyPaid === 0
+        ? await incompleteMonthlyElsewhere(s, player, selectedMonth, [...monthlyElsewhere.values()])
+        : null;
+      return new NextResponse(elsewhere ?? refusal, { status: 409 });
+    }
 
     // A session payment names its session: paying today's and a missed one
     // back to back is two payments, not one typed twice.
@@ -181,3 +198,44 @@ export const POST = withPermission('api', '/api/training-sessions/payment', 'POS
     return new NextResponse("Internal server error", { status: 500 });
   }
 });
+
+type OtherMonthly = { weekday: number; hour: number; paid: number };
+
+/**
+ * Where this month's monthly payment was started and left incomplete, as the
+ * refusal should say it; null when there is no such slot. Each slot's price is
+ * the ledger's, worked out from one of its sessions this month.
+ */
+async function incompleteMonthlyElsewhere(
+  s: SupabaseClient,
+  player: Parameters<typeof ledgerExtrasFor>[1][number],
+  month: string,
+  slots: OtherMonthly[],
+): Promise<string | null> {
+  if (slots.length === 0) return null;
+  // Bounded by the first of the next month: "YYYY-11-31" is not a date, and
+  // Postgres rejects the whole query rather than clamping it.
+  const [y, m] = month.split("-").map(Number);
+  const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+  const { data: sessions } = await s
+    .from("training_sessions_resolved")
+    .select("date,hour")
+    .gte("date", `${month}-01`)
+    .lt("date", `${next}-01`);
+  const missing: string[] = [];
+  for (const slot of slots) {
+    const one = (sessions ?? []).find((t) =>
+      Number(t.hour) === slot.hour && isoWeekday(String(t.date)) === slot.weekday
+    );
+    if (!one) continue;
+    const session = `${one.date}-${String(slot.hour).padStart(2, "0")}`;
+    const price = (await ledgerExtrasFor(s, [player], session)).get(player.id)?.month_preset ?? 0;
+    const left = price - slot.paid;
+    if (left > 0) missing.push(`${slotLabel(slot.weekday, slot.hour)} (le faltan $${formatArs(left)})`);
+  }
+  if (missing.length === 0) return null;
+  const name = monthNameEs(month).toLowerCase();
+  return missing.length === 1
+    ? `El mensual de ${name} de este jugador es del ${missing[0]}: cobralo desde esa sesión`
+    : `Este jugador tiene mensuales de ${name} sin completar en ${missing.join(" y ")}: cobralos desde esas sesiones`;
+}
