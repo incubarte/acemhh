@@ -13,6 +13,8 @@ import DebtBreakdown from "../../components/DebtBreakdown";
 import NoteField from "../../components/NoteField";
 import TransferField from "../../components/TransferField";
 import { postMoney } from "@/lib/postMoney";
+import { attendanceGate, sendAttendance, type AttendancePlayer } from "@/lib/attendanceWrite";
+import type { SessionLock } from "@/lib/sessionLock";
 import { setActivityFocus } from "@/lib/activity";
 
 // Redesigned attendance & payments screen. Presence is expressed by the
@@ -231,7 +233,7 @@ function withPayment(p: RosterPlayer, amount: number, concept: PaymentConcept): 
   };
 }
 
-type RosterResponse = {
+type RosterResponse = Partial<SessionLock> & {
   current_date?: string | null;
   slot?: { categories: string[]; goalies: boolean } | null;
   players?: RosterPlayer[];
@@ -836,6 +838,9 @@ function TrainingSessionBetaContent() {
   const [players, setPlayers] = useState<RosterPlayer[]>([]);
   /** The date the club is working on, to flag browsing a different session. */
   const [currentDate, setCurrentDate] = useState<string | null>(null);
+  /** Whether the session still takes changes, and whether this admin may
+   * change it anyway. */
+  const [lock, setLock] = useState<SessionLock | null>(null);
   /** What this slot is: the categories that train here, and whether goalies do. */
   const [slot, setSlot] = useState<{ categories: string[]; goalies: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -928,6 +933,9 @@ function TrainingSessionBetaContent() {
   const applyRoster = useCallback((data: RosterResponse) => {
     pendingRef.current = null;
     setCurrentDate(data.current_date ?? null);
+    setLock(data.closed === undefined
+      ? null
+      : { closed: data.closed, can_write_closed: data.can_write_closed === true });
     setSlot(data.slot ?? null);
     // Reuse the existing object for players whose data did not change, so
     // React skips re-rendering their (memoized) rows entirely.
@@ -995,8 +1003,12 @@ function TrainingSessionBetaContent() {
   }, [applyRoster, quietIn]);
 
   /** Marks attendance right away and refreshes in the background: the row
-   * moves on the spot, and whichever refresh lands last wins. */
-  const setAttendance = useCallback(async (playerId: string, attended: boolean) => {
+   * moves on the spot, and whichever refresh lands last wins. A closed session
+   * is settled first, with no request: ROOT is asked, anybody else told. */
+  const setAttendance = useCallback(async (player: AttendancePlayer, attended: boolean) => {
+    const go = attendanceGate(session, lock, player, attended);
+    if (!go) return;
+    const playerId = player.id;
     setPlayers((prev) => prev.map((p) =>
       p.id === playerId
         ? {
@@ -1013,12 +1025,8 @@ function TrainingSessionBetaContent() {
         : p
     ));
 
-    const res = await fetch(`/api/training-sessions/${session}/attendance`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ player_id: playerId, attended }),
-    });
-    if (!res.ok) {
+    // On failure the admin is told, by name, the state the player was left in.
+    if (!await sendAttendance(session, player, attended, go.confirmClosed)) {
       // Put it back: the write never happened.
       setPlayers((prev) => prev.map((p) =>
         p.id === playerId
@@ -1033,7 +1041,7 @@ function TrainingSessionBetaContent() {
       return;
     }
     reload();
-  }, [session, reload]);
+  }, [session, lock, reload]);
 
   const settleWheel = useCallback((releaseVx: number) => {
     const g = gestureRef.current;
@@ -1077,7 +1085,7 @@ function TrainingSessionBetaContent() {
           const owes = !wasAttended &&
             ((g.player.debt_outstanding ?? 0) > 0 || g.player.owed_now > 0);
           if (owes) setConfirmPlayer(g.player);
-          else setAttendance(playerId, !wasAttended);
+          else setAttendance(g.player, !wasAttended);
         }
         return;
       }
@@ -1364,12 +1372,12 @@ function TrainingSessionBetaContent() {
           onConfirm={() => {
             const p = confirmPlayer;
             setConfirmPlayer(null);
-            setAttendance(p.id, true);
+            setAttendance(p, true);
           }}
           onCharge={() => {
             const p = confirmPlayer;
             setConfirmPlayer(null);
-            setAttendance(p.id, true);
+            setAttendance(p, true);
             setPayModalPlayer(p);
           }}
         />
@@ -1447,7 +1455,7 @@ function TrainingSessionBetaContent() {
                     key={r.id}
                     onClick={async () => {
                       setSearchOpen(null);
-                      await setAttendance(r.id, true);
+                      await setAttendance(r, true);
                     }}
                     style={{
                       display: "block",

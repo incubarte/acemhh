@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { withPermission } from "@/lib/authMiddleware";
-import { withinWriteWindow } from "@shared/tokens";
-import { todayBA } from "@/lib/trainingDay";
+import { sessionLock } from "@/lib/sessionLock";
 
 function toSpecificSlot(isoDate: string, hour: string): string {
   return `${isoDate} ${hour}hs`;
@@ -29,6 +28,8 @@ export const POST = withPermission('api', '/api/training-sessions/attendance', '
       attended: boolean;
       /** The admin decided not to charge this one. */
       bonified?: boolean;
+      /** ROOT only: change it although the session is already closed. */
+      confirm_closed?: boolean;
     };
 
     if (!body?.player_id || typeof body.attended !== 'boolean') {
@@ -36,13 +37,23 @@ export const POST = withPermission('api', '/api/training-sessions/attendance', '
     }
 
     // Attendance moves debt just like money does, so it closes on the same
-    // schedule: the current week and the previous one. Older than that takes
-    // direct access to the database.
-    if (!withinWriteWindow(isoDate, todayBA())) {
-      return new NextResponse(
-        "Esa sesión ya está cerrada: se puede marcar en la semana actual y la anterior",
-        { status: 409 },
-      );
+    // schedule: the current week and the previous one. Past that only ROOT
+    // may change it, and only sending confirm_closed: the screen asks first,
+    // knowing from the roster that the session is closed.
+    const lock = sessionLock(isoDate, sess.groups);
+    if (lock.closed) {
+      if (!lock.can_write_closed) {
+        return new NextResponse(
+          "Esa sesión ya está cerrada: se puede marcar en la semana actual y la anterior",
+          { status: 409 },
+        );
+      }
+      if (body.confirm_closed !== true) {
+        return new NextResponse(
+          "Esa sesión ya está cerrada: para cambiar el presente hay que confirmarlo",
+          { status: 409 },
+        );
+      }
     }
 
     // Upsert attendance

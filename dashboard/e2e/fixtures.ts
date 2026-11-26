@@ -84,6 +84,18 @@ function shiftMonth(month: string, by: number): string {
   return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, "0")}`;
 }
 
+/** The most recent training of a slot that is already closed: older than the
+ * current week and the previous one. */
+export async function closedSession(hour = 22): Promise<{ session: string; sessionStr: string }> {
+  const { data, error } = await admin().from("training_sessions")
+    .select("date").eq("hour", hour).lt("date", writeWindowStart(todayBA()))
+    .order("date", { ascending: false }).limit(1);
+  if (error) throw new Error(JSON.stringify(error));
+  const date = data?.[0]?.date ? String(data[0].date) : null;
+  if (!date) throw new Error(`La agenda no tiene un entrenamiento de ${hour}hs ya cerrado`);
+  return { session: `${date}-${hour}`, sessionStr: `${date} ${hour}hs` };
+}
+
 /**
  * The most recent training of a slot that is still writable, plus the one
  * before it. Usually the last one already held; but a week without training

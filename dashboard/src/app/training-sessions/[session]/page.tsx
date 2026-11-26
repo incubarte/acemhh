@@ -12,8 +12,16 @@ import DebtBreakdown from "../../components/DebtBreakdown";
 import NoteField from "../../components/NoteField";
 import TransferField from "../../components/TransferField";
 import { postMoney } from "@/lib/postMoney";
+import { attendanceGate, markAttendance, sendAttendance } from "@/lib/attendanceWrite";
+import type { SessionLock } from "@/lib/sessionLock";
 import { setActivityFocus } from "@/lib/activity";
 import type { PaymentConcept } from "@shared/tokens";
+
+function lockOf(data: { closed?: boolean; can_write_closed?: boolean }): SessionLock | null {
+  return data.closed === undefined
+    ? null
+    : { closed: data.closed, can_write_closed: data.can_write_closed === true };
+}
 
 type Player = {
   id: string;
@@ -97,6 +105,9 @@ function TrainingSessionDetailContent() {
   const [slotInfo, setSlotInfo] = useState<{ categories: string[]; goalies: boolean } | null>(null);
   /** The date the club is working on, to flag browsing a different session. */
   const [currentDate, setCurrentDate] = useState<string | null>(null);
+  /** Whether the session still takes changes, and whether this admin may
+   * change it anyway. */
+  const [lock, setLock] = useState<SessionLock | null>(null);
   const [debtModalPlayer, setDebtModalPlayer] = useState<PlayerWithAttendance | null>(null);
 
   // Taps in a player's panel say which player they were for.
@@ -125,29 +136,32 @@ function TrainingSessionDetailContent() {
       setErr(null);
 
       try {
-        // If returning from adding a new player, mark attendance first
-        if (newPlayerId && processedPlayerRef.current !== newPlayerId) {
-          processedPlayerRef.current = newPlayerId;
-          await fetch(`/api/training-sessions/${session}/attendance`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ player_id: newPlayerId, attended: true }),
-          });
-          // Remove the query param from the URL
-          window.history.replaceState(null, "", currentPath);
-        }
-
-        const res = await fetch(`/api/training-sessions/${session}`);
+        let res = await fetch(`/api/training-sessions/${session}`);
         if (!res.ok) {
           setErr(await res.text());
           setLoading(false);
           return;
         }
 
-        const data = await res.json();
+        let data = await res.json();
+
+        // Returning from adding a new player: mark them present, once the
+        // roster has said whether the session is still open.
+        if (newPlayerId && processedPlayerRef.current !== newPlayerId) {
+          processedPlayerRef.current = newPlayerId;
+          const added = (data.players ?? []).find((p: Player) => p.id === newPlayerId) ??
+            { id: newPlayerId, name: "el jugador nuevo" };
+          if (await markAttendance(session, lockOf(data), added, true)) {
+            res = await fetch(`/api/training-sessions/${session}`);
+            if (res.ok) data = await res.json();
+          }
+          // Remove the query param from the URL
+          window.history.replaceState(null, "", currentPath);
+        }
         setPlayers(data.players || []);
         if (data.slot) setSlotInfo(data.slot);
         setCurrentDate(data.current_date ?? null);
+        setLock(lockOf(data));
         setLoading(false);
       } catch {
         setErr("Error al cargar jugadores");
@@ -159,34 +173,23 @@ function TrainingSessionDetailContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, dateStr, hourStr, hour]);
 
-  const toggleAttendance = async (playerId: string, currentStatus: boolean) => {
+  const toggleAttendance = async (player: Player, currentStatus: boolean) => {
+    // A closed session is settled before anything moves: ROOT is asked,
+    // anybody else told. A failed write says who was left in which state.
+    const go = attendanceGateFor(player, !currentStatus);
+    if (!go) return;
     setPlayers(prev => prev.map(p =>
-      p.id === playerId ? { ...p, attended: !currentStatus } : p
+      p.id === player.id ? { ...p, attended: !currentStatus } : p
     ));
-
-    try {
-      const res = await fetch(`/api/training-sessions/${session}/attendance`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          player_id: playerId,
-          attended: !currentStatus,
-        }),
-      });
-
-      if (!res.ok) {
-        setPlayers(prev => prev.map(p =>
-          p.id === playerId ? { ...p, attended: currentStatus } : p
-        ));
-        alert("Error al actualizar asistencia");
-      }
-    } catch {
+    if (!await sendAttendance(session, player, !currentStatus, go.confirmClosed)) {
       setPlayers(prev => prev.map(p =>
-        p.id === playerId ? { ...p, attended: currentStatus } : p
+        p.id === player.id ? { ...p, attended: currentStatus } : p
       ));
-      alert("Error al actualizar asistencia");
     }
   };
+
+  const attendanceGateFor = (player: Player, attended: boolean) =>
+    attendanceGate(session, lock, player, attended);
 
   const confirmPayment = async () => {
     if (!pendingPayment) return;
@@ -221,14 +224,12 @@ function TrainingSessionDetailContent() {
         return;
       }
 
-      // Auto-mark attendance if not already marked
+      // Auto-mark attendance if not already marked. On a closed session only
+      // ROOT got this far, having confirmed the payment: that confirmation
+      // covers the attendance that goes with it.
       const player = players.find(p => p.id === playerId);
       if (player && !player.attended) {
-        await fetch(`/api/training-sessions/${session}/attendance`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ player_id: playerId, attended: true }),
-        });
+        await sendAttendance(session, player, true, lock?.closed === true);
       }
 
       // Reload players to get updated payment totals
@@ -238,6 +239,7 @@ function TrainingSessionDetailContent() {
         setPlayers(data.players || []);
         if (data.slot) setSlotInfo(data.slot);
         setCurrentDate(data.current_date ?? null);
+        setLock(lockOf(data));
       }
 
       setPaymentProcessing(false);
@@ -305,13 +307,9 @@ function TrainingSessionDetailContent() {
     }
   };
 
-  const selectCrossCategoryPlayer = async (playerId: string) => {
+  const selectCrossCategoryPlayer = async (player: Player) => {
     try {
-      await fetch(`/api/training-sessions/${session}/attendance`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ player_id: playerId, attended: true }),
-      });
+      await markAttendance(session, lock, player, true);
 
       const res = await fetch(`/api/training-sessions/${session}`);
       if (res.ok) {
@@ -319,6 +317,7 @@ function TrainingSessionDetailContent() {
         setPlayers(data.players || []);
         if (data.slot) setSlotInfo(data.slot);
         setCurrentDate(data.current_date ?? null);
+        setLock(lockOf(data));
       }
     } catch {
       alert("Error al agregar invitado");
@@ -345,13 +344,9 @@ function TrainingSessionDetailContent() {
     }
   };
 
-  const selectCrossCategoryArquero = async (playerId: string) => {
+  const selectCrossCategoryArquero = async (player: Player) => {
     try {
-      await fetch(`/api/training-sessions/${session}/attendance`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ player_id: playerId, attended: true }),
-      });
+      await markAttendance(session, lock, player, true);
 
       const res = await fetch(`/api/training-sessions/${session}`);
       if (res.ok) {
@@ -359,6 +354,7 @@ function TrainingSessionDetailContent() {
         setPlayers(data.players || []);
         if (data.slot) setSlotInfo(data.slot);
         setCurrentDate(data.current_date ?? null);
+        setLock(lockOf(data));
       }
     } catch {
       alert("Error al agregar arquero");
@@ -466,7 +462,10 @@ function TrainingSessionDetailContent() {
           borderBottom: "1px solid rgba(255,255,255,0.05)"
         }}>
           <span
-            onClick={() => toggleAttendance(player.id, player.attended)}
+            data-testid="attendance-toggle"
+            data-player={player.id}
+            data-attended={player.attended}
+            onClick={() => toggleAttendance(player, player.attended)}
             style={{
               cursor: "pointer",
               fontSize: "1.2rem",
@@ -833,7 +832,7 @@ function TrainingSessionDetailContent() {
             .map(p => (
             <div
               key={p.id}
-              onClick={() => selectCrossCategoryPlayer(p.id)}
+              onClick={() => selectCrossCategoryPlayer(p)}
               style={{
                 padding: "8px 12px 8px 24px",
                 cursor: "pointer",
@@ -1126,7 +1125,7 @@ function TrainingSessionDetailContent() {
                   .map(p => (
                   <div
                     key={p.id}
-                    onClick={() => selectCrossCategoryArquero(p.id)}
+                    onClick={() => selectCrossCategoryArquero(p)}
                     style={{
                       padding: "8px 12px 8px 24px",
                       cursor: "pointer",
