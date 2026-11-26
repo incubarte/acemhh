@@ -1,1181 +1,1490 @@
 "use client";
 
-import React, { Suspense, useEffect, useRef, useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 import ProtectedPage from "../../components/ProtectedPage";
 import Overlay from "../../components/Overlay";
 import SessionDateWarning from "../../components/SessionDateWarning";
-import ExperienceToggle from "../../components/ExperienceToggle";
 import { usePageTitle } from "../../components/PageTitleContext";
-import { paymentThresholdOverride } from "@/lib/thresholds";
+import type { PaymentConcept } from "@shared/tokens";
+import { categoryLabel } from "@/lib/categories";
 import DebtBreakdown from "../../components/DebtBreakdown";
 import NoteField from "../../components/NoteField";
 import TransferField from "../../components/TransferField";
 import { postMoney } from "@/lib/postMoney";
-import { attendanceGate, markAttendance, sendAttendance } from "@/lib/attendanceWrite";
+import { attendanceGate, paymentGate, sendAttendance, type AttendancePlayer } from "@/lib/attendanceWrite";
 import type { SessionLock } from "@/lib/sessionLock";
 import { setActivityFocus } from "@/lib/activity";
-import type { PaymentConcept } from "@shared/tokens";
 
-function lockOf(data: { closed?: boolean; can_write_closed?: boolean }): SessionLock | null {
-  return data.closed === undefined
-    ? null
-    : { closed: data.closed, can_write_closed: data.can_write_closed === true };
-}
+// Redesigned attendance & payments screen. Presence is expressed by the
+// section a player sits in, and toggled with a horizontal thumb-wheel on the
+// row itself.
 
-type Player = {
+type RosterPlayer = {
   id: string;
   name: string;
   last_name: string;
   categories: string[];
-};
-
-type PlayerWithAttendance = Player & {
-  attended: boolean;
-  payments: number;
-  hasSessionPayment: boolean;
-  paidMembershipDues: boolean;
-  dues_status: "full" | "partial" | "none";
   invitee: boolean;
   player_type: "player" | "goalkeeper";
   scholarship: number;
-  /** Bonified sessions from last month (club's fault), usable this month. */
+  attended: boolean;
+  payments: number;
+  payment_amounts: number[];
+  hasSessionPayment: boolean;
+  paidMonthlyForSlot: boolean;
+  paidMembershipDues: boolean;
+  dues_status: "full" | "partial" | "none";
+  qualifies: boolean;
+  recent_attendance: boolean;
   carryover_sessions: number;
-  /** Accumulated unpaid pesos from earlier months. */
   debt: number;
-  /** Of that, what is still outstanding after this month's debt payments. */
-  debt_outstanding: number;
   debt_months: { month: string; charge: number; paid: number; settled: number; outstanding: number }[];
-  /** Pesos this month is still waiting for, right now. */
+  month_preset: number | null;
+  /** Sessions in favour the month preset already discounts. */
+  month_credit: number;
+  session_preset: number | null;
+  half_month_preset: number | null;
+  owes_now: boolean | null;
+  bought_month: boolean;
+  owes_if_present: boolean;
+  owes_if_absent: boolean;
   owed_now: number;
+  debt_outstanding: number;
+  prev_owed: number;
+  prev_attended: number;
+  prev_paid: number;
   cur_attended: number;
   cur_paid: number;
-  /** This month's bundle for the player, carryover-adjusted; null = no bundle. */
-  month_preset: number | null;
-  session_preset: number | null;
-  /** Whether this month's charge is currently unpaid; null on pre-ledger sessions. */
-  owes_now: boolean | null;
-  section: "jugadores" | "invitados" | "arqueros";
 };
 
-const ALL_CATEGORIES = ["youth", "cat-d", "cat-c", "cat-b", "cat-a"];
+const MONTH_NAMES_ES = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
 
-// How faded the attendance face is when a player did not attend. Low enough to read
-// as "off" at a glance on a phone, high enough to stay visible on the dark theme.
-const AbsentOpacity = 0.3;
+function monthNameEs(month: string) {
+  return MONTH_NAMES_ES[Number(month.slice(5)) - 1] ?? month;
+}
 
-const CATEGORY_SHORT_LABELS: Record<string, string> = {
-  "u-14": "Menores",
-  "youth": "Juv",
-  "cat-d": "Cat D",
-  "cat-c": "Cat C",
-  "cat-b": "Cat B",
-  "cat-a": "Cat A",
+
+function formatArs(amount: number) {
+  if (amount >= 1000 && amount % 1000 === 0) return `${amount / 1000}k`;
+  return new Intl.NumberFormat("es-AR").format(amount);
+}
+
+const rowBorder = "1px solid rgba(255,255,255,0.07)";
+
+// ---- Attendance wheel (horizontal thumb-wheel toggle) ----
+// x is the wheel travel in px. Detents at -width, 0 and +width: 0 centers the
+// current state, either extreme centers the other one (committing the toggle
+// on release) — the wheel turns both ways. One of these per row, keyed by
+// player id: pure visual state, decoupled from the gesture.
+type WheelVisual = {
+  attended: boolean;
+  x: number;
+  width: number;
 };
 
-function TrainingSessionDetailContent() {
+/** Horizontal movement needed before the wheel engages (vs a tap). */
+/** How long a finger must stay on a row before the PRESENTE/AUSENTE word
+ * appears. Long enough that a scroll starting on a row never flashes it,
+ * short enough that a deliberate press feels immediate. */
+const WheelRevealDelay = 180;
+
+/** How long the wheel must sit still before a refresh is allowed to reshuffle
+ * the rows. Long enough to cover a run of quick toggles, short enough that a
+ * pause reads as "done". */
+const QuietAfterGesture = 1000;
+
+const WheelSlop = 10;
+/** Release velocity (px/ms) that flicks to the next detent regardless of position. */
+const FlickVelocity = 0.4;
+const PresentGreen = "#15803d";
+const AbsentRed = "#b91c1c";
+
+/** Solid state color with a ~1-character fade to black at both edges; shared
+ * by the wheel cells and the resting row's highlight band. */
+const bandBg = (color: string) =>
+  `linear-gradient(90deg, #000 0, ${color} 14px, ${color} calc(100% - 14px), #000 100%)`;
+
+/** Annual dues owed: red for who paid nothing, dark amber for who paid part
+ * of it. Settled players get no band. */
+const DuesUnpaidRed = "#f87171";
+const DuesPartialAmber = "#fbbf24";
+
+/** The + button's width, mirrored as a left spacer so centred names land on
+ * the row's true middle. */
+const ActionWidth = 28;
+
+/** One palette per section: a strong header (CR) over a muted body of the
+ * same hue (CO). Rows add no colour of their own, so the section a row sits
+ * in is the only thing its background says. Debtors get the deepest red so
+ * they do not read as just another absent row. */
+const SectionColors = {
+  debt: { header: "#5f1414", body: "rgba(95, 20, 20, 0.55)" },
+  present: { header: "#14532d", body: "rgba(20, 83, 45, 0.45)" },
+  absent: { header: "#52525b", body: "rgba(82, 82, 91, 0.30)" },
+} as const;
+
+type SectionTone = keyof typeof SectionColors;
+
+function Section({
+  title,
+  tone,
+  count,
+  children,
+  testId,
+}: {
+  title: string;
+  tone: SectionTone;
+  count: number;
+  children: React.ReactNode;
+  testId: string;
+}) {
+  const colors = SectionColors[tone];
+  return (
+    <section
+      data-testid={testId}
+      style={{
+        marginTop: 16,
+        borderRadius: 10,
+        overflow: "hidden",
+        border: rowBorder,
+      }}
+    >
+      <div style={{
+        background: colors.header,
+        padding: "8px 12px",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        fontWeight: 700,
+        fontSize: "0.85rem",
+        letterSpacing: "0.06em",
+        textTransform: "uppercase",
+      }}>
+        <span>{title}</span>
+        <span style={{ opacity: 0.75 }}>{count}</span>
+      </div>
+      <div style={{ background: colors.body }}>{children}</div>
+    </section>
+  );
+}
+
+/** Anything owed at all, closed months or this one: what opens the detail. */
+function owesAnything(p: RosterPlayer) {
+  return (p.debt_outstanding ?? 0) > 0 || p.owed_now > 0;
+}
+
+/** Attended sessions of this month left unpaid, or what last month left
+ * unpaid. Older debt is not what this screen chases. */
+function isDebtor(p: RosterPlayer) {
+  return p.owes_now === true || p.prev_owed > 0;
+}
+
+/** "A/PA C/PC": last month's attendance and payments, then this month's.
+ * A month that owes nothing is not worth spelling out — the previous one
+ * drops off entirely, the current one collapses to a dash. */
+function debtorStats(p: RosterPlayer): string {
+  const prev = p.prev_owed > 0 ? `${p.prev_attended}/${formatArs(p.prev_paid)}` : "";
+  const cur = p.owes_now ? `${p.cur_attended}/${formatArs(p.cur_paid)}` : "-";
+  return `${prev} ${cur}`.trim();
+}
+
+/**
+ * The row as it stands the moment a payment is registered, before any
+ * refresh: the amount joins the parentheses and the flags it settles follow.
+ * Classification mirrors the API — up to one session's price is a session,
+ * more than that is the month.
+ */
+function withPayment(p: RosterPlayer, amount: number, concept: PaymentConcept): RosterPlayer {
+  // A debt payment buys nothing this month: it takes the closed months'
+  // figures down, newest last, and leaves the current month as it was.
+  if (concept === "debt settlement") {
+    const outstanding = Math.max(0, p.debt_outstanding - amount);
+    return {
+      ...p,
+      payments: p.payments + amount,
+      payment_amounts: [...p.payment_amounts, amount],
+      debt_outstanding: outstanding,
+      prev_owed: Math.min(p.prev_owed, outstanding),
+      prev_paid: p.prev_paid + (p.prev_owed - Math.min(p.prev_owed, outstanding)),
+    };
+  }
+  const isSession = p.session_preset !== null && amount <= p.session_preset;
+  const buysMonth = p.month_preset !== null && amount >= p.month_preset;
+  return {
+    ...p,
+    payments: p.payments + amount,
+    payment_amounts: [...p.payment_amounts, amount],
+    // Anything registered from here lands on this session (a session
+    // payment) or on this slot's month, so either way it counts as paid here.
+    hasSessionPayment: true,
+    paidMonthlyForSlot: p.paidMonthlyForSlot || !isSession,
+    bought_month: p.bought_month || buysMonth,
+    // Whatever is left owing decides whether the row stays under Deben. A
+    // payment that buys the month clears it outright.
+    owed_now: buysMonth ? 0 : Math.max(0, p.owed_now - amount),
+    owes_now: buysMonth ? false : Math.max(0, p.owed_now - amount) > 0,
+    // Keeps the figures the debtors list shows in step with the payment.
+    cur_paid: p.cur_paid + amount,
+  };
+}
+
+type RosterResponse = Partial<SessionLock> & {
+  current_date?: string | null;
+  slot?: { categories: string[]; goalies: boolean } | null;
+  players?: RosterPlayer[];
+};
+
+// ---- Row ----
+
+type GestureApi = {
+  down: (e: React.PointerEvent, player: RosterPlayer) => void;
+  move: (e: React.PointerEvent) => void;
+  up: () => void;
+  cancel: () => void;
+};
+
+const PlayerRow = React.memo(function PlayerRow({
+  player,
+  wheel,
+  gesture,
+  onOpenDebt,
+  onOpenPayment,
+  showPayments,
+  tone,
+}: {
+  player: RosterPlayer;
+  wheel: WheelVisual | undefined;
+  gesture: GestureApi;
+  onOpenDebt: (p: RosterPlayer) => void;
+  onOpenPayment: (p: RosterPlayer) => void;
+  showPayments: boolean;
+  tone: SectionTone;
+}) {
+  const p = player;
+  const hasDebt = owesAnything(p);
+  // Annual dues still owed. It no longer paints the row — the row's colour
+  // belongs to its section — so it is a marker beside the name instead.
+  const duesDot: string | null = p.invitee
+    ? null
+    : p.dues_status === "partial"
+    ? DuesPartialAmber
+    : p.dues_status === "none" ? DuesUnpaidRed : null;
+
+  // Everywhere but the debtors list the name is centred, to sit under the
+  // PRESENTE/AUSENTE the wheel puts in the same place. Debtors keep their
+  // names left-aligned, with the figures that explain the debt on the right.
+  const centred = tone !== "debt";
+
+  // The debtors list is a bill, not a roster: it takes no wheel gesture, and
+  // every row in it reads the same red whether the player showed up or not.
+  // Attendance is toggled where the player actually sits.
+  const inert = tone === "debt";
+
+  // Three cells — [other][current][other] — so the wheel turns both ways.
+  const currentWord = p.attended ? "PRESENTE" : "AUSENTE";
+  const currentColor = p.attended ? PresentGreen : AbsentRed;
+  const otherWord = p.attended ? "AUSENTE" : "PRESENTE";
+  const otherColor = p.attended ? AbsentRed : PresentGreen;
+  const cellStyle = (color: string): React.CSSProperties => ({
+    width: "33.3333%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontWeight: 700,
+    fontSize: "0.85rem",
+    letterSpacing: "0.12em",
+    color: "#fff",
+    background: bandBg(color),
+    borderRadius: 6,
+  });
+
+  return (
+    <div
+      data-activity-player={player.id}
+      data-player-row={p.id}
+      onPointerDown={inert ? undefined : (e) => gesture.down(e, p)}
+      onPointerMove={inert ? undefined : gesture.move}
+      onPointerUp={inert ? undefined : gesture.up}
+      onPointerCancel={inert ? undefined : gesture.cancel}
+      // The browser's own long-press UI (context menu, iOS callout) must not
+      // interfere with the wheel gesture.
+      onContextMenu={inert ? undefined : (e) => e.preventDefault()}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "10px 8px",
+        borderBottom: rowBorder,
+        touchAction: inert ? "auto" : "pan-y",
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        WebkitTouchCallout: "none",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      {wheel && !inert && (
+        <div
+          data-testid="attendance-wheel"
+          // Inset to the name pill's height: the wheel reads as the row's
+          // content sliding, not a full-bleed band swallowing the padding.
+          style={{
+            position: "absolute",
+            top: 9,
+            bottom: 10,
+            left: 0,
+            width: "300%",
+            display: "flex",
+            zIndex: 5,
+            pointerEvents: "none",
+            transform: `translateX(${-wheel.width + wheel.x}px)`,
+          }}
+        >
+          <div style={cellStyle(otherColor)}>{otherWord}</div>
+          <div style={cellStyle(currentColor)}>{currentWord}</div>
+          <div style={cellStyle(otherColor)}>{otherWord}</div>
+        </div>
+      )}
+
+      {/* Balances the + button so the centred name sits on the row's real
+          middle, where the wheel puts its word. */}
+      {centred && showPayments && <span style={{ width: ActionWidth, flexShrink: 0 }} />}
+
+      <span
+        data-testid="player-name"
+        onClick={hasDebt ? () => onOpenDebt(p) : undefined}
+        style={{
+          flex: 1,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          fontSize: "0.9rem",
+          padding: "2px 6px",
+          textAlign: centred ? "center" : "left",
+          cursor: hasDebt ? "pointer" : undefined,
+          position: "relative",
+        }}
+      >
+        {p.last_name}, {p.name}
+        {duesDot && (
+          <span
+            data-testid="dues-dot"
+            data-dues={p.dues_status}
+            title={p.dues_status === "partial"
+              ? "Cuota anual paga en parte"
+              : "Cuota anual impaga"}
+            style={{ color: duesDot, marginLeft: 5 }}
+          >
+            ●
+          </span>
+        )}
+        {p.payment_amounts.length > 0 && (
+          <span style={{ opacity: 0.85 }}>
+            {" "}({p.payment_amounts.map(formatArs).join(", ")})
+          </span>
+        )}
+        {p.carryover_sessions > 0 && (
+          // One dot per bonified session from last month.
+          <span
+            title={`${p.carryover_sessions} sesión(es) bonificada(s)`}
+            style={{ color: "#4ade80", marginLeft: 4, letterSpacing: 2 }}
+          >
+            {"•".repeat(Math.min(3, p.carryover_sessions))}
+          </span>
+        )}
+      </span>
+
+      {tone === "debt" && (
+        // Attendance and payments behind the debt: last month, then this one.
+        <span
+          data-testid="debtor-stats"
+          style={{
+            fontSize: "0.75rem",
+            fontVariantNumeric: "tabular-nums",
+            whiteSpace: "nowrap",
+            opacity: 0.9,
+            flexShrink: 0,
+            position: "relative",
+          }}
+        >
+          {debtorStats(p)}
+        </span>
+      )}
+
+      {showPayments && (
+        <button
+          onClick={() => onOpenPayment(p)}
+          style={{
+            width: ActionWidth,
+            flexShrink: 0,
+            padding: "2px 0",
+            borderRadius: 4,
+            border: "1px solid rgba(255,255,255,0.2)",
+            background: "rgba(255,255,255,0.15)",
+            cursor: "pointer",
+            position: "relative",
+          }}
+        >
+          +
+        </button>
+      )}
+    </div>
+  );
+});
+
+/**
+ * Marking somebody present who owes money. It warns and never blocks: whether
+ * the player trains is the admin's call, and either way we want to know they
+ * were there.
+ */
+function DebtWarningModal({
+  player,
+  onCancel,
+  onConfirm,
+  onCharge,
+}: {
+  player: RosterPlayer;
+  onCancel: () => void;
+  onConfirm: () => void;
+  onCharge: () => void;
+}) {
+  const owed = (player.debt_outstanding ?? 0) + player.owed_now;
+  return (
+    <Overlay>
+      <div
+        onClick={onCancel}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,0.65)",
+          zIndex: 100,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 20,
+        }}
+      >
+        <div
+          data-testid="debt-warning"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            width: "100%",
+            maxWidth: 380,
+            borderRadius: 12,
+            border: "1px solid #b45309",
+            background: "#16211b",
+            padding: 18,
+          }}
+        >
+          <p style={{ margin: 0, fontWeight: 700, fontSize: "1.05rem" }}>
+            {player.last_name}, {player.name}
+          </p>
+          <p style={{ margin: "8px 0 0", color: "#fbbf24" }}>
+            Debe ${formatArs(owed)}
+          </p>
+          <p style={{ margin: "4px 0 0", opacity: 0.75, fontSize: "0.9rem" }}>
+            Pasale el mensaje antes de que entrene.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
+            <button className="btnPrimary" data-testid="debt-warning-charge" onClick={onCharge}>
+              Marcar presente y cobrar
+            </button>
+            <button
+              data-testid="debt-warning-anyway"
+              onClick={onConfirm}
+              style={{
+                padding: 12,
+                borderRadius: 8,
+                border: "1px solid rgba(255,255,255,0.2)",
+                background: "rgba(255,255,255,0.06)",
+                cursor: "pointer",
+              }}
+            >
+              Marcar presente igual
+            </button>
+            <button
+              onClick={onCancel}
+              style={{
+                padding: 12,
+                borderRadius: 8,
+                border: "none",
+                background: "transparent",
+                color: "inherit",
+                cursor: "pointer",
+              }}
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+/**
+ * Which training this is, before anything else on the screen. With three slots
+ * a night and a screen that looks the same for all of them, saying it out loud
+ * is what stops an admin marking attendance on the wrong one.
+ */
+function SessionHeading({
+  date,
+  hour,
+  slot,
+}: {
+  date: string;
+  hour: string;
+  slot: { categories: string[]; goalies: boolean } | null;
+}) {
+  const day = new Date(`${date}T12:00:00`).toLocaleDateString("es-AR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+
+  return (
+    <div
+      data-testid="session-heading"
+      style={{
+        marginTop: 12,
+        padding: "10px 12px",
+        borderRadius: 10,
+        border: rowBorder,
+        background: "rgba(255,255,255,0.04)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        {/* The day and the hour are what tell two sessions apart. */}
+        <strong style={{ fontSize: "1.05rem" }}>
+          {day.charAt(0).toUpperCase() + day.slice(1)}
+        </strong>
+        <span style={{ fontSize: "1.05rem", opacity: 0.75 }}>{hour}hs</span>
+      </div>
+      <div style={{ marginTop: 2, fontSize: "0.85rem", opacity: 0.75 }}>
+        {slot
+          ? slot.categories.map(categoryLabel).join(" + ") +
+            (slot.goalies ? " · arqueros" : "")
+          : "\u00a0"}
+      </div>
+    </div>
+  );
+}
+
+/** The "buscar" affordance at the foot of an absent section. */
+function SearchButton({
+  testId,
+  onClick,
+  children,
+}: {
+  testId: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      data-testid={testId}
+      onClick={onClick}
+      style={{
+        width: "100%",
+        padding: "10px",
+        border: "none",
+        background: "rgba(255,255,255,0.04)",
+        cursor: "pointer",
+        fontSize: "0.85rem",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ---- Payment modal ----
+
+/** "1 sesión", "2 sesiones", "0,64 sesiones": credit can be fractional. */
+function formatSessions(n: number): string {
+  const rounded = Math.round(n * 100) / 100;
+  const text = rounded.toLocaleString("es-AR", { maximumFractionDigits: 2 });
+  return `${text} ${rounded === 1 ? "sesión" : "sesiones"}`;
+}
+
+function PaymentModal({
+  player,
+  sessionLabel,
+  monthLabel,
+  onClose,
+  onConfirm,
+  busy,
+}: {
+  player: RosterPlayer;
+  sessionLabel: string;
+  monthLabel: string;
+  onClose: () => void;
+  onConfirm: (amount: number, concept: PaymentConcept, notes: string, transfer: boolean) => void;
+  busy: boolean;
+}) {
+  const [chosen, setChosen] = useState<{ amount: number; concept: PaymentConcept } | null>(null);
+  const [notes, setNotes] = useState("");
+  const [transfer, setTransfer] = useState(false);
+  const [custom, setCustom] = useState("");
+  // "Otro..." has to say WHAT it is: the amount no longer decides.
+  const [customConcept, setCustomConcept] = useState<PaymentConcept>("session");
+
+  const sessionPreset = player.session_preset;
+  const monthPreset = player.month_preset;
+  const owing = player.debt_outstanding;
+
+  const conceptLabel: Record<PaymentConcept, string> = {
+    session: sessionLabel,
+    monthly: monthLabel,
+    "half month": "Lo que queda del mes",
+    "debt settlement": "Saldo de meses anteriores",
+  };
+
+  const button: React.CSSProperties = {
+    width: "100%",
+    padding: "12px",
+    borderRadius: 8,
+    border: "1px solid rgba(255,255,255,0.2)",
+    background: "rgba(255,255,255,0.06)",
+    cursor: "pointer",
+    fontSize: "0.95rem",
+    textAlign: "left",
+  };
+
+  return (
+    <Overlay>
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,0.65)",
+          zIndex: 100,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 20,
+        }}
+      >
+        <div
+          data-testid="payment-modal"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            width: "100%",
+            maxWidth: 380,
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.18)",
+            background: "#16211b",
+            padding: 18,
+          }}
+        >
+          <p style={{ margin: 0, fontWeight: 700, fontSize: "1.05rem" }}>
+            {player.last_name}, {player.name}
+          </p>
+
+          {chosen === null ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
+              {/* With debt outstanding, nothing else may be collected: the
+                  money on the table settles it first. */}
+              {owing > 0 ? (
+                <button
+                  data-testid="pay-debt"
+                  style={button}
+                  onClick={() => setChosen({ amount: owing, concept: "debt settlement" })}
+                >
+                  Saldar deuda · <strong>${formatArs(owing)}</strong>
+                </button>
+              ) : (
+                <>
+                  {sessionPreset !== null && (
+                    <button
+                      data-testid="pay-session"
+                      style={button}
+                      onClick={() => setChosen({ amount: sessionPreset, concept: "session" })}
+                    >
+                      Sesión individual · <strong>${formatArs(sessionPreset)}</strong>
+                    </button>
+                  )}
+                  {monthPreset !== null && (
+                    <button
+                      data-testid="pay-month"
+                      style={button}
+                      onClick={() => setChosen({ amount: monthPreset, concept: "monthly" })}
+                    >
+                      Mes completo · <strong>${formatArs(monthPreset)}</strong>
+                      {player.month_credit > 0 && (
+                        <span
+                          data-testid="month-credit"
+                          style={{ display: "block", fontSize: "0.75rem", opacity: 0.65 }}
+                        >
+                          descuenta {formatSessions(player.month_credit)} a favor
+                        </span>
+                      )}
+                    </button>
+                  )}
+                  {/* Only for somebody starting the period with the month
+                      already under way: it buys what is still to come. */}
+                  {player.half_month_preset !== null && (
+                    <button
+                      data-testid="pay-half-month"
+                      style={button}
+                      onClick={() =>
+                        setChosen({ amount: player.half_month_preset!, concept: "half month" })}
+                    >
+                      Lo que queda del mes ·{" "}
+                      <strong>${formatArs(player.half_month_preset)}</strong>
+                    </button>
+                  )}
+                </>
+              )}
+              <select
+                data-testid="custom-concept"
+                value={customConcept}
+                onChange={(e) => setCustomConcept(e.target.value as PaymentConcept)}
+                style={{ ...button, cursor: "pointer" }}
+              >
+                <option value="session">Otro monto · sesión individual</option>
+                <option value="monthly">Otro monto · mes</option>
+                {owing > 0 && <option value="debt settlement">Otro monto · deuda</option>}
+              </select>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  placeholder="Otro..."
+                  value={custom}
+                  onChange={(e) => setCustom(e.target.value)}
+                  style={{
+                    flex: 1,
+                    padding: "12px",
+                    borderRadius: 8,
+                    border: "1px solid rgba(255,255,255,0.2)",
+                    background: "rgba(255,255,255,0.06)",
+                    color: "inherit",
+                  }}
+                />
+                <button
+                  className="btnPrimary"
+                  disabled={!custom.trim()}
+                  onClick={() => {
+                    let value = parseInt(custom, 10);
+                    if (!Number.isFinite(value) || value <= 0) return;
+                    // Typing "30" means 30k: the amounts here are thousands.
+                    if (value < 1000) value = value * 1000;
+                    setChosen({ amount: value, concept: customConcept });
+                  }}
+                >
+                  OK
+                </button>
+              </div>
+              <button
+                onClick={onClose}
+                style={{ ...button, textAlign: "center", background: "transparent" }}
+              >
+                Cancelar
+              </button>
+            </div>
+          ) : (
+            <div style={{ marginTop: 14 }}>
+              <p style={{ margin: 0, fontSize: "1.6rem", fontWeight: 700 }}>
+                ${formatArs(chosen.amount)}
+              </p>
+              <p style={{ margin: "4px 0 0", opacity: 0.75, fontSize: "0.9rem" }}>
+                {conceptLabel[chosen.concept]}
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", marginTop: 10 }}>
+                <NoteField value={notes} onChange={setNotes} />
+                <TransferField value={transfer} onChange={setTransfer} />
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+                <button
+                  style={{ ...button, textAlign: "center" }}
+                  disabled={busy}
+                  onClick={() => setChosen(null)}
+                >
+                  Cancelar
+                </button>
+                <button
+                  className="btnPrimary"
+                  style={{ flex: 1 }}
+                  disabled={busy}
+                  onClick={() => onConfirm(chosen.amount, chosen.concept, notes, transfer)}
+                >
+                  Confirmar
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+// ---- Screen ----
+
+function TrainingSessionBetaContent() {
   const params = useParams();
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const session = params.session as string; // Format: YYYY-MM-DD-HH
-  const currentPath = `/training-sessions/${session}`;
-  const newPlayerId = searchParams.get("player");
-  const processedPlayerRef = useRef<string | null>(null);
+  const session = params.session as string; // YYYY-MM-DD-HH
+  const sessionDate = session.slice(0, 10);
+  const sessionHour = session.slice(11);
+  const sessionMonth = session.slice(0, 7);
 
-  const [players, setPlayers] = useState<PlayerWithAttendance[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
-  const [expandedPlayerId, setExpandedPlayerId] = useState<string | null>(null);
-  // The amount no longer says what a payment IS: the concept travels with it.
-  const [pendingPayment, setPendingPayment] = useState<
-    { playerId: string; amount: number; concept: PaymentConcept } | null
-  >(null);
-  const [customAmountMode, setCustomAmountMode] = useState<string | null>(null);
-  const [customAmount, setCustomAmount] = useState("");
-  const [paymentNote, setPaymentNote] = useState("");
-  const [paymentTransfer, setPaymentTransfer] = useState(false);
-  const [paymentProcessing, setPaymentProcessing] = useState(false);
-  const [paymentSuccess, setPaymentSuccess] = useState(false);
-  const [addInviteeStep, setAddInviteeStep] = useState<'choose' | 'selectCategory' | 'selectPlayer' | null>(null);
-  const [addArqueroStep, setAddArqueroStep] = useState<'choose' | 'selectCategory' | 'selectPlayer' | null>(null);
-  const [categoryPlayersForInvite, setCategoryPlayersForInvite] = useState<Player[]>([]);
-  const [categoryPlayersForArquero, setCategoryPlayersForArquero] = useState<Player[]>([]);
-  // The slot definition (categories, goalie-friendliness) comes from the
-  // roster API, which reads it from the database.
-  const [slotInfo, setSlotInfo] = useState<{ categories: string[]; goalies: boolean } | null>(null);
+  const [players, setPlayers] = useState<RosterPlayer[]>([]);
   /** The date the club is working on, to flag browsing a different session. */
   const [currentDate, setCurrentDate] = useState<string | null>(null);
   /** Whether the session still takes changes, and whether this admin may
    * change it anyway. */
   const [lock, setLock] = useState<SessionLock | null>(null);
-  const [debtModalPlayer, setDebtModalPlayer] = useState<PlayerWithAttendance | null>(null);
+  /** What this slot is: the categories that train here, and whether goalies do. */
+  const [slot, setSlot] = useState<{ categories: string[]; goalies: boolean } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [expandedAbsent, setExpandedAbsent] = useState(false);
+  const [debtModalPlayer, setDebtModalPlayer] = useState<RosterPlayer | null>(null);
+  const [payModalPlayer, setPayModalPlayer] = useState<RosterPlayer | null>(null);
+  /** Marking this player present is waiting on the admin's confirmation. */
+  const [confirmPlayer, setConfirmPlayer] = useState<RosterPlayer | null>(null);
+  const [busy, setBusy] = useState(false);
 
   // Taps in a player's panel say which player they were for.
   useEffect(() => {
-    const id = pendingPayment?.playerId ?? expandedPlayerId ?? debtModalPlayer?.id ?? null;
-    setActivityFocus(id ? { player_id: id } : null);
-  }, [pendingPayment, expandedPlayerId, debtModalPlayer]);
+    const p = payModalPlayer ?? debtModalPlayer ?? confirmPlayer;
+    setActivityFocus(p ? { player_id: p.id } : null);
+  }, [payModalPlayer, debtModalPlayer, confirmPlayer]);
 
-  // Parse session string
-  const [dateStr, hourStr] = session.split('-').length === 4
-    ? [session.substring(0, 10), session.substring(11)]
-    : ['', ''];
+  // Search popup
+  // Each section searches its own kind: "Buscar jugador" never turns up a
+  // goalkeeper, and "Buscar arquero" never turns up a field player.
+  const [searchOpen, setSearchOpen] = useState<"player" | "goalkeeper" | null>(null);
+  const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<{ id: string; name: string; last_name: string }[]>([]);
+  const openSearch = useCallback((kind: "player" | "goalkeeper") => {
+    setSearchOpen(kind);
+    setQuery("");
+    setSearchResults([]);
+  }, []);
 
-  const date = dateStr ? new Date(dateStr + 'T12:00:00') : null;
-  const hour = parseInt(hourStr, 10);
+  // Attendance wheels: per-row VISUAL state. The gesture itself lives only
+  // from pointerdown to pointerup (gestureRef, one finger); everything after
+  // the finger-up is feedback owned by its row, so several rows can animate
+  // while a new gesture runs.
+  const [wheels, setWheels] = useState<Map<string, WheelVisual>>(new Map());
+  const wheelsRef = useRef(wheels);
+  wheelsRef.current = wheels;
+  const setRowWheel = useCallback((playerId: string, v: WheelVisual | null) => {
+    setWheels((prev) => {
+      const m = new Map(prev);
+      if (v) m.set(playerId, v);
+      else m.delete(playerId);
+      return m;
+    });
+  }, []);
+  /** One rAF id per row animation, cancellable independently. */
+  const animsRef = useRef<Map<string, number>>(new Map());
 
+  const gestureRef = useRef<{
+    player: RosterPlayer;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    baseX: number;
+    width: number;
+    engaged: boolean;
+    /** Whether the word is on screen yet — see WheelRevealDelay. */
+    revealed: boolean;
+    revealTimer: ReturnType<typeof setTimeout> | null;
+    x: number;
+    samples: [number, number][];
+  } | null>(null);
+
+  // Scroll blocker while the wheel is engaged: a PERMANENT non-passive
+  // touchmove listener, registered at mount and inert otherwise. It must
+  // pre-exist the touch — iOS Safari decides at touchstart whether touchmove
+  // is cancelable, so a listener added mid-gesture never wins.
   useEffect(() => {
-    if (!dateStr || !hourStr || isNaN(hour)) {
-      setErr("Sesión inválida");
+    const fn = (e: TouchEvent) => {
+      if (gestureRef.current?.engaged) e.preventDefault();
+    };
+    window.addEventListener("touchmove", fn, { passive: false });
+    return () => window.removeEventListener("touchmove", fn);
+  }, []);
+
+  // Only the newest refresh counts. A response is worth anything only while
+  // no later request has been issued: since every optimistic change fires its
+  // own refresh once its write landed, an outstanding later request is proof
+  // this response predates something already on screen. Applying it would
+  // revert that change, so it is dropped outright rather than held.
+  const reqSeqRef = useRef(0);
+
+  /** A refresh that arrived while the admin was still working, waiting for a
+   * gap to be applied. Superseded wholesale by any newer response. */
+  const pendingRef = useRef<RosterResponse | null>(null);
+  /** performance.now() of the last gesture that ended; -Infinity before the
+   * first one, so an untouched screen never holds anything back. */
+  const lastGestureEndRef = useRef(-Infinity);
+  const applyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const applyRoster = useCallback((data: RosterResponse) => {
+    pendingRef.current = null;
+    setCurrentDate(data.current_date ?? null);
+    setLock(data.closed === undefined
+      ? null
+      : { closed: data.closed, can_write_closed: data.can_write_closed === true });
+    setSlot(data.slot ?? null);
+    // Reuse the existing object for players whose data did not change, so
+    // React skips re-rendering their (memoized) rows entirely.
+    setPlayers((prev) => {
+      const byId = new Map(prev.map((p) => [p.id, p]));
+      return (data.players ?? []).map((incoming) => {
+        const existing = byId.get(incoming.id);
+        return existing && sameRoster(existing, incoming) ? existing : incoming;
+      });
+    });
+    setErr(null);
+    setLoading(false);
+  }, []);
+
+  /** Rows must not reshuffle under a thumb that is still marking attendance:
+   * a refresh lands only once the wheel has been still for QuietAfterGesture.
+   * Returns how long is left to wait, or 0 when the coast is clear. */
+  const quietIn = useCallback(() => {
+    if (gestureRef.current) return QuietAfterGesture;
+    return Math.max(0, QuietAfterGesture - (performance.now() - lastGestureEndRef.current));
+  }, []);
+
+  const reload = useCallback(async () => {
+    const seq = ++reqSeqRef.current;
+    const res = await fetch(`/api/training-sessions/${session}`);
+    if (!res.ok) {
+      setErr(await res.text());
       setLoading(false);
       return;
     }
+    const data = (await res.json()) as RosterResponse;
+    if (seq < reqSeqRef.current) return;
 
-    const loadPlayers = async () => {
-      setLoading(true);
-      setErr(null);
+    if (quietIn() > 0) pendingRef.current = data;
+    else applyRoster(data);
+  }, [session, quietIn, applyRoster]);
 
-      try {
-        let res = await fetch(`/api/training-sessions/${session}`);
-        if (!res.ok) {
-          setErr(await res.text());
-          setLoading(false);
-          return;
-        }
+  useEffect(() => {
+    reload();
+  }, [reload]);
 
-        let data = await res.json();
+  useEffect(() => () => {
+    if (applyTimerRef.current !== null) clearTimeout(applyTimerRef.current);
+  }, []);
 
-        // Returning from adding a new player: mark them present, once the
-        // roster has said whether the session is still open.
-        if (newPlayerId && processedPlayerRef.current !== newPlayerId) {
-          processedPlayerRef.current = newPlayerId;
-          const added = (data.players ?? []).find((p: Player) => p.id === newPlayerId) ??
-            { id: newPlayerId, name: "el jugador nuevo" };
-          if (await markAttendance(session, lockOf(data), added, true)) {
-            res = await fetch(`/api/training-sessions/${session}`);
-            if (res.ok) data = await res.json();
-          }
-          // Remove the query param from the URL
-          window.history.replaceState(null, "", currentPath);
-        }
-        setPlayers(data.players || []);
-        if (data.slot) setSlotInfo(data.slot);
-        setCurrentDate(data.current_date ?? null);
-        setLock(lockOf(data));
-        setLoading(false);
-      } catch {
-        setErr("Error al cargar jugadores");
-        setLoading(false);
-      }
+  /** Called when a gesture ends — every gesture, including one that snapped
+   * back without toggling: what buys the quiet window is the thumb being
+   * busy, not the change. Restarts the wait, so a run of quick toggles keeps
+   * the screen still until the admin actually stops. */
+  const noteGestureEnd = useCallback(() => {
+    lastGestureEndRef.current = performance.now();
+    const arm = (delay: number) => {
+      if (applyTimerRef.current !== null) clearTimeout(applyTimerRef.current);
+      applyTimerRef.current = setTimeout(() => {
+        applyTimerRef.current = null;
+        // A finger may well be down on another row by now: this timer was
+        // armed by the PREVIOUS gesture, and firing regardless would reshuffle
+        // the list under the thumb that is marking right now.
+        const wait = quietIn();
+        if (wait > 0) return arm(wait);
+        if (pendingRef.current) applyRoster(pendingRef.current);
+      }, delay);
     };
+    arm(QuietAfterGesture);
+  }, [applyRoster, quietIn]);
 
-    loadPlayers();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, dateStr, hourStr, hour]);
-
-  const toggleAttendance = async (player: Player, currentStatus: boolean) => {
-    // A closed session is settled before anything moves: ROOT is asked,
-    // anybody else told. A failed write says who was left in which state.
-    const go = attendanceGateFor(player, !currentStatus);
+  /** Marks attendance right away and refreshes in the background: the row
+   * moves on the spot, and whichever refresh lands last wins. A closed session
+   * is settled first, with no request: ROOT is asked, anybody else told. */
+  const setAttendance = useCallback(async (player: AttendancePlayer, attended: boolean) => {
+    const go = attendanceGate(session, lock, player, attended);
     if (!go) return;
-    setPlayers(prev => prev.map(p =>
-      p.id === player.id ? { ...p, attended: !currentStatus } : p
-    ));
-    if (!await sendAttendance(session, player, !currentStatus, go.confirmClosed)) {
-      setPlayers(prev => prev.map(p =>
-        p.id === player.id ? { ...p, attended: currentStatus } : p
-      ));
-    }
-  };
-
-  const attendanceGateFor = (player: Player, attended: boolean) =>
-    attendanceGate(session, lock, player, attended);
-
-  const confirmPayment = async () => {
-    if (!pendingPayment) return;
-
-    const { playerId, amount, concept } = pendingPayment;
-    setPaymentProcessing(true);
-
-    try {
-      const res = await postMoney(`/api/training-sessions/${session}/payment`, {
-        player_id: playerId,
-        amount,
-        concept,
-        notes: paymentNote.trim() || null,
-        transfer: paymentTransfer,
-      });
-
-      // Not sent: it was the same payment registered twice.
-      if (!res) {
-        setPaymentProcessing(false);
-        return;
-      }
-      if (!res.ok) {
-        const errorText = await res.text();
-        if (errorText.includes("duplicate") || errorText.includes("23505")) {
-          alert("Pago ya registrado");
-        } else {
-          // A refusal says why (a closed session, a blocked concept): show it.
-          alert(res.status === 409 && errorText ? errorText : "Error al registrar pago");
+    const playerId = player.id;
+    setPlayers((prev) => prev.map((p) =>
+      p.id === playerId
+        ? {
+          ...p,
+          attended,
+          // Presence changes what this month owes, which decides whether the
+          // player shows up under Deudores; both outcomes came precomputed.
+          owes_now: attended ? p.owes_if_present : p.owes_if_absent,
+          // Keeps the figures the debtors list shows in step with the toggle.
+          cur_attended: p.attended === attended
+            ? p.cur_attended
+            : Math.max(0, p.cur_attended + (attended ? 1 : -1)),
         }
-        setPaymentProcessing(false);
-        setPendingPayment(null);
-        return;
-      }
+        : p
+    ));
 
-      // Auto-mark attendance if not already marked. On a closed session only
-      // ROOT got this far, having confirmed the payment: that confirmation
-      // covers the attendance that goes with it.
-      const player = players.find(p => p.id === playerId);
-      if (player && !player.attended) {
-        await sendAttendance(session, player, true, lock?.closed === true);
-      }
-
-      // Reload players to get updated payment totals
-      const playersRes = await fetch(`/api/training-sessions/${session}`);
-      if (playersRes.ok) {
-        const data = await playersRes.json();
-        setPlayers(data.players || []);
-        if (data.slot) setSlotInfo(data.slot);
-        setCurrentDate(data.current_date ?? null);
-        setLock(lockOf(data));
-      }
-
-      setPaymentProcessing(false);
-      setPaymentSuccess(true);
-
-      setPaymentNote("");
-      setPaymentTransfer(false);
-      setTimeout(() => {
-        setPaymentSuccess(false);
-        setPendingPayment(null);
-        setExpandedPlayerId(null);
-      }, 2000);
-    } catch {
-      alert("Error al registrar pago");
-      setPaymentProcessing(false);
-      setPendingPayment(null);
-    }
-  };
-
-  const cancelPayment = () => {
-    setExpandedPlayerId(null);
-    setPendingPayment(null);
-    setPaymentNote("");
-      setPaymentTransfer(false);
-    setCustomAmountMode(null);
-    setCustomAmount("");
-    setPaymentProcessing(false);
-    setPaymentSuccess(false);
-  };
-
-  const handleCustomAmountSubmit = (playerId: string) => {
-    let amount = parseInt(customAmount, 10);
-    if (isNaN(amount) || amount <= 0) {
-      alert("Ingrese un monto válido");
+    // On failure the admin is told, by name, the state the player was left in.
+    if (!await sendAttendance(session, player, attended, go.confirmClosed)) {
+      // Put it back: the write never happened.
+      setPlayers((prev) => prev.map((p) =>
+        p.id === playerId
+          ? {
+            ...p,
+            attended: !attended,
+            owes_now: attended ? p.owes_if_absent : p.owes_if_present,
+            cur_attended: Math.max(0, p.cur_attended + (attended ? -1 : 1)),
+          }
+          : p
+      ));
       return;
     }
-    if (amount < 1000) {
-      amount = amount * 1000;
+    reload();
+  }, [session, lock, reload]);
+
+  const settleWheel = useCallback((releaseVx: number) => {
+    const g = gestureRef.current;
+    gestureRef.current = null;
+    if (!g || !g.engaged) {
+      if (g) setRowWheel(g.player.id, null);
+      return;
     }
-    // A hand-typed amount is a session unless it is exactly the month's
-    // price. This screen is the legacy one and has no concept picker; the
-    // service refuses anything the model does not allow anyway.
-    const player = players.find((p) => p.id === playerId);
-    const concept: PaymentConcept =
-      player?.month_preset && amount === player.month_preset ? "monthly" : "session";
-    setPendingPayment({ playerId, amount, concept });
-    setCustomAmountMode(null);
-    setCustomAmount("");
-  };
 
-  const sessionCategories = slotInfo?.categories ?? [];
-  const isGkFriendly = slotInfo?.goalies ?? false;
-  const newPlayerCategoryParam = sessionCategories.length === 1 ? `category=${sessionCategories[0]}&` : "";
+    // Magnetic detents at -W, 0, +W: a flick snaps to the next detent in its
+    // direction (never past it); otherwise the nearest one — i.e. whichever
+    // section covers most of the row — wins.
+    const W = g.width;
+    const target = releaseVx > FlickVelocity
+      ? Math.min(W, (Math.floor(g.x / W) + 1) * W)
+      : releaseVx < -FlickVelocity
+      ? Math.max(-W, (Math.ceil(g.x / W) - 1) * W)
+      : Math.max(-W, Math.min(W, Math.round(g.x / W) * W));
 
-  const selectCategoryForInvite = async (cat: string) => {
-    try {
-      const res = await fetch(`/api/players?category=${encodeURIComponent(cat)}&player_type=player`);
-      if (res.ok) {
-        const data = await res.json();
-        setCategoryPlayersForInvite(data.players || []);
-        setAddInviteeStep('selectPlayer');
+    // Damped spring from the release position with the release velocity, so
+    // the wheel keeps its inertia and the magnet reels it into the detent.
+    let x = g.x;
+    let v = releaseVx;
+    let last = performance.now();
+    const k = 0.0004;
+    const c = 2 * Math.sqrt(k);
+    const playerId = g.player.id;
+    const wasAttended = g.player.attended;
+    const step = (now: number) => {
+      const dt = Math.min(40, now - last);
+      last = now;
+      v += (target - x) * k * dt - c * v * dt;
+      x += v * dt;
+      if (Math.abs(target - x) < 1 && Math.abs(v) < 0.05) {
+        animsRef.current.delete(playerId);
+        setRowWheel(playerId, null);
+        if (target !== 0) {
+          // Marking someone present who owes money is worth a word with them,
+          // so the admin gets asked. It only ever warns: if they let the
+          // player train anyway we still want the attendance recorded.
+          const owes = !wasAttended &&
+            ((g.player.debt_outstanding ?? 0) > 0 || g.player.owed_now > 0);
+          if (owes) setConfirmPlayer(g.player);
+          else setAttendance(g.player, !wasAttended);
+        }
+        return;
       }
-    } catch {
-      alert("Error al cargar jugadores");
-    }
-  };
+      setRowWheel(playerId, { attended: wasAttended, x, width: W });
+      animsRef.current.set(playerId, requestAnimationFrame(step));
+    };
+    animsRef.current.set(playerId, requestAnimationFrame(step));
+  }, [setRowWheel, setAttendance]);
 
-  const selectCrossCategoryPlayer = async (player: Player) => {
-    try {
-      await markAttendance(session, lock, player, true);
+  /** Drops a gesture that never became a wheel turn, taking the pending
+   * reveal with it. Only a revealed row is cleared, so a plain tap costs no
+   * render at all. */
+  const endGesture = useCallback((g: { player: RosterPlayer; revealed: boolean; revealTimer: ReturnType<typeof setTimeout> | null }) => {
+    if (g.revealTimer !== null) clearTimeout(g.revealTimer);
+    g.revealTimer = null;
+    gestureRef.current = null;
+    if (g.revealed) setRowWheel(g.player.id, null);
+    noteGestureEnd();
+  }, [setRowWheel, noteGestureEnd]);
 
-      const res = await fetch(`/api/training-sessions/${session}`);
-      if (res.ok) {
-        const data = await res.json();
-        setPlayers(data.players || []);
-        if (data.slot) setSlotInfo(data.slot);
-        setCurrentDate(data.current_date ?? null);
-        setLock(lockOf(data));
+  // Stable across renders so memoized rows are not invalidated by it.
+  const gesture: GestureApi = useMemo(() => ({
+    down: (e, player) => {
+      if ((e.target as HTMLElement).closest("button,input,select")) return;
+      const id = animsRef.current.get(player.id);
+      if (id !== undefined) {
+        cancelAnimationFrame(id);
+        animsRef.current.delete(player.id);
       }
-    } catch {
-      alert("Error al agregar invitado");
-    }
-    setAddInviteeStep(null);
-    setCategoryPlayersForInvite([]);
-  };
+      const el = e.currentTarget as HTMLElement;
+      const baseX = wheelsRef.current.get(player.id)?.x ?? 0;
+      const g = {
+        player,
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        baseX,
+        width: el.clientWidth,
+        engaged: false,
+        revealed: false,
+        revealTimer: null as ReturnType<typeof setTimeout> | null,
+        x: baseX,
+        samples: [[performance.now(), baseX]] as [number, number][],
+      };
+      gestureRef.current = g;
+      // Showing the word on finger-down flickers it on every scroll that
+      // happens to start on a row. So it waits: a finger still on the row
+      // after this long meant to be there. A sideways move reveals it at
+      // once (below), a vertical one never does.
+      g.revealTimer = setTimeout(() => {
+        g.revealTimer = null;
+        if (gestureRef.current !== g) return;
+        g.revealed = true;
+        setRowWheel(player.id, { attended: player.attended, x: g.x, width: g.width });
+      }, WheelRevealDelay);
+    },
+    move: (e) => {
+      const g = gestureRef.current;
+      if (!g || g.pointerId !== e.pointerId) return;
+      const dx = e.clientX - g.startX;
+      const dy = e.clientY - g.startY;
 
-  const cancelAddInvitee = () => {
-    setAddInviteeStep(null);
-    setCategoryPlayersForInvite([]);
-  };
-
-  const selectCategoryForArquero = async (cat: string) => {
-    try {
-      const res = await fetch(`/api/players?category=${encodeURIComponent(cat)}&player_type=goalkeeper`);
-      if (res.ok) {
-        const data = await res.json();
-        setCategoryPlayersForArquero(data.players || []);
-        setAddArqueroStep('selectPlayer');
+      if (!g.engaged) {
+        // Vertical intent: the scroller's gesture, not ours.
+        if (Math.abs(dy) > WheelSlop && Math.abs(dy) >= Math.abs(dx)) {
+          endGesture(g);
+          return;
+        }
+        if (Math.abs(dx) > WheelSlop && Math.abs(dx) > Math.abs(dy)) {
+          g.engaged = true;
+          // Sideways is unambiguous, so the word does not wait out the dwell.
+          if (g.revealTimer !== null) clearTimeout(g.revealTimer);
+          g.revealTimer = null;
+          g.revealed = true;
+          try {
+            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          } catch { /* capture is best-effort */ }
+        } else {
+          return;
+        }
       }
-    } catch {
-      alert("Error al cargar jugadores");
-    }
-  };
 
-  const selectCrossCategoryArquero = async (player: Player) => {
-    try {
-      await markAttendance(session, lock, player, true);
-
-      const res = await fetch(`/api/training-sessions/${session}`);
-      if (res.ok) {
-        const data = await res.json();
-        setPlayers(data.players || []);
-        if (data.slot) setSlotInfo(data.slot);
-        setCurrentDate(data.current_date ?? null);
-        setLock(lockOf(data));
+      // The wheel turns both ways; rubber-band beyond the detents at ±width.
+      const W = g.width;
+      const raw = g.baseX + dx;
+      const x = raw > W ? W + (raw - W) / 4 : raw < -W ? -W + (raw + W) / 4 : raw;
+      g.x = x;
+      const now = performance.now();
+      g.samples.push([now, x]);
+      while (g.samples.length > 2 && now - g.samples[0][0] > 90) g.samples.shift();
+      setRowWheel(g.player.id, { attended: g.player.attended, x, width: W });
+    },
+    up: () => {
+      const g = gestureRef.current;
+      if (!g) return;
+      if (!g.engaged) {
+        endGesture(g);
+        return;
       }
-    } catch {
-      alert("Error al agregar arquero");
-    }
-    setAddArqueroStep(null);
-    setCategoryPlayersForArquero([]);
-  };
+      if (g.revealTimer !== null) clearTimeout(g.revealTimer);
+      noteGestureEnd();
+      const [t0, x0] = g.samples[0];
+      const [t1, x1] = g.samples[g.samples.length - 1];
+      // A finger that stopped before lifting releases with no inertia.
+      const stale = performance.now() - t1 > 80;
+      settleWheel(!stale && t1 > t0 ? (x1 - x0) / (t1 - t0) : 0);
+    },
+    cancel: () => {
+      const g = gestureRef.current;
+      if (g) endGesture(g);
+    },
+  }), [setRowWheel, settleWheel, endGesture, noteGestureEnd]);
 
-  const cancelAddArquero = () => {
-    setAddArqueroStep(null);
-    setCategoryPlayersForArquero([]);
-  };
-
-  const formatDate = (d: Date) => {
-    return d.toLocaleDateString("es-AR", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric"
+  const registerPayment = useCallback(async (
+    player: RosterPlayer,
+    amount: number,
+    concept: PaymentConcept,
+    notes: string,
+    transfer: boolean,
+  ) => {
+    const playerId = player.id;
+    // A closed session is settled from what the roster said, before sending:
+    // ROOT is asked, anybody else told.
+    const go = paymentGate(session, lock, player, amount);
+    if (!go) return;
+    setBusy(true);
+    const res = await postMoney(`/api/training-sessions/${session}/payment`, {
+      player_id: playerId,
+      amount,
+      concept,
+      notes: notes.trim() || null,
+      transfer,
+      ...(go.confirmClosed ? { confirm_closed: true } : {}),
     });
-  };
-
-  const formatArs = (amount: number) => {
-    if (amount >= 1000 && amount % 1000 === 0) {
-      return `${amount / 1000}k`;
+    setBusy(false);
+    // Not sent: it was the same payment registered twice.
+    if (!res) return;
+    if (!res.ok) {
+      // The service refuses with a reason the admin can act on; show it
+      // instead of a generic failure.
+      alert(res.status === 409 ? await res.text() : "Error al registrar pago");
+      return;
     }
-    return new Intl.NumberFormat("es-AR", {
-      style: "decimal",
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+    setPayModalPlayer(null);
+    // Show it right away — the refresh that follows only confirms it.
+    setPlayers((prev) => prev.map((p) => p.id === playerId ? withPayment(p, amount, concept) : p));
+    reload();
+  }, [session, lock, reload]);
 
-  // Pre-ledger sessions (before LEDGER_FROM) fall back to the legacy
-  // threshold; the API computes owes_now from the ledger for the rest.
-  const PAYMENT_THRESHOLD = paymentThresholdOverride(dateStr, hour) ?? 100000;
+  const openDebt = useCallback((p: RosterPlayer) => setDebtModalPlayer(p), []);
+  const openPayment = useCallback((p: RosterPlayer) => setPayModalPlayer(p), []);
 
-  const playerOwes = (p: PlayerWithAttendance) =>
-    p.owes_now ?? (p.payments < PAYMENT_THRESHOLD * (100 - p.scholarship) / 100);
+  // ---- Grouping ----
 
-  // Only one thing sends a player to the bottom group: having paid this
-  // month's bundle or this very session. Attendance does not enter into it,
-  // and neither does a payment for an earlier session of the month —
-  // hasSessionPayment is already exactly that (bundle for this slot, or a
-  // payment against this session).
-  const playerSettled = (p: PlayerWithAttendance) => p.hasSessionPayment;
+  const jugadores = players.filter((p) => p.player_type !== "goalkeeper");
+  const arqueros = players.filter((p) => p.player_type === "goalkeeper");
 
-  const jugadores = players
-    .filter(p => p.section === "jugadores")
-    .sort((a, b) => Number(playerSettled(a)) - Number(playerSettled(b)));
-  const invitados = players.filter(p => p.section === "invitados");
-  const arqueros = players.filter(p => p.section === "arqueros");
+  const deudores = players.filter(isDebtor);
 
-  const renderPlayerRow = (player: PlayerWithAttendance, bgColor: string, hidePayment = false) => {
-    const owes = playerOwes(player);
-    const statusIcon = owes ? "💸" : player.scholarship > 0 ? "🏦" : "💰";
-    const hasDebt = (player.debt_outstanding ?? 0) > 0 || (player.owed_now ?? 0) > 0;
-    // Money owed to the club. Annual dues: settled (no highlight), partially
-    // paid (dark amber) and unpaid (red) — training-ledger debt also paints
-    // red. The debt one opens a detail modal on tap.
-    const duesPartial = !player.invitee && player.dues_status === "partial";
-    const duesUnpaid = !player.invitee && player.dues_status === "none";
-    const nameBgColor = duesPartial
-      ? "rgba(133, 77, 14, 0.8)"
-      : hasDebt || duesUnpaid
-      ? "rgba(220, 38, 38, 0.45)"
-      : bgColor;
-    return (
-      // display: contents keeps the cells in the grid; the wrapper only
-      // tells the activity log which player a tap was for.
-      <div key={player.id} data-activity-player={player.id} style={{ display: "contents" }}>
-        {/* Name */}
-        <div
-          onClick={hasDebt ? () => setDebtModalPlayer(player) : undefined}
-          style={{
-            fontSize: "0.875rem",
-            fontWeight: 400,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            padding: "8px",
-            background: nameBgColor,
-            borderBottom: "1px solid rgba(255,255,255,0.05)",
-            cursor: hasDebt ? "pointer" : undefined,
-          }}
-        >
-          {player.last_name}, {player.name}
-          {(player.carryover_sessions ?? 0) > 0 && (
-            // One dot per bonified session from last month.
-            <span
-              title={`${player.carryover_sessions} sesión(es) bonificada(s)`}
-              style={{ color: "#4ade80", marginLeft: 4, letterSpacing: 2 }}
-            >
-              {"•".repeat(Math.min(3, player.carryover_sessions))}
-            </span>
-          )}
-        </div>
+  const jugadoresPresentes = jugadores.filter((p) => p.attended);
+  const arquerosPresentes = arqueros.filter((p) => p.attended);
 
-        {/* Attendance emoji */}
-        <div style={{
-          display: "flex",
-          justifyContent: "flex-end",
-          alignItems: "center",
-          padding: "8px",
-          background: bgColor,
-          borderBottom: "1px solid rgba(255,255,255,0.05)"
-        }}>
-          <span
-            data-testid="attendance-toggle"
-            data-player={player.id}
-            data-attended={player.attended}
-            onClick={() => toggleAttendance(player, player.attended)}
-            style={{
-              cursor: "pointer",
-              fontSize: "1.2rem",
-              lineHeight: 1,
-              userSelect: "none",
-              WebkitTapHighlightColor: "transparent",
-              // Same glyph either way: opacity carries the state. 🫥 renders with a
-              // solid yellow fill on Apple's emoji font, so it read as "present" on
-              // phones. Opacity applies to the glyph on every platform.
-              opacity: player.attended ? 1 : AbsentOpacity,
-              transition: "opacity 150ms ease"
-            }}
-          >
-            😐
-          </span>
-        </div>
-
-        {!hidePayment && (
-        <>
-        {/* Payment status icon */}
-        <div style={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          padding: "8px 0",
-          background: bgColor,
-          borderBottom: "1px solid rgba(255,255,255,0.05)"
-        }}>
-          <span style={{ fontSize: "1.3rem", lineHeight: 1 }}>{statusIcon}</span>
-        </div>
-
-        {/* Payment amount and button */}
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          gap: 6,
-          padding: "8px",
-          background: bgColor,
-          borderBottom: "1px solid rgba(255,255,255,0.05)",
-        }}>
-          <span style={{ fontSize: "0.9rem", fontWeight: 500 }}>{formatArs(player.payments)}</span>
-          <button
-            onClick={() => {
-              setExpandedPlayerId(expandedPlayerId === player.id ? null : player.id);
-            }}
-            style={{
-              padding: "2px 6px",
-              borderRadius: 4,
-              border: "1px solid rgba(255,255,255,0.2)",
-              background: "rgba(255,255,255,0.05)",
-              cursor: "pointer",
-              fontSize: "1rem",
-              lineHeight: 1,
-            }}
-          >
-            +
-          </button>
-        </div>
-
-        {/* Expandable payment amounts row */}
-        {expandedPlayerId === player.id && (
-          <>
-            {pendingPayment?.playerId === player.id ? (
-              <>
-                {paymentProcessing || paymentSuccess ? (
-                  <div style={{
-                    gridColumn: "1 / -1",
-                    display: "flex",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    padding: "8px",
-                    background: bgColor,
-                    borderBottom: "1px solid rgba(255,255,255,0.05)"
-                  }}>
-                    <span style={{ fontSize: "0.9rem" }}>
-                      {paymentProcessing ? "Procesando..." : "✓ Pago registrado"}
-                    </span>
-                  </div>
-                ) : (
-                  <div style={{
-                    gridColumn: "1 / -1",
-                    display: "grid",
-                    gridTemplateColumns: "auto 1fr auto",
-                    alignItems: "start",
-                    gap: 8,
-                    padding: "8px",
-                    background: bgColor,
-                    borderBottom: "1px solid rgba(255,255,255,0.05)"
-                  }}>
-                    <span style={{ fontSize: "0.9rem", paddingTop: "2px" }}>↳</span>
-                    <span style={{ fontSize: "0.9rem", display: "flex", flexDirection: "column", gap: 4 }}>
-                      Registrar pago de ${formatArs(pendingPayment.amount)}?
-                      <NoteField value={paymentNote} onChange={setPaymentNote} />
-                      <TransferField value={paymentTransfer} onChange={setPaymentTransfer} />
-                    </span>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button
-                        onClick={confirmPayment}
-                        style={{
-                          padding: "6px 12px",
-                          borderRadius: 6,
-                          border: "1px solid rgba(255,255,255,0.2)",
-                          background: "rgba(36, 179, 91, 0.2)",
-                          cursor: "pointer",
-                          fontSize: "0.85rem",
-                        }}
-                      >
-                        Ok
-                      </button>
-                      <button
-                        onClick={cancelPayment}
-                        style={{
-                          padding: "6px 12px",
-                          borderRadius: 6,
-                          border: "1px solid rgba(255,255,255,0.2)",
-                          background: "rgba(255,255,255,0.05)",
-                          cursor: "pointer",
-                          fontSize: "0.85rem",
-                        }}
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : customAmountMode === player.id ? (
-              <div style={{
-                gridColumn: "1 / -1",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 8,
-                padding: "8px",
-                background: bgColor,
-                borderBottom: "1px solid rgba(255,255,255,0.05)"
-              }}>
-                <input
-                  type="number"
-                  placeholder="Monto"
-                  value={customAmount}
-                  onChange={(e) => setCustomAmount(e.target.value)}
-                  style={{
-                    flex: 1,
-                    padding: "6px 10px",
-                    borderRadius: 6,
-                    border: "1px solid rgba(255,255,255,0.2)",
-                    background: "rgba(255,255,255,0.05)",
-                    color: "inherit",
-                    fontSize: "0.85rem",
-                  }}
-                />
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button
-                    onClick={() => handleCustomAmountSubmit(player.id)}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: 6,
-                      border: "1px solid rgba(255,255,255,0.2)",
-                      background: "rgba(36, 179, 91, 0.2)",
-                      cursor: "pointer",
-                      fontSize: "0.85rem",
-                    }}
-                  >
-                    OK
-                  </button>
-                  <button
-                    onClick={cancelPayment}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: 6,
-                      border: "1px solid rgba(255,255,255,0.2)",
-                      background: "rgba(255,255,255,0.05)",
-                      cursor: "pointer",
-                      fontSize: "0.85rem",
-                    }}
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div style={{
-                gridColumn: "1 / -1",
-                display: "flex",
-                gap: 6,
-                padding: "8px",
-                background: bgColor,
-                borderBottom: "1px solid rgba(255,255,255,0.05)",
-                justifyContent: "space-between",
-                alignItems: "center"
-              }}>
-                <button
-                  onClick={() => setExpandedPlayerId(null)}
-                  style={{
-                    padding: "4px 6px",
-                    borderRadius: 4,
-                    border: "1px solid rgba(255,255,255,0.2)",
-                    background: "rgba(255,255,255,0.05)",
-                    cursor: "pointer",
-                    fontSize: "0.85rem",
-                    lineHeight: 1,
-                  }}
-                >
-                  ✕
-                </button>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {(player.month_preset || player.session_preset
-                    ? [
-                      // The month's bundle for this player, carryover-adjusted.
-                      ...(player.month_preset
-                        ? [{
-                          label: `Mes ${formatArs(player.month_preset)}`,
-                          amount: player.month_preset,
-                          concept: "monthly" as const,
-                        }]
-                        : []),
-                      ...(player.session_preset
-                        ? [{
-                          label: `Sesión ${formatArs(player.session_preset)}`,
-                          amount: player.session_preset,
-                          concept: "session" as const,
-                        }]
-                        : []),
-                    ]
-                    // Pre-ledger sessions keep the historical amounts.
-                    : [100000, 75000, 50000, 30000].map((amount) => ({
-                      label: formatArs(amount),
-                      amount,
-                      concept: "session" as const,
-                    }))
-                  ).map(({ label, amount, concept }) => (
-                    <button
-                      key={label}
-                      onClick={() => setPendingPayment({ playerId: player.id, amount, concept })}
-                      style={{
-                        padding: "6px 10px",
-                        borderRadius: 6,
-                        border: "1px solid rgba(255,255,255,0.2)",
-                        background: "rgba(255,255,255,0.05)",
-                        cursor: "pointer",
-                        fontSize: "0.85rem",
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => setCustomAmountMode(player.id)}
-                    style={{
-                      padding: "6px 10px",
-                      borderRadius: 6,
-                      border: "1px solid rgba(255,255,255,0.2)",
-                      background: "rgba(255,255,255,0.05)",
-                      cursor: "pointer",
-                      fontSize: "0.85rem",
-                    }}
-                  >
-                    Otro
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-        </>
-        )}
-      </div>
-    );
-  };
-
-  const renderAddGuestControls = (sectionColor: string) => (
-    <>
-      {addInviteeStep === 'choose' && (
-        <div style={{
-          display: "flex",
-          gap: 8,
-          padding: "10px 12px",
-          background: sectionColor,
-          borderBottom: "1px solid rgba(255,255,255,0.05)"
-        }}>
-          <button
-            onClick={() => {
-              setAddInviteeStep(null);
-              router.replace(`/players/new?${newPlayerCategoryParam}returnTo=${encodeURIComponent(currentPath)}`);
-            }}
-            style={{
-              flex: 1,
-              padding: "8px 12px",
-              borderRadius: 6,
-              border: "1px solid rgba(255,255,255,0.2)",
-              background: "rgba(255,255,255,0.05)",
-              cursor: "pointer",
-              fontSize: "0.85rem",
-            }}
-          >
-            Nuevo jugador
-          </button>
-          <button
-            onClick={() => setAddInviteeStep('selectCategory')}
-            style={{
-              flex: 1,
-              padding: "8px 12px",
-              borderRadius: 6,
-              border: "1px solid rgba(255,255,255,0.2)",
-              background: "rgba(255,255,255,0.05)",
-              cursor: "pointer",
-              fontSize: "0.85rem",
-            }}
-          >
-            Existente
-          </button>
-        </div>
-      )}
-
-      {addInviteeStep === 'selectCategory' && (
-        <div style={{
-          display: "flex",
-          gap: 8,
-          padding: "10px 12px",
-          background: sectionColor,
-          borderBottom: "1px solid rgba(255,255,255,0.05)",
-          flexWrap: "wrap",
-          alignItems: "center"
-        }}>
-          {ALL_CATEGORIES.map(cat => (
-            <button
-              key={cat}
-              onClick={() => selectCategoryForInvite(cat)}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 6,
-                border: "1px solid rgba(255,255,255,0.2)",
-                background: "rgba(255,255,255,0.05)",
-                cursor: "pointer",
-                fontSize: "0.85rem",
-              }}
-            >
-              {CATEGORY_SHORT_LABELS[cat] || cat}
-            </button>
-          ))}
-          <button
-            onClick={cancelAddInvitee}
-            style={{
-              padding: "8px 10px",
-              borderRadius: 6,
-              border: "1px solid rgba(255,255,255,0.2)",
-              background: "rgba(255,255,255,0.05)",
-              cursor: "pointer",
-              fontSize: "0.85rem",
-              marginLeft: "auto",
-            }}
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {addInviteeStep === 'selectPlayer' && (
-        <div style={{ background: sectionColor }}>
-          {categoryPlayersForInvite
-            .filter(p => !invitados.some(existing => existing.id === p.id) && !jugadores.some(existing => existing.id === p.id))
-            .map(p => (
-            <div
-              key={p.id}
-              onClick={() => selectCrossCategoryPlayer(p)}
-              style={{
-                padding: "8px 12px 8px 24px",
-                cursor: "pointer",
-                borderBottom: "1px solid rgba(255,255,255,0.05)",
-                fontSize: "0.875rem",
-              }}
-            >
-              {p.last_name}, {p.name}
-            </div>
-          ))}
-          <div
-            onClick={cancelAddInvitee}
-            style={{
-              padding: "8px 12px 8px 24px",
-              cursor: "pointer",
-              borderBottom: "1px solid rgba(255,255,255,0.05)",
-              fontSize: "0.875rem",
-              opacity: 0.6,
-            }}
-          >
-            ✕
-          </div>
-        </div>
-      )}
-    </>
+  // Absent list: paid this session or this slot's bundle links anyone here;
+  // qualifying by category needs attendance in one of the last 3 trainings.
+  const ausentesBase = jugadores.filter((p) =>
+    !p.attended &&
+    (p.hasSessionPayment || p.paidMonthlyForSlot || (p.qualifies && p.recent_attendance))
   );
+  const baseIds = new Set(ausentesBase.map((p) => p.id));
+  const ausentesExtra = jugadores.filter((p) =>
+    !p.attended && p.qualifies && !baseIds.has(p.id)
+  );
+  const arquerosAusentes = arqueros.filter((p) => !p.attended);
 
-  usePageTitle(loading ? "Cargando..." : err || !date ? "Error" : "Asistencia y Pagos");
+  const sessionLabel = useMemo(() => {
+    const d = new Date(`${sessionDate}T12:00:00`);
+    const label = d.toLocaleDateString("es-AR", { weekday: "short", day: "numeric", month: "short" });
+    return `Sesión del ${label} ${sessionHour}hs`;
+  }, [sessionDate, sessionHour]);
+  const monthLabel = `Mes de ${monthNameEs(sessionMonth)}`;
 
-  if (loading) {
-    return (
-      <ProtectedPage requiredPage={currentPath}>
-        <div />
-      </ProtectedPage>
-    );
-  }
+  const renderRows = (list: RosterPlayer[], tone: SectionTone, emptyText: string) =>
+    list.length === 0
+      ? <p style={{ margin: 0, padding: "10px", fontSize: "0.85rem", opacity: 0.5 }}>{emptyText}</p>
+      : list.map((p) => (
+        <PlayerRow
+          key={p.id}
+          player={p}
+          tone={tone}
+          wheel={wheels.get(p.id)}
+          gesture={gesture}
+          onOpenDebt={openDebt}
+          onOpenPayment={openPayment}
+          showPayments
+        />
+      ));
 
-  if (err || !date) {
-    return (
-      <ProtectedPage requiredPage={currentPath}>
-        <div>
-          <p style={{ marginTop: 12, color: "crimson" }}>{err || "Sesión inválida"}</p>
-        </div>
-      </ProtectedPage>
-    );
-  }
+  usePageTitle("Asistencia y Pagos");
 
-  const sectionBgJugadores = "rgba(255, 140, 0, 0.08)";
-  const sectionBgInvitados = "rgba(36, 179, 91, 0.08)";
-  const sectionBgArqueros = "rgba(255, 140, 0, 0.08)";
+  if (loading) return <p style={{ marginTop: 16 }}>Cargando...</p>;
+  if (err) return <p style={{ marginTop: 16, color: "crimson" }}>{err}</p>;
 
   return (
-    <ProtectedPage requiredPage={currentPath}>
-      <div>
-        <div style={{ padding: "0 20px" }}>
-          <ExperienceToggle session={`${dateStr}-${hour}`} current="vieja" />
-          <SessionDateWarning sessionDate={dateStr} currentDate={currentDate} />
-          <div className="card" style={{ marginTop: 12, marginLeft: -15, marginRight: -15, borderRadius: "8px" }}>
-            <div><strong>Fecha:</strong> {formatDate(date)}</div>
-            <div><strong>Horario:</strong> {hour}:00hs</div>
-            <div style={{ marginTop: 8, fontSize: "1rem", opacity: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px" }}>
-              <span>😐 asistió</span><span>💸 adeuda</span>
-              <span><span style={{ opacity: AbsentOpacity }}>😐</span> no asistió</span><span>💰 al día</span>
-              <span><span style={{ background: "rgba(220, 38, 38, 0.45)", padding: "0 6px", borderRadius: 3 }}>nombre</span></span><span>cuota anual impaga</span>
-              <span><span style={{ background: "rgba(133, 77, 14, 0.8)", padding: "0 6px", borderRadius: 3 }}>nombre</span></span><span>cuota anual a medio pagar</span>
-              <span></span><span>🏦 beca (parcial o completa)</span>
-            </div>
-          </div>
-        </div>
+    <div style={{ paddingBottom: 60 }}>
+      <SessionDateWarning sessionDate={sessionDate} currentDate={currentDate} />
 
-        <div style={{ marginTop: 16, marginLeft: -15, marginRight: -15 }}>
-          {/* S1: Jugadores */}
-          <div style={{ marginBottom: 24 }}>
-            <div style={{
-              fontSize: "0.95rem",
-              fontWeight: 600,
-              padding: "8px 12px",
-              background: "var(--acemhh-orange)",
-              color: "#000",
-              textAlign: "center",
-              borderRadius: "8px 8px 0 0"
-            }}>
-              Jugadores
-            </div>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 38px 38px max-content",
-              alignItems: "stretch"
-            }}>
-              {(() => {
-                const owingCount = jugadores.filter(p => !playerSettled(p)).length;
-                const showSeparator = owingCount > 0 && owingCount < jugadores.length;
-                return jugadores.map((p, i) => (
-                  <React.Fragment key={p.id}>
-                    {showSeparator && i === owingCount && (
-                      <div style={{
-                        gridColumn: "1 / -1",
-                        height: 3,
-                        background: "var(--acemhh-orange)",
-                        opacity: 0.5,
-                      }} />
-                    )}
-                    {renderPlayerRow(p, sectionBgJugadores)}
-                  </React.Fragment>
-                ));
-              })()}
-            </div>
-          </div>
+      <SessionHeading date={sessionDate} hour={sessionHour} slot={slot} />
 
-          {/* S2: Invitados */}
-          <div style={{ marginBottom: 24 }}>
-            <div style={{
-              fontSize: "0.95rem",
-              fontWeight: 600,
-              padding: "8px 12px",
-              background: "var(--acemhh-green)",
-              color: "#000",
-              textAlign: "center",
-              borderRadius: "8px 8px 0 0",
-              position: "relative"
-            }}>
-              Invitados
-              <button
-                onClick={() => setAddInviteeStep('choose')}
-                style={{
-                  position: "absolute",
-                  right: 12,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  padding: "2px 8px",
-                  borderRadius: 4,
-                  border: "1px solid rgba(0,0,0,0.2)",
-                  background: "rgba(0,0,0,0.1)",
-                  cursor: "pointer",
-                  fontSize: "1rem",
-                  lineHeight: 1,
-                  color: "#000"
+      {deudores.length > 0 && (
+        <Section title="Deben" tone="debt" count={deudores.length} testId="section-deudores">
+          {renderRows(deudores, "debt", "")}
+        </Section>
+      )}
+
+      <Section
+        title="Jugadores presentes"
+        tone="present"
+        count={jugadoresPresentes.length}
+        testId="section-presentes"
+      >
+        {renderRows(jugadoresPresentes, "present", "Nadie")}
+      </Section>
+
+      <Section
+        title="Jugadores ausentes"
+        tone="absent"
+        count={ausentesBase.length + (expandedAbsent ? ausentesExtra.length : 0)}
+        testId="section-ausentes"
+      >
+        {renderRows(ausentesBase, "absent", "Nadie")}
+        {expandedAbsent && ausentesExtra.map((p) => (
+          <PlayerRow
+            key={p.id}
+            player={p}
+            tone="absent"
+            wheel={wheels.get(p.id)}
+            gesture={gesture}
+            onOpenDebt={openDebt}
+            onOpenPayment={openPayment}
+            showPayments
+          />
+        ))}
+        {!expandedAbsent && ausentesExtra.length > 0 && (
+          <button
+            onClick={() => setExpandedAbsent(true)}
+            style={{
+              width: "100%",
+              padding: "10px",
+              border: "none",
+              borderBottom: rowBorder,
+              background: "rgba(255,255,255,0.04)",
+              cursor: "pointer",
+              fontSize: "0.85rem",
+            }}
+          >
+            Más jugadores...
+          </button>
+        )}
+        <SearchButton testId="search-player" onClick={() => openSearch("player")}>
+          🔍 Buscar jugador
+        </SearchButton>
+      </Section>
+
+      <Section
+        title="Arqueros presentes"
+        tone="present"
+        count={arquerosPresentes.length}
+        testId="section-arqueros-presentes"
+      >
+        {renderRows(arquerosPresentes, "present", "Nadie")}
+      </Section>
+
+      <Section
+        title="Arqueros ausentes"
+        tone="absent"
+        count={arquerosAusentes.length}
+        testId="section-arqueros-ausentes"
+      >
+        {renderRows(arquerosAusentes, "absent", "Sin arqueros")}
+        <SearchButton testId="search-goalkeeper" onClick={() => openSearch("goalkeeper")}>
+          🔍 Buscar arquero
+        </SearchButton>
+      </Section>
+
+      {confirmPlayer && (
+        <DebtWarningModal
+          player={confirmPlayer}
+          onCancel={() => setConfirmPlayer(null)}
+          onConfirm={() => {
+            const p = confirmPlayer;
+            setConfirmPlayer(null);
+            setAttendance(p, true);
+          }}
+          onCharge={() => {
+            const p = confirmPlayer;
+            setConfirmPlayer(null);
+            setAttendance(p, true);
+            setPayModalPlayer(p);
+          }}
+        />
+      )}
+
+      {payModalPlayer && (
+        <PaymentModal
+          player={payModalPlayer}
+          sessionLabel={sessionLabel}
+          monthLabel={monthLabel}
+          busy={busy}
+          onClose={() => setPayModalPlayer(null)}
+          onConfirm={(amount, concept, notes, transfer) =>
+            registerPayment(payModalPlayer, amount, concept, notes, transfer)}
+        />
+      )}
+
+      {/* Search popup: pick a player and mark them present. */}
+      {searchOpen !== null && (
+        <Overlay>
+          <div
+            onClick={() => setSearchOpen(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.6)",
+              zIndex: 80,
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "center",
+              padding: 20,
+              paddingTop: 60,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: "100%",
+                maxWidth: 420,
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,0.18)",
+                background: "#1c2620",
+                padding: 16,
+              }}
+            >
+              <input
+                autoFocus
+                placeholder="Nombre o apellido"
+                value={query}
+                onChange={async (e) => {
+                  const q = e.target.value;
+                  setQuery(q);
+                  if (q.trim().length < 2) return setSearchResults([]);
+                  const res = await fetch(
+                    `/api/players?query=${encodeURIComponent(q.trim())}` +
+                      `&player_type=${searchOpen}`,
+                  );
+                  if (res.ok) {
+                    const data = await res.json();
+                    setSearchResults(data.players ?? []);
+                  }
                 }}
-              >
-                +
-              </button>
-            </div>
-
-            {renderAddGuestControls(sectionBgInvitados)}
-
-            {invitados.length > 0 ? (
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 38px 38px max-content",
-                alignItems: "stretch"
-              }}>
-                {invitados.map(p => renderPlayerRow(p, sectionBgInvitados))}
-              </div>
-            ) : (
-              <div style={{
-                padding: "12px",
-                background: sectionBgInvitados,
-                fontSize: "0.85rem",
-                opacity: 0.5,
-                textAlign: "center",
-              }}>
-                Sin invitados
-              </div>
-            )}
-          </div>
-
-          {/* S3: Arqueros */}
-          <div style={{ marginBottom: 24 }}>
-            <div style={{
-              fontSize: "0.95rem",
-              fontWeight: 600,
-              padding: "8px 12px",
-              background: "var(--acemhh-orange)",
-              color: "#000",
-              textAlign: "center",
-              borderRadius: "8px 8px 0 0",
-              position: "relative"
-            }}>
-              Arqueros
-              <button
-                onClick={() => setAddArqueroStep('choose')}
                 style={{
-                  position: "absolute",
-                  right: 12,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  padding: "2px 8px",
-                  borderRadius: 4,
-                  border: "1px solid rgba(0,0,0,0.2)",
-                  background: "rgba(0,0,0,0.1)",
-                  cursor: "pointer",
-                  fontSize: "1rem",
-                  lineHeight: 1,
-                  color: "#000"
+                  width: "100%",
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid rgba(255,255,255,0.2)",
+                  background: "rgba(255,255,255,0.05)",
+                  color: "inherit",
                 }}
-              >
-                +
-              </button>
-            </div>
-
-            {addArqueroStep === 'choose' && (
-              <div style={{
-                display: "flex",
-                gap: 8,
-                padding: "10px 12px",
-                background: sectionBgArqueros,
-                borderBottom: "1px solid rgba(255,255,255,0.05)"
-              }}>
-                <button
-                  onClick={() => {
-                    setAddArqueroStep(null);
-                    router.replace(`/players/new?${newPlayerCategoryParam}player_type=goalkeeper&returnTo=${encodeURIComponent(currentPath)}`);
-                  }}
-                  style={{
-                    flex: 1,
-                    padding: "8px 12px",
-                    borderRadius: 6,
-                    border: "1px solid rgba(255,255,255,0.2)",
-                    background: "rgba(255,255,255,0.05)",
-                    cursor: "pointer",
-                    fontSize: "0.85rem",
-                  }}
-                >
-                  Nuevo arquero
-                </button>
-                <button
-                  onClick={() => setAddArqueroStep('selectCategory')}
-                  style={{
-                    flex: 1,
-                    padding: "8px 12px",
-                    borderRadius: 6,
-                    border: "1px solid rgba(255,255,255,0.2)",
-                    background: "rgba(255,255,255,0.05)",
-                    cursor: "pointer",
-                    fontSize: "0.85rem",
-                  }}
-                >
-                  {isGkFriendly ? "De otra categoría" : "Existente"}
-                </button>
-              </div>
-            )}
-
-            {addArqueroStep === 'selectCategory' && (
-              <div style={{
-                display: "flex",
-                gap: 8,
-                padding: "10px 12px",
-                background: sectionBgArqueros,
-                borderBottom: "1px solid rgba(255,255,255,0.05)",
-                flexWrap: "wrap",
-                alignItems: "center"
-              }}>
-                {(isGkFriendly ? ALL_CATEGORIES.filter(c => !sessionCategories.includes(c)) : ALL_CATEGORIES).map(cat => (
+              />
+              <div style={{ marginTop: 8 }}>
+                {searchResults.map((r) => (
                   <button
-                    key={cat}
-                    onClick={() => selectCategoryForArquero(cat)}
+                    key={r.id}
+                    onClick={async () => {
+                      setSearchOpen(null);
+                      await setAttendance(r, true);
+                    }}
                     style={{
-                      padding: "8px 12px",
-                      borderRadius: 6,
-                      border: "1px solid rgba(255,255,255,0.2)",
-                      background: "rgba(255,255,255,0.05)",
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "10px 8px",
+                      border: "none",
+                      borderBottom: rowBorder,
+                      background: "transparent",
                       cursor: "pointer",
-                      fontSize: "0.85rem",
+                      fontSize: "0.9rem",
                     }}
                   >
-                    {CATEGORY_SHORT_LABELS[cat] || cat}
+                    {r.last_name}, {r.name}
                   </button>
                 ))}
-                <button
-                  onClick={cancelAddArquero}
-                  style={{
-                    padding: "8px 10px",
-                    borderRadius: 6,
-                    border: "1px solid rgba(255,255,255,0.2)",
-                    background: "rgba(255,255,255,0.05)",
-                    cursor: "pointer",
-                    fontSize: "0.85rem",
-                    marginLeft: "auto",
-                  }}
-                >
-                  ✕
-                </button>
               </div>
-            )}
-
-            {addArqueroStep === 'selectPlayer' && (
-              <div style={{ background: sectionBgArqueros }}>
-                {categoryPlayersForArquero
-                  .filter(p => !arqueros.some(existing => existing.id === p.id))
-                  .map(p => (
-                  <div
-                    key={p.id}
-                    onClick={() => selectCrossCategoryArquero(p)}
-                    style={{
-                      padding: "8px 12px 8px 24px",
-                      cursor: "pointer",
-                      borderBottom: "1px solid rgba(255,255,255,0.05)",
-                      fontSize: "0.875rem",
-                    }}
-                  >
-                    {p.last_name}, {p.name}
-                  </div>
-                ))}
-                <div
-                  onClick={cancelAddArquero}
-                  style={{
-                    padding: "8px 12px 8px 24px",
-                    cursor: "pointer",
-                    borderBottom: "1px solid rgba(255,255,255,0.05)",
-                    fontSize: "0.875rem",
-                    opacity: 0.6,
-                  }}
-                >
-                  ✕
-                </div>
-              </div>
-            )}
-
-            {arqueros.length > 0 ? (
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: isGkFriendly ? "1fr 38px 38px max-content" : "1fr 38px",
-                alignItems: "stretch"
-              }}>
-                {arqueros.map(p => renderPlayerRow(p, sectionBgArqueros, !isGkFriendly))}
-              </div>
-            ) : (
-              <div style={{
-                padding: "12px",
-                background: sectionBgArqueros,
-                fontSize: "0.85rem",
-                opacity: 0.5,
-                textAlign: "center",
-              }}>
-                Sin arqueros
-              </div>
-            )}
+            </div>
           </div>
-        </div>
+        </Overlay>
+      )}
 
-        {/* Debt detail modal, opened by tapping a red (indebted) player name. */}
-        {debtModalPlayer && (
-          <Overlay>
+      {/* Debt detail modal. */}
+      {debtModalPlayer && (
+        <Overlay>
           <div
             onClick={() => setDebtModalPlayer(null)}
             style={{
@@ -1204,26 +1513,59 @@ function TrainingSessionDetailContent() {
                 {debtModalPlayer.last_name}, {debtModalPlayer.name}
               </p>
               <p style={{ marginTop: 8, fontSize: "1.2rem", fontWeight: 700, color: "#f87171" }}>
-                Debe {formatArs(debtModalPlayer.debt_outstanding + debtModalPlayer.owed_now)}
+                Debe ${formatArs(debtModalPlayer.debt_outstanding + debtModalPlayer.owed_now)}
               </p>
-              <DebtBreakdown player={debtModalPlayer} month={dateStr.slice(0, 7)} pesos={formatArs} />
+              <DebtBreakdown player={debtModalPlayer} month={session.slice(0, 7)} pesos={(n) => `$${formatArs(n)}`} />
               <button onClick={() => setDebtModalPlayer(null)} style={{ marginTop: 12, width: "100%" }}>
                 Cerrar
               </button>
             </div>
           </div>
-          </Overlay>
-        )}
-
-      </div>
-    </ProtectedPage>
+        </Overlay>
+      )}
+    </div>
   );
 }
 
-export default function TrainingSessionDetailPage() {
+/** Whether a refreshed row carries anything the screen would draw differently.
+ * Equal rows keep their previous object so memoized rows never re-render. */
+function sameRoster(a: RosterPlayer, b: RosterPlayer): boolean {
+  return a.attended === b.attended &&
+    a.payments === b.payments &&
+    a.payment_amounts.length === b.payment_amounts.length &&
+    a.payment_amounts.every((v, i) => v === b.payment_amounts[i]) &&
+    a.hasSessionPayment === b.hasSessionPayment &&
+    a.paidMonthlyForSlot === b.paidMonthlyForSlot &&
+    a.dues_status === b.dues_status &&
+    a.debt === b.debt &&
+    a.debt_outstanding === b.debt_outstanding &&
+    a.owes_now === b.owes_now &&
+    a.owes_if_present === b.owes_if_present &&
+    a.owes_if_absent === b.owes_if_absent &&
+    a.owed_now === b.owed_now &&
+    a.prev_owed === b.prev_owed &&
+    a.prev_attended === b.prev_attended &&
+    a.prev_paid === b.prev_paid &&
+    a.cur_attended === b.cur_attended &&
+    a.cur_paid === b.cur_paid &&
+    a.bought_month === b.bought_month &&
+    a.carryover_sessions === b.carryover_sessions &&
+    a.month_preset === b.month_preset &&
+    a.session_preset === b.session_preset &&
+    a.half_month_preset === b.half_month_preset &&
+    a.qualifies === b.qualifies &&
+    a.recent_attendance === b.recent_attendance &&
+    a.name === b.name &&
+    a.last_name === b.last_name;
+}
+
+export default function TrainingSessionBetaPage() {
+  const params = useParams();
   return (
-    <Suspense fallback={<div style={{ padding: "20px", textAlign: "center" }}>Cargando...</div>}>
-      <TrainingSessionDetailContent />
-    </Suspense>
+    <ProtectedPage requiredPage={`/training-sessions/${params.session}`}>
+      <Suspense fallback={<div style={{ padding: 20, textAlign: "center" }}>Cargando...</div>}>
+        <TrainingSessionBetaContent />
+      </Suspense>
+    </ProtectedPage>
   );
 }

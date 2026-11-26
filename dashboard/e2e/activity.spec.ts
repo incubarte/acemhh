@@ -46,7 +46,7 @@ test.afterAll(cleanup);
 
 async function open(page: Page) {
   await page.request.post("/api/auth/dev");
-  await page.goto(`/training-sessions-beta/${fx.session}`);
+  await page.goto(`/training-sessions/${fx.session}`);
   await expect(page.getByTestId("section-presentes")).toBeVisible();
   const more = page.getByRole("button", { name: /Más jugadores/ });
   if (await more.isVisible().catch(() => false)) await more.click();
@@ -103,7 +103,7 @@ test("un cobro deja tap, envío, respuesta y fila, atados por un trace", async (
   const tap = rows.find((r) => r.source === "UI" && r.action === "tap" && r.detail.label === "+");
   expect(tap?.detail.player_id).toBe(playerId);
   // And the screen it happened on.
-  expect(tap?.screen).toBe(`/training-sessions-beta/${fx.session}`);
+  expect(tap?.screen).toBe(`/training-sessions/${fx.session}`);
 });
 
 test("si el envío falla, la línea llega después con sus reintentos", async ({ page }) => {
@@ -145,7 +145,7 @@ test("lo que no salió antes de cerrar lo manda la próxima pantalla, y lo dice"
   await expect.poll(async () => {
     const rows = await linesSince(since);
     return rows.some((r) => r.source === "UI" && r.action === "tap" && r.after_close === true &&
-      (r.attempts ?? 0) >= 2 && r.screen === `/training-sessions-beta/${fx.session}`);
+      (r.attempts ?? 0) >= 2 && r.screen === `/training-sessions/${fx.session}`);
   }, { timeout: 15_000 }).toBe(true);
   await context.close();
 });

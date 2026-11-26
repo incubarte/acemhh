@@ -36,7 +36,7 @@ async function cleanup() {
 
 async function openPage(page: Page) {
   await page.request.post("/api/auth/dev");
-  await page.goto(`/training-sessions-beta/${SESSION}`);
+  await page.goto(`/training-sessions/${SESSION}`);
   await expect(page.getByTestId("section-presentes")).toBeVisible();
 }
 

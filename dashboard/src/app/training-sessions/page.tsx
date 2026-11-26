@@ -5,7 +5,6 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import ProtectedPage from "../components/ProtectedPage";
 import { usePageTitle } from "../components/PageTitleContext";
 import type { TrainingDay } from "../api/training-slots/route";
-import { attendancePath, readExperience, type Experience } from "@/lib/experience";
 import { categoryLabel } from "@/lib/categories";
 
 function TrainingSessionsContent() {
@@ -15,14 +14,6 @@ function TrainingSessionsContent() {
 
   const [day, setDay] = useState<TrainingDay | null | undefined>(undefined);
   const [err, setErr] = useState<string | null>(null);
-  // Which screen a slot opens. Read after mount so the server-rendered markup
-  // never mismatches; the switch itself now lives on the screens it picks
-  // between. New by default, and only a stored opt-out says otherwise.
-  const [experience, setExperience] = useState<Experience>("nueva");
-  useEffect(() => {
-    setExperience(readExperience());
-  }, []);
-
   // The agenda lives in training_sessions: navigation walks the dates that
   // actually have trainings, so holidays are skipped without special cases.
   const load = useCallback(async (date: string | null) => {
@@ -128,7 +119,7 @@ function TrainingSessionsContent() {
               key={`${day.date}-${slot.hour}`}
               className="btnPrimary"
               onClick={() =>
-                router.push(attendancePath(experience, `${day.date}-${slot.hour}`))}
+                router.push(`/training-sessions/${day.date}-${slot.hour}`)}
               style={{
                 textAlign: "left",
                 display: "flex",

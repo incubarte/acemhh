@@ -84,7 +84,7 @@ async function seed() {
 async function openPage(page: Page, session?: string) {
   session = session ?? SESSION;
   await page.request.post("/api/auth/dev");
-  await page.goto(`/training-sessions-beta/${session}`);
+  await page.goto(`/training-sessions/${session}`);
   await expect(page.getByTestId("section-presentes")).toBeVisible();
 }
 
@@ -277,7 +277,7 @@ test("el refresh no reordena las filas mientras el dedo sigue marcando", async (
   // Every held request keeps its own resolver: with only one variable, a
   // second refresh overwrites the first and releasing frees the wrong one.
   const held: Array<() => void> = [];
-  await page.route("**/api/training-sessions-beta/**", async (route) => {
+  await page.route(/\/api\/training-sessions\/[^/?]+(\?.*)?$/, async (route) => {
     await new Promise<void>((resolve) => held.push(resolve));
     await route.continue();
   });
@@ -365,7 +365,7 @@ test("una respuesta vieja no pisa un cambio que ya está en pantalla", async ({ 
   // Each refresh reaches the server — so its body is a real snapshot of that
   // moment — but the answer is parked until we let it through, in order.
   const gates: Array<() => void> = [];
-  await page.route("**/api/training-sessions-beta/**", async (route) => {
+  await page.route(/\/api\/training-sessions\/[^/?]+(\?.*)?$/, async (route) => {
     const response = await route.fetch();
     const body = await response.text();
     await new Promise<void>((resolve) => gates.push(resolve));

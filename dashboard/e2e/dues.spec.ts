@@ -88,8 +88,8 @@ test("solo la cuota anual completa cuenta como al día", async ({ page }) => {
   )).json();
   expect(completo.upToDate).toBe(true);
 
-  // Both rosters carry the same verdict.
-  for (const api of ["training-sessions", "training-sessions-beta"]) {
+  // The roster carries the same verdict.
+  for (const api of ["training-sessions"]) {
     const roster = await (await page.request.get(`/api/${api}/${SESSION}`)).json();
     const byId = new Map(roster.players.map((p: { id: string }) => [p.id, p]));
     expect(
@@ -103,7 +103,7 @@ test("solo la cuota anual completa cuenta como al día", async ({ page }) => {
   // Three visual states on the beta screen: an amber dot for the partial
   // payer, red for who paid nothing, nothing at all for the settled one. The
   // row itself carries no colour — that belongs to its section.
-  await page.goto(`/training-sessions-beta/${SESSION}`);
+  await page.goto(`/training-sessions/${SESSION}`);
   await expect(page.getByTestId("section-presentes")).toBeVisible();
   // A debtor renders twice (Deudores plus their own section); either copy
   // carries the same marker.

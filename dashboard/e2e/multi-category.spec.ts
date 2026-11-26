@@ -36,6 +36,15 @@ async function insertTestPlayer(categories: string[]) {
   if (error) throw new Error("Insert failed: " + JSON.stringify(error));
 }
 
+/** Opens a session's roster with every listed player on screen: those with
+ * no recent training sit behind "Más jugadores...". */
+async function openRoster(page: Page, session: string) {
+  await page.goto(`/training-sessions/${session}`);
+  await expect(page.getByTestId("session-heading")).toBeVisible();
+  const more = page.getByRole("button", { name: "Más jugadores..." });
+  if (await more.isVisible()) await more.click();
+}
+
 async function login(page: Page) {
   const res = await page.request.post("/api/auth/dev");
   if (!res.ok()) {
@@ -84,16 +93,15 @@ test("el jugador aparece una vez en el horario de cada una de sus categorías", 
 
   // jue 22hs (cat-a + cat-b): must appear, and only once even though the slot
   // queries two categories.
-  await page.goto(`/training-sessions/${THURSDAY}-22`);
+  await openRoster(page, `${THURSDAY}-22`);
   await expect(page.getByText(fullName)).toHaveCount(1);
 
   // jue 23hs (cat-c): his second category also gets him on the list.
-  await page.goto(`/training-sessions/${THURSDAY}-23`);
+  await openRoster(page, `${THURSDAY}-23`);
   await expect(page.getByText(fullName)).toHaveCount(1);
 
   // jue 21hs (youth): not his category, must not be listed.
-  await page.goto(`/training-sessions/${THURSDAY}-21`);
-  await expect(page.getByText("21:00")).toBeVisible();
+  await openRoster(page, `${THURSDAY}-21`);
   await expect(page.getByText(fullName)).toHaveCount(0);
 });
 

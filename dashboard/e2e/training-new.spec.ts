@@ -145,7 +145,7 @@ async function seed() {
 
 async function openPage(page: Page) {
   await page.request.post("/api/auth/dev");
-  await page.goto(`/training-sessions-beta/${SESSION}`);
+  await page.goto(`/training-sessions/${SESSION}`);
   await expect(page.getByTestId("section-presentes")).toBeVisible();
 }
 
@@ -372,7 +372,7 @@ test("el pago aparece entre paréntesis sin esperar el refresh", async ({ page }
   // Hold the refresh back, so anything that shows up is optimistic.
   let releaseRefresh: () => void = () => {};
   const held = new Promise<void>((resolve) => { releaseRefresh = resolve; });
-  await page.route("**/api/training-sessions-beta/**", async (route) => {
+  await page.route(/\/api\/training-sessions\/[^/?]+(\?.*)?$/, async (route) => {
     await held;
     await route.continue();
   });

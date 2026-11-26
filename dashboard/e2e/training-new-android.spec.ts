@@ -73,7 +73,7 @@ test.describe("Pixel 7 (Blink, como Android Chrome)", () => {
 
   test("deslizar la ruedita marca presente", async ({ page }) => {
     await page.request.post("/api/auth/dev");
-    await page.goto(`/training-sessions-beta/${SESSION}`);
+    await page.goto(`/training-sessions/${SESSION}`);
     await expect(page.getByTestId("section-presentes")).toBeVisible();
 
     // Deudores renders first, so the last copy is the one in the player's own
@@ -116,7 +116,7 @@ test.describe("Pixel 7 (Blink, como Android Chrome)", () => {
 
   test("un swipe inmediato sobre una fila scrollea de verdad", async ({ page }) => {
     await page.request.post("/api/auth/dev");
-    await page.goto(`/training-sessions-beta/${SESSION}`);
+    await page.goto(`/training-sessions/${SESSION}`);
     await expect(page.getByTestId("section-presentes")).toBeVisible();
 
     // Deudores renders first, so the last copy is the one in the player's own

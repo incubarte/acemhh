@@ -1,10 +1,11 @@
-// Marking attendance from a session screen, with the two answers the admin
-// needs: before writing, whether the session is closed (the roster says so,
-// see lib/sessionLock.ts), and after, if the write failed, which player was
-// left in which state.
+// Writing from a session screen — attendance and payments — with the answers
+// the admin needs: before writing, whether the session is closed (the roster
+// says so, see lib/sessionLock.ts), and after a failed attendance write,
+// which player was left in which state.
 
 import { isoWeekday, slotLabel } from "@shared/slot";
 import type { SessionLock } from "@/lib/sessionLock";
+import { formatArs } from "@/lib/tournamentFees";
 
 export type AttendancePlayer = { id: string; name: string; last_name?: string | null };
 
@@ -79,15 +80,32 @@ export async function sendAttendance(
   return false;
 }
 
-/** The gate and the write together, for the screens that have nothing to do
- * in between. */
-export async function markAttendance(
+/**
+ * The same question for a payment, asked from what the roster already says
+ * instead of after a refusal: ROOT is asked whether to register it anyway,
+ * anybody else is told it cannot be. null means nothing is to be sent.
+ * (postMoney still asks if the service refuses anyway — a tab left open
+ * across the Monday the session closed on.)
+ */
+export function paymentGate(
   session: string,
   lock: SessionLock | null,
   player: AttendancePlayer,
-  attended: boolean,
-): Promise<boolean> {
-  const go = attendanceGate(session, lock, player, attended);
-  if (!go) return false;
-  return sendAttendance(session, player, attended, go.confirmClosed);
+  amount: number,
+): { confirmClosed: boolean } | null {
+  if (!lock?.closed) return { confirmClosed: false };
+  const label = sessionLabel(session);
+  if (!lock.can_write_closed) {
+    window.alert(
+      `La sesión del ${label} ya está cerrada: no se le puede cobrar a ${fullName(player)}. ` +
+        "Se cobra en la semana actual y la anterior.",
+    );
+    return null;
+  }
+  return window.confirm(
+      `La sesión del ${label} ya está cerrada. ` +
+        `¿Registrar el cobro de $${formatArs(amount)} a ${fullName(player)} igual?`,
+    )
+    ? { confirmClosed: true }
+    : null;
 }

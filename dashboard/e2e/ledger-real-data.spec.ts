@@ -40,7 +40,7 @@ test("el ledger corre sobre toda la temporada real sin números imposibles", asy
   const debtors = new Map<string, Row>();
   for (const s of sessions ?? []) {
     const session = `${s.date}-${String(s.hour).padStart(2, "0")}`;
-    const res = await page.request.get(`/api/training-sessions-beta/${session}`);
+    const res = await page.request.get(`/api/training-sessions/${session}`);
     expect(res.status(), `${session} devolvió ${res.status()}`).toBe(200);
     const body = await res.json();
 

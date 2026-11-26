@@ -2,12 +2,12 @@ import { test, expect, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { closedSession, writableSession } from "./fixtures";
 
-// Attendance on a session already closed. The roster says the session is
-// closed and whether the admin may change it anyway, so the screen settles it
-// before writing: ROOT is asked, anybody else told, and nothing is sent until
-// ROOT confirms. The service enforces the same rule: only ROOT, and only with
-// confirm_closed. And any write that fails says, by name, the state the player
-// was left in.
+// Attendance and payments on a session already closed. The roster says the
+// session is closed and whether the admin may change it anyway, so the screen
+// settles it before writing: ROOT is asked, anybody else told, and nothing is
+// sent until ROOT confirms. The service enforces the same rule: only ROOT, and
+// only with confirm_closed. And an attendance write that fails says, by name,
+// the state the player was left in.
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? "http://127.0.0.1:54321";
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ??
@@ -28,6 +28,7 @@ async function cleanup() {
   const { data } = await s.from("players").select("id").eq("last_name", LAST);
   const ids = (data ?? []).map((p) => p.id);
   if (ids.length === 0) return;
+  await s.from("payments").delete().in("player_id", ids);
   await s.from("attendances").delete().in("player_id", ids);
   await s.from("players").delete().in("id", ids);
 }
@@ -91,19 +92,18 @@ test.beforeAll(async () => {
 });
 test.afterAll(cleanup);
 test.afterEach(async () => {
+  await admin().from("payments").delete().eq("player_id", playerId);
   await admin().from("attendances").delete().eq("player_id", playerId);
 });
 
 test("el roster dice si la sesión está cerrada y si quien mira puede cambiarla igual", async ({ page }) => {
   await page.request.post("/api/auth/dev");
-  for (const api of ["training-sessions", "training-sessions-beta"]) {
-    const c = await (await page.request.get(`/api/${api}/${closed.session}`)).json();
-    expect([api, c.closed, c.can_write_closed]).toEqual([api, true, true]);
-    const o = await (await page.request.get(`/api/${api}/${open.session}`)).json();
-    expect([api, o.closed]).toEqual([api, false]);
-  }
+  const c = await (await page.request.get(`/api/training-sessions/${closed.session}`)).json();
+  expect([c.closed, c.can_write_closed]).toEqual([true, true]);
+  const o = await (await page.request.get(`/api/training-sessions/${open.session}`)).json();
+  expect(o.closed).toBe(false);
   await asWheel(page, async () => {
-    const c = await (await page.request.get(`/api/training-sessions-beta/${closed.session}`)).json();
+    const c = await (await page.request.get(`/api/training-sessions/${closed.session}`)).json();
     expect([c.closed, c.can_write_closed]).toEqual([true, false]);
   });
 });
@@ -128,7 +128,7 @@ test("el servicio: en una sesión cerrada sólo ROOT, y sólo confirmando", asyn
 
 test("ROOT en una sesión cerrada: pregunta antes de mandar nada", async ({ page }) => {
   await page.request.post("/api/auth/dev");
-  await page.goto(`/training-sessions-beta/${closed.session}`);
+  await page.goto(`/training-sessions/${closed.session}`);
   await expect(page.getByTestId("section-ausentes")).toBeVisible();
   const sent = attendanceWrites(page);
 
@@ -160,7 +160,7 @@ test("ROOT en una sesión cerrada: pregunta antes de mandar nada", async ({ page
 
 test("WHEEL en una sesión cerrada: avisa que no se puede, sin mandar nada", async ({ page }) => {
   await asWheel(page, async () => {
-    await page.goto(`/training-sessions-beta/${closed.session}`);
+    await page.goto(`/training-sessions/${closed.session}`);
     await expect(page.getByTestId("section-ausentes")).toBeVisible();
     const sent = attendanceWrites(page);
     let told = "";
@@ -177,7 +177,7 @@ test("WHEEL en una sesión cerrada: avisa que no se puede, sin mandar nada", asy
 
 test("si marcar falla, avisa con el nombre y cómo quedó el jugador", async ({ page }) => {
   await page.request.post("/api/auth/dev");
-  await page.goto(`/training-sessions-beta/${open.session}`);
+  await page.goto(`/training-sessions/${open.session}`);
   await expect(page.getByTestId("section-ausentes")).toBeVisible();
   await page.route("**/attendance", (r) => r.fulfill({ status: 500, body: "Se cayó la base" }));
 
@@ -190,30 +190,98 @@ test("si marcar falla, avisa con el nombre y cómo quedó el jugador", async ({ 
   expect(await attended(open.sessionStr)).toBeNull();
 });
 
-test("la pantalla clásica hace lo mismo: ROOT confirma una sesión cerrada antes de mandar", async ({ page }) => {
+/** Every payment write the page sends. */
+function paymentWrites(page: Page): string[] {
+  const sent: string[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url().endsWith("/payment")) sent.push(r.postData() ?? "");
+  });
+  return sent;
+}
+
+/** Opens the payment modal for the test player and picks "Sesión". */
+async function chargeSession(page: Page) {
+  const more = page.getByRole("button", { name: "Más jugadores..." });
+  if (await more.isVisible()) await more.click();
+  await page.locator(`[data-player-row="${playerId}"]`).last().getByRole("button", { name: "+" }).click();
+  const modal = page.getByTestId("payment-modal");
+  await modal.getByTestId("pay-session").click();
+  await modal.getByRole("button", { name: "Confirmar" }).click();
+  return modal;
+}
+
+async function payments(sessionStr: string): Promise<number> {
+  const { data } = await admin().from("payments").select("id")
+    .eq("player_id", playerId).eq("session", sessionStr);
+  return (data ?? []).length;
+}
+
+test("cobro de ROOT en una sesión cerrada: pregunta antes de mandar nada", async ({ page }) => {
   await page.request.post("/api/auth/dev");
   await page.goto(`/training-sessions/${closed.session}`);
-  const toggle = page.locator(`[data-testid="attendance-toggle"][data-player="${playerId}"]`);
-  await expect(toggle).toHaveAttribute("data-attended", "false");
-  const sent = attendanceWrites(page);
+  await expect(page.getByTestId("section-ausentes")).toBeVisible();
+  const sent = paymentWrites(page);
 
+  // Dice que no: no se manda nada y el modal sigue abierto.
   let asked = "";
-  page.once("dialog", (d) => { asked = d.message(); d.accept(); });
-  await toggle.click();
-  await expect.poll(() => asked).toContain(`¿Marcar a ${NAME} ${LAST} como presente igual?`);
-  await expect(toggle).toHaveAttribute("data-attended", "true");
-  await expect.poll(() => sent.length).toBe(1);
-  expect(JSON.parse(sent[0])).toMatchObject({ confirm_closed: true });
-  await expect.poll(() => attended(closed.sessionStr)).toBe(true);
-
-  // Y si falla, lo dice y vuelve atrás.
-  await page.route("**/attendance", (r) => r.fulfill({ status: 500, body: "Se cayó la base" }));
-  let told = "";
-  page.on("dialog", (d) => {
-    if (d.type() === "confirm") d.accept();
-    else { told = d.message(); d.accept(); }
+  page.once("dialog", (d) => {
+    asked = d.message();
+    expect(sent).toHaveLength(0);
+    d.dismiss();
   });
-  await toggle.click();
-  await expect.poll(() => told).toBe(`No se pudo marcar a ${NAME} ${LAST} como ausente: quedó presente.\n\nSe cayó la base`);
-  await expect(toggle).toHaveAttribute("data-attended", "true");
+  const modal = await chargeSession(page);
+  await expect.poll(() => asked).toMatch(
+    new RegExp(`^La sesión del jue \\d+/\\d+ 22hs ya está cerrada\\. ¿Registrar el cobro de \\$[\\d.k]+ a ${NAME} ${LAST} igual\\?$`),
+  );
+  await page.waitForTimeout(500);
+  expect(sent).toHaveLength(0);
+  await expect(modal).toBeVisible();
+  expect(await payments(closed.sessionStr)).toBe(0);
+
+  // Dice que sí: se manda una sola vez, ya confirmado, sin un rechazo antes.
+  page.once("dialog", (d) => d.accept());
+  await modal.getByRole("button", { name: "Confirmar" }).click();
+  await expect(modal).toHaveCount(0);
+  expect(sent).toHaveLength(1);
+  expect(JSON.parse(sent[0])).toMatchObject({ player_id: playerId, concept: "session", confirm_closed: true });
+  expect(await payments(closed.sessionStr)).toBe(1);
+});
+
+test("cobro de WHEEL en una sesión cerrada: avisa que no se puede, sin mandar nada", async ({ page }) => {
+  await asWheel(page, async () => {
+    await page.goto(`/training-sessions/${closed.session}`);
+    await expect(page.getByTestId("section-ausentes")).toBeVisible();
+    const sent = paymentWrites(page);
+    let told = "";
+    page.once("dialog", (d) => { told = d.message(); d.accept(); });
+    await chargeSession(page);
+    await expect.poll(() => told).toMatch(
+      new RegExp(`ya está cerrada: no se le puede cobrar a ${NAME} ${LAST}\\. Se cobra en la semana actual y la anterior\\.$`),
+    );
+    await page.waitForTimeout(500);
+    expect(sent).toHaveLength(0);
+    expect(await payments(closed.sessionStr)).toBe(0);
+  });
+});
+
+test("en una sesión abierta el cobro sale sin preguntar", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  await page.goto(`/training-sessions/${open.session}`);
+  await expect(page.getByTestId("section-ausentes")).toBeVisible();
+  const sent = paymentWrites(page);
+  let asked = false;
+  page.on("dialog", (d) => { asked = true; d.dismiss(); });
+  const modal = await chargeSession(page);
+  await expect(modal).toHaveCount(0);
+  expect(asked).toBe(false);
+  expect(JSON.parse(sent[0]).confirm_closed).toBeUndefined();
+  expect(await payments(open.sessionStr)).toBe(1);
+});
+
+test("la dirección vieja de la pantalla nueva lleva a la única que queda", async ({ page }) => {
+  await page.request.post("/api/auth/dev");
+  await page.goto(`/training-sessions-beta/${open.session}`);
+  await page.waitForURL(`**/training-sessions/${open.session}`);
+  await expect(page.getByTestId("section-ausentes")).toBeVisible();
+  await expect(page.getByTestId("experience-toggle")).toHaveCount(0);
 });

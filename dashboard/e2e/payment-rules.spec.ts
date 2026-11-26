@@ -244,7 +244,7 @@ test("quien no es ROOT no puede cobrar una sesión cerrada, ni confirmando", asy
 test("en pantalla, ROOT ve la pregunta y el cobro entra al aceptar", async ({ page }) => {
   await page.request.post("/api/auth/dev");
   const oldSession = closedSession();
-  await page.goto(`/training-sessions-beta/${oldSession}`);
+  await page.goto(`/training-sessions/${oldSession}`);
   await expect(page.getByTestId("section-presentes")).toBeVisible();
   const more = page.getByRole("button", { name: /Más jugadores/ });
   if (await more.isVisible().catch(() => false)) await more.click();
@@ -292,7 +292,7 @@ test("medio mes cobra lo que queda, y sólo como primer pago del período", asyn
   const { prepaid } = await tariffAt(dates[1]);
   const expected = (dates.length - 1) * prepaid;
 
-  const roster = await (await page.request.get(`/api/training-sessions-beta/${second}`)).json();
+  const roster = await (await page.request.get(`/api/training-sessions/${second}`)).json();
   const row = roster.players.find((p: { id: string }) => p.id === playerId);
   expect(row.half_month_preset, `${dates.length} sesiones, arranca en la 2a`).toBe(expected);
 

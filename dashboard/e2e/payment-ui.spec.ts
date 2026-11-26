@@ -59,7 +59,7 @@ test.afterAll(cleanup);
 
 async function open(page: import("@playwright/test").Page) {
   await page.request.post("/api/auth/dev");
-  await page.goto(`/training-sessions-beta/${fx.session}`);
+  await page.goto(`/training-sessions/${fx.session}`);
   await expect(page.getByTestId("section-presentes")).toBeVisible();
   // Someone absent with no recent training sits behind "Más jugadores...".
   const more = page.getByRole("button", { name: /Más jugadores/ });
@@ -94,7 +94,7 @@ test("con deuda cerrada, lo único que se ofrece es saldarla", async ({ page }) 
   // Closed debt means a month that already ended, so this has to be read from
   // a later month of the same period than the unpaid session.
   await page.request.post("/api/auth/dev");
-  await page.goto(`/training-sessions-beta/${later}`);
+  await page.goto(`/training-sessions/${later}`);
   await expect(page.getByTestId("section-presentes")).toBeVisible();
   const more = page.getByRole("button", { name: /Más jugadores/ });
   if (await more.isVisible().catch(() => false)) await more.click();
@@ -111,7 +111,7 @@ test("marcar presente a alguien que debe avisa, pero nunca impide", async ({ pag
   // From a later month, the unpaid session is closed debt — exactly the case
   // the warning exists for.
   await page.request.post("/api/auth/dev");
-  await page.goto(`/training-sessions-beta/${later}`);
+  await page.goto(`/training-sessions/${later}`);
   await expect(page.getByTestId("section-presentes")).toBeVisible();
   const more = page.getByRole("button", { name: /Más jugadores/ });
   if (await more.isVisible().catch(() => false)) await more.click();
@@ -224,6 +224,6 @@ test("el slot de arqueros lo dice", async ({ page }) => {
     .order("date", { ascending: false }).limit(1);
   test.skip(!data?.length, "la agenda no tiene un entrenamiento de arqueros");
 
-  await page.goto(`/training-sessions-beta/${data![0].date}-${data![0].hour}`);
+  await page.goto(`/training-sessions/${data![0].date}-${data![0].hour}`);
   await expect(page.getByTestId("session-heading")).toContainText("arqueros");
 });

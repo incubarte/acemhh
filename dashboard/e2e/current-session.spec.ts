@@ -138,13 +138,13 @@ test("el cartel avisa cuando la sesión abierta no es la actual", async ({ page 
   await page.request.post("/api/auth/dev");
 
   // The current session: no warning.
-  for (const base of ["training-sessions", "training-sessions-beta"]) {
+  for (const base of ["training-sessions"]) {
     await page.goto(`/${base}/${today}-22`);
     await expect(page.getByTestId("session-date-warning")).toHaveCount(0);
   }
 
   // A future one: warned, and offered a way back.
-  for (const base of ["training-sessions", "training-sessions-beta"]) {
+  for (const base of ["training-sessions"]) {
     await page.goto(`/${base}/${future}-22`);
     const warning = page.getByTestId("session-date-warning");
     await expect(warning).toBeVisible();
@@ -161,23 +161,21 @@ test("header y cartel quedan fijos arriba, a todo el ancho y en orden", async ({
   await page.request.post("/api/auth/dev");
   await page.setViewportSize({ width: 390, height: 640 });
 
-  for (const base of ["training-sessions", "training-sessions-beta"]) {
+  for (const base of ["training-sessions"]) {
     await page.goto(`/${base}/${future}-22`);
     const header = page.getByTestId("app-header");
     const warning = page.getByTestId("session-date-warning");
     await expect(warning).toBeVisible();
 
-    // Header first, then the experience switch, then the warning — stacked
-    // with no gaps, all edge to edge.
+    // Header first, then the warning — stacked with no gap, edge to edge.
     const headerBox = (await header.boundingBox())!;
-    const switchBox = (await page.getByTestId("experience-toggle").boundingBox())!;
     const warnBox = (await warning.boundingBox())!;
     expect(headerBox.y).toBe(0);
     expect(headerBox.width).toBe(390);
     expect(warnBox.x).toBe(0);
     expect(warnBox.width).toBe(390);
-    expect(Math.round(switchBox.y)).toBe(Math.round(headerBox.y + headerBox.height));
-    expect(Math.round(warnBox.y)).toBe(Math.round(switchBox.y + switchBox.height));
+    expect(Math.round(warnBox.y)).toBe(Math.round(headerBox.y + headerBox.height));
+    await expect(page.getByTestId("experience-toggle")).toHaveCount(0);
 
     // Page content starts below the whole stack.
     const firstContent = page.locator(".appShell");
@@ -213,7 +211,7 @@ test("el ledger funciona en meses de 30 días", async ({ page }) => {
   const september = "2026-09-17"; // a seeded Thursday
   await page.request.post("/api/auth/dev");
 
-  for (const base of ["training-sessions", "training-sessions-beta"]) {
+  for (const base of ["training-sessions"]) {
     const res = await page.request.get(`/api/${base}/${september}-22`);
     expect(res.status()).toBe(200);
     const body = await res.json();
@@ -231,7 +229,7 @@ test("el logo del header lleva al inicio, también con el header achicado", asyn
   // A session that is not the current one: its warning bar is what makes the
   // page tall enough to scroll at all. On today's, with an empty roster and no
   // warning, there is nothing to scroll and the header never shrinks.
-  await page.goto(`/training-sessions-beta/${future}-22`);
+  await page.goto(`/training-sessions/${future}-22`);
   // The roster is fetched after mount, so goto() returning is not enough: the
   // page is still "Cargando...", nothing is tall enough to scroll, and the
   // header never shrinks. This is what made the test flaky.
